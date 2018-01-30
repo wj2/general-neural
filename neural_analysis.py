@@ -7,6 +7,8 @@ from sklearn import discriminant_analysis as da
 from sklearn.decomposition import PCA
 from dPCA.dPCA import dPCA
 import string, itertools
+import pystan as ps
+import os
 
 ### ORGANIZE SPIKES ###
 
@@ -118,15 +120,28 @@ def fano_factor_tc(spks_tc, boots=1000, spks_per_s=False, window_size=None):
 ### ROC ###
                     
 def roc_tc(s1_tc, s2_tc, boots=1000):
-    aucs = np.zeros((boots, s1_tc.shape[1]))
-    for j in range(boots):
-        s1_indsamp = np.random.choice(s1_tc.shape[0], s1_tc.shape[0])
-        s2_indsamp = np.random.choice(s2_tc.shape[0], s2_tc.shape[0])
-        s1_tcsamp = s1_tc[s1_indsamp, :]
-        s2_tcsamp = s2_tc[s2_indsamp, :]
-        for i in range(s1_tc.shape[1]):
-            aucs[j, i] = roc(s1_tcsamp[:, i], s2_tcsamp[:, i])
+    aucs = np.zeros((boots, s1_tc.shape[1])) + .5
+    if s1_tc.shape[0] > 0 and s2_tc.shape[0] > 0:
+        for j in range(boots):
+            s1_indsamp = np.random.choice(s1_tc.shape[0], s1_tc.shape[0])
+            s2_indsamp = np.random.choice(s2_tc.shape[0], s2_tc.shape[0])
+            s1_tcsamp = s1_tc[s1_indsamp, :]
+            s2_tcsamp = s2_tc[s2_indsamp, :]
+            for i in range(s1_tc.shape[1]):
+                aucs[j, i] = roc(s1_tcsamp[:, i], s2_tcsamp[:, i])
     return aucs
+
+def mwu_tc(s1_tc, s2_tc, alternative='two-sided'):
+    us = np.zeros(s2_tc.shape[1])
+    ps = np.ones_like(us)
+    if s1_tc.shape[0] > 0 and s2_tc.shape[0] > 0:
+        for i in range(s1_tc.shape[1]):
+            try:
+                us[i], ps[i] = sts.mannwhitneyu(s1_tc[:, i], s2_tc[:, i],
+                                                alternative=alternative)
+            except:
+                us[i], ps[i] = np.nan, np.nan
+    return us, ps
 
 def roc(samples1, samples2):
     all_samples = np.concatenate((samples1, samples2))
@@ -224,25 +239,30 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
 
 def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  with_replace=False, shuff_labels=False, stability=False,
-                 kernel='linear', penalty=1):
+                 kernel='linear', penalty=1, format_=True):
     spec_params = {'C':penalty, 'kernel':kernel}
     model = svm.SVC
     out = decoding(cat1, cat2, leave_out=leave_out, 
                    require_trials=require_trials, resample=resample,
                    with_replace=with_replace, shuff_labels=shuff_labels,
-                   stability=stability, params=spec_params)
+                   stability=stability, params=spec_params, format_=format_)
     return out
 
 def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
              resample=100, with_replace=False, shuff_labels=False, 
-             stability=False, params=None, collapse_time=False):
-    cat1 = np.array(list(cat1.values()))
-    cat2 = np.array(list(cat2.values()))
-    bool1 = [x.shape[0] < require_trials for x in cat1]
-    bool2 = [x.shape[0] < require_trials for x in cat2]
-    combool = np.logical_not(np.logical_or(bool1, bool2))
-    cat1_f = cat1[combool]
-    cat2_f = cat2[combool]
+             stability=False, params=None, collapse_time=False,
+             format_=True):
+    if format_:
+        cat1 = np.array(list(cat1.values()))
+        cat2 = np.array(list(cat2.values()))
+        bool1 = [x.shape[0] < require_trials for x in cat1]
+        bool2 = [x.shape[0] < require_trials for x in cat2]
+        combool = np.logical_not(np.logical_or(bool1, bool2))
+        cat1_f = cat1[combool]
+        cat2_f = cat2[combool]
+    else:
+        cat1_f = cat1
+        cat2_f = cat2
     if stability:
         tcs_shape = (resample, cat1_f[0].shape[1], cat1_f[0].shape[1])
     else:
@@ -503,8 +523,39 @@ def pca_trajectories(data, pca, n_comp=None, comps=(0,1)):
     for i, d in enumerate(data):
         all_traj[i] = pca.transform(data[i].T).T[comps, :]
     return mean_traj, all_traj
-    
-    
+
+def function_on_dim(data, func, dims=None, norm_dims=True,
+                    boots=1000):
+    """
+    Bootstrap a function on some colelction of dimensions across some
+    timecourse.
+
+    Parameters
+    ----------
+    data : array
+        Array organized as by the array_format function, shape (K, N, T)
+        where K is the number of trials, N is the number of neurons, and T
+        is the number of time points
+    func : function
+        Function to apply to the data, should take an axis parameter.
+    dims : list[array]
+        List of arrays of shape (N,)
+    norm_dims : boolean
+        Normalize the vector to length 1 (default True)
+    boots : int
+        Number of times to resample the trials for constructing estimate of
+        function value (default 1000)    
+    """
+    if dims is None:
+        dims = [np.ones(data.shape[1])]
+    n_dim = [dim / np.sqrt(np.sum(dim**2)) for dim in dims]
+    data = basis_trajectories(data, dims)
+    boot_data = np.zeros((boots,) + data.shape[1:])
+    for i in range(boots):
+        samp = u.resample_on_axis(data, data.shape[0], axis=0)
+        boot_data[i] = func(samp, axis=0)
+    return boot_data        
+
 ### (Generalized) Linear Models ###
 
 def _generate_label_list(n_factors, ref_string=string.ascii_lowercase):
@@ -515,14 +566,21 @@ def _generate_label_list(n_factors, ref_string=string.ascii_lowercase):
         labels.append(ref_string[string_ind]*string_mult)
     return labels
 
-def _generate_interaction_terms(inter, labels):
+def _generate_interaction_terms(inter, labels, with_replace=True):
     x = filter(lambda x: x[0] in inter, labels)
-    combos = list(itertools.combinations_with_replacement(x, len(inter)))
+    if with_replace:
+        combos = list(itertools.combinations_with_replacement(x, 
+                                                              len(inter)))
+    else:
+        combos = list(itertools.combinations(x, len(inter)))
     return combos
 
-def _generate_factor_labels(factors, labels=None, interactions=()):
+def _generate_factor_labels(factors, labels=None, interactions=(),
+                            double_factors=None):
     if labels is None:
         labels = _generate_label_list(len(factors))
+    if double_factors is None:
+        double_factors = len(factors)*(True,)
     full_labels = []
     for i, f in enumerate(factors):
         if f == 1:
@@ -533,7 +591,9 @@ def _generate_factor_labels(factors, labels=None, interactions=()):
                 full_labels.append(l)
     for inter in interactions:
         lab_inter = [labels[x] for x in inter]
-        new_terms = _generate_interaction_terms(lab_inter, full_labels)
+        wr = np.product([double_factors[i] for i in inter])
+        new_terms = _generate_interaction_terms(lab_inter, full_labels,
+                                                with_replace=wr)
         full_labels = full_labels + new_terms
     return full_labels, labels
 
@@ -556,7 +616,8 @@ def _generate_cond_refs(labels, comb, cond_labels, ind_sizes):
                 labs[i] = -1
     return labs
 
-def _condition_mask(data, cond_labels=None, single_conds=(), interactions=()):
+def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
+                    double_factors=None):
     """
     Format array data for production of (generalized) linear models.
 
@@ -575,6 +636,9 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=()):
         rather than the default two factor (values 1, 0)
     interactions : list of lists of ints
         Dimensions for which to include interaction terms.
+    double_factors : list of boolean
+        If square terms should be included, default is true -- typically doesn't
+        make sense for single factor conditions.
 
     Returns 
     -------
@@ -589,7 +653,8 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=()):
     for sc in single_conds:
         factors[sc] = 1
     labels, cond_labels = _generate_factor_labels(factors, cond_labels, 
-                                                  interactions)
+                                                  interactions, 
+                                                  double_factors=double_factors)
     n_factors = len(labels)
     format_data = np.zeros((data.shape[2], data.shape[1], n_trials))
     format_cond = np.zeros((data.shape[1], n_trials, n_factors))
@@ -608,34 +673,39 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=()):
             format_cond[i, j] = cs
     return format_data, format_cond
 
-def generate_null_glm_coeffs(data, conds, perms=100):
+def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False):
     null_coeff_pop = np.zeros((perms, data.shape[1], data.shape[0], 
                                conds.shape[2] + 1))
     for i in range(perms):
         shuff_conds = u.resample_on_axis(conds, conds.shape[1], axis=1, 
                                          with_replace=False)
-        _, null_coeff_pop[i] = fit_glms(data, shuff_conds)
+        _, null_coeff_pop[i] = fit_glms(data, shuff_conds, use_stan=use_stan)
     return null_coeff_pop
 
-def fit_glms_with_perm(data, conds, perms=100):
-    mp, cp = fit_glms(data, conds)
-    null_cp = generate_null_glm_coeffs(data, conds, perms)
+def fit_glms_with_perm(data, conds, perms=100, use_stan=False):
+    mp, cp = fit_glms(data, conds, use_stan=use_stan)
+    null_cp = generate_null_glm_coeffs(data, conds, perms, use_stan=use_stan)
     exp_cp = np.expand_dims(cp, axis=0)
     higher = np.sum(exp_cp > null_cp, axis=0) / perms
     lower = np.sum(exp_cp < null_cp, axis=0) / perms
     ps = np.min(np.stack((lower, higher), axis=0), axis=0)
     return mp, cp, ps, null_cp
 
-def fit_glms(data, conds):
+def fit_glms(data, conds, use_stan=False):
     model_pop = []
     coeffs_pop = np.zeros((data.shape[1], data.shape[0], conds.shape[2] + 1))
     for i, neur in enumerate(conds):
-        ms, cs = generalized_linear_model(data[:, i, :], neur)
+        ms, cs = generalized_linear_model(data[:, i, :], neur, 
+                                          use_stan=use_stan)
         model_pop.append(ms)
         coeffs_pop[i] = cs
     return model_pop, coeffs_pop
 
-def generalized_linear_model(data, conds):
+stan_file_trunk = '/Users/wjj/Dropbox/research/uc/freedman/analysis/general/'
+stan_file_gaussian = os.path.join(stan_file_trunk, 'glm_fitting.stan')
+
+def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
+                             stan_iters=10000, stan_file=stan_file_gaussian):
     """
     Fit a generalized linear model to data.
 
@@ -647,9 +717,9 @@ def generalized_linear_model(data, conds):
     conds : array
         An array of shape (K, F) where K is the number of samples at each 
         timepoint and F specifies the task conditions for each of those samples.
-    link : string
-        Link function to use for the model. Default is the identity function.
-
+    use_stan : boolean
+        If true, will fit the model using stan; if false, will use linear 
+        regression.
     Returns
     -------
     models : list of objects
@@ -662,13 +732,19 @@ def generalized_linear_model(data, conds):
     models = []
     coeffs = np.zeros((data.shape[0], conds.shape[1] + 1))
     for t in range(data.shape[0]):
-        m = linear_model.LinearRegression(fit_intercept=True)
-        m.fit(conds, data[t, :])
-        coeffs[t, 0] = m.intercept_
-        coeffs[t, 1:] = m.coef_
+        if use_stan:
+            stan_data = {'N':data.shape[1], 'K':conds.shape[1], 'x':conds, 
+                         'y':data[t, :]}
+            m = ps.stan(file=stan_file, data=stan_data, iter=stan_iters, 
+                        chains=stan_chains)
+            coeffs[t] = m.get_posterior_mean()[:conds.shape[1]+1, 0]
+        else:
+            m = linear_model.LinearRegression(fit_intercept=True)
+            m.fit(conds, data[t, :])
+            coeffs[t, 0] = m.intercept_
+            coeffs[t, 1:] = m.coef_
         models.append(m)
     return models, coeffs
-
     
 # spiking variability
 

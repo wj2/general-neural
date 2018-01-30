@@ -4,10 +4,29 @@ import os
 import re
 import shutil
 import scipy.io as sio
+import pref_looking.eyes as es
 
 monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May', 
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
+
+def make_trial_constraint_func(fields, targets, relationships, 
+                               combfunc=np.logical_and, begin=True):
+    def dfunc(data):
+        selection = np.array([begin]*data.shape[0])
+        for i, field in enumerate(fields):
+            target = targets[i]
+            relat = relationships[i]
+            b = relat(data[field], target)
+            selection = combfunc(selection, b)
+        return selection
+    return dfunc
+
+def make_time_field_func(fieldname, offset=0):
+    def ffunc(data):
+        ts = data[fieldname] + offset
+        return ts
+    return ffunc
 
 def split_angles(angs, div):
     sangs = np.sort(angs)
@@ -26,10 +45,14 @@ def split_angles(angs, div):
     return c1, c2, ambig_dirs
 
 def vector_angle(v1, v2, degrees=True):
+    v1 = np.array(v1)
+    v2 = np.array(v2)
     costheta = np.dot(v1, v2)/(np.sqrt(np.sum(v1**2))*np.sqrt(np.sum(v2**2)))
     if costheta > 1.:
         costheta = 1
-    theta = np.arccos(costheta)*(180/np.pi)
+    theta = np.arccos(costheta)
+    if degrees:
+        theta = theta*(180/np.pi)
     return theta
 
 def demean_unit_std(data, collapse_dims=(), axis=0, sig_eps=.00001):
@@ -54,6 +77,38 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
         arrs.append(arr[inds])
     return np.concatenate(arrs, axis=stack_dim)
 
+def load_collection_bhvmats(datadir, params, expr='.*\.mat', 
+                            log_suffix='_imglog.txt', make_log_name=True,
+                            trial_cutoff=300):
+    dirfiles = os.listdir(datadir)
+    matchfiles = filter(lambda x: re.match(expr, x) is not None, dirfiles)
+    ld = {}
+    full_bhv = None
+    for i, mf in enumerate(matchfiles):
+        name, ext = os.path.splitext(mf)
+        if make_log_name:
+            imglog = os.path.join(datadir, name + log_suffix)
+        else:
+            imglog = None
+        full_mf = os.path.join(datadir, mf)
+        try:
+            bhv, ld = load_bhvmat_imglog(full_mf, imglog, datanum=i, 
+                                         prevlog_dict=ld, **params)
+            print(i, len(bhv))
+            if len(bhv) > trial_cutoff:
+                if full_bhv is None:
+                    full_bhv = bhv
+                else:
+                    full_bhv = np.concatenate((full_bhv, bhv), axis=0)
+            else:
+                print('file {} has less than {} trials and was '
+                      'excluded'.format(mf, trial_cutoff))
+        except:
+            print('error on {}'.format(full_mf))
+    return full_bhv
+
+code_to_direc_saccdmc = {201:0, 219:270, 213:180, 207:90}
+
 def merge_neuro_bhv_saccdmc(neuro, bhv, noerr=True, fixation_on=35, 
                             fixation_off=36, start_trial=9, datanum=0, 
                             lever_release=4, lever_hold=7, reward_given=48,
@@ -63,7 +118,8 @@ def merge_neuro_bhv_saccdmc(neuro, bhv, noerr=True, fixation_on=35,
                             test2_off_code=28, spks_buff=1000, saccdms_block=3,
                             ms_block=1, cat1sampdir=(90, 180), 
                             cat2sampdir=(270, 0), cat1testdir=(75, 135, 195), 
-                            cat2testdir=(255, 315, 15), datanumber=None):
+                            cat2testdir=(255, 315, 15), datanumber=None,
+                            code_to_direc=code_to_direc_saccdmc):
     samp_catdict = {}
     samp_catdict.update([(d, 1) for d in cat1sampdir])
     samp_catdict.update([(d, 2) for d in cat2sampdir])
@@ -133,11 +189,15 @@ def merge_neuro_bhv_saccdmc(neuro, bhv, noerr=True, fixation_on=35,
             x[i]['saccade'] = condinf[cn-1, 0]['Saccade']
             x[i]['saccade_intoRF'] = condinf[cn-1, 0]['IntoRF']
             x[i]['saccade_towardRF'] = condinf[cn-1, 0]['TowardsRF']
-            x[i]['sample_direction'] = condinf[cn-1, 0]['SampleDirection']
+            try:
+                x[i]['sample_direction'] = condinf[cn-1, 0]['SampleDirection']
+                x[i]['test_direction'] = condinf[cn-1, 0]['TestDirection']
+                x[i]['test_category'] = test_catdict[int(x[i]['test_direction'])]
+                x[i]['match'] = condinf[cn-1, 0][0,0]['Match']
+            except ValueError:
+                direc = code_to_direc[int(condinf[cn-1, 0][0,0]['SampleCode'])]
+                x[i]['sample_direction'] = direc
             x[i]['sample_category'] = samp_catdict[int(x[i]['sample_direction'])]
-            x[i]['test_direction'] = condinf[cn-1, 0]['TestDirection']
-            x[i]['test_category'] = test_catdict[int(x[i]['test_direction'])]
-            x[i]['match'] = condinf[cn-1, 0][0,0]['Match']
         elif x[i]['block_number'] == ms_block:
             x[i]['angle'] = condinf[cn-1,0]['Angle']
         ep = bhv['AnalogData'][0, 0][0, i]['EyeSignal'][0, 0]
@@ -153,6 +213,19 @@ def merge_neuro_bhv_saccdmc(neuro, bhv, noerr=True, fixation_on=35,
     if noerr:
         x = x[x['TrialError'] == 0]
     return x
+
+def split_spikes_startdur(neuron, starts, durs, buff=1000):
+    neurs = neuron.dtype.fields.keys()
+    ns = dict((n, []) for n in neurs)
+    for i, s in enumerate(starts):
+        end = s + durs[i]
+        for n in neurs:
+            n_spks = neuron[n][0, 0]
+            t_spks = np.logical_and(n_spks > s - buff,
+                                    n_spks < end + buff)
+            spks_t = n_spks[t_spks] - s
+            ns[n].append(spks_t)
+    return ns
 
 def split_spikes(neuron, codes, code_times, start_code=9, end_code=18, 
                  buff=1000):
@@ -236,20 +309,33 @@ def load_separate(paths, pattern=None, varname='x'):
             alldata = np.concatenate((alldata, d), axis=0)
     return alldata
 
-def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True, prevlog_dict=None,
+def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True, 
+                       prevlog_dict=None,
                        trial_field='TrialNumber', fixation_on=35, 
                        fixation_off=36, start_trial=9, datanum=0, 
                        lever_release=4, lever_hold=7, reward_given=48,
                        end_trial=18, fixation_acq=8, left_img_on=191,
                        left_img_off=192, right_img_on=195, right_img_off=196,
                        default_wid=6, default_hei=6, default_img1_xy=(-5, 0),
-                       default_img2_xy=(5, 0), 
-                       plt_conds=(7,8,9,10,11,12,13,14,15,16)):
+                       default_img2_xy=(5, 0), spks_buff=1000,
+                       plt_conds=(7,8,9,10,11,12,13,14,15,16), 
+                       sdms_conds=(1,2,3,4,5,6,7,8), ephys=False,
+                       centimgon=25, centimgoff=26, filtwin=40, thr=.1,
+                       skips=1):
     if prevlog_dict is None:
         log_dict = {}
     else:
         log_dict = prevlog_dict
-    bhv = sio.loadmat(path_bhv)['bhv']
+    data = sio.loadmat(path_bhv)['data'][0]
+    bhv = data['BHV'][0]
+    if path_log is None and 'imglog' in data.dtype.names:
+        path_log = data['imglog'][0][0]
+    if ephys:
+        neuro = data['NEURO'][0]
+        neurons = split_spikes_startdur(neuro['Neuron'][0,0], 
+                                        neuro['TrialTimes'][0,0],
+                                        neuro['TrialDurations'][0,0], 
+                                        buff=spks_buff)
     if path_log is not None:
         log = open(path_log, 'rb').readlines()
     else:
@@ -257,39 +343,57 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True, prevlog_dict=None,
     trls = bhv[trial_field][0,0]
     fields = ['trial_type', 'TrialError', 'block_number', 'code_numbers',
               'code_times', 'trial_starts', 'datafile', 'datanum',
-              'centimgon','centimgoff','trialnum','image_nos','leftimg',
+              'samp_img_on','samp_img_off','trialnum','image_nos','leftimg',
               'rightimg', 'leftviews', 'rightviews','fixation_on','fixation_off',
               'lever_release','lever_hold','reward_time','ISI_start',
               'ISI_end','fixation_acquired','left_img_on','left_img_off',
               'right_img_on','right_img_off','eyepos','spike_times','LFP',
-              'task_cond_num', 'img1_xy', 'img2_xy', 'img_wid', 'img_hei']
+              'task_cond_num', 'img1_xy', 'img2_xy', 'img_wid', 'img_hei',
+              'test_array_on', 'test_array_off', 'left_first', 'right_first',
+              'first_sacc_time', 'angular_separation']
     dt = {'names':fields, 'formats':['O']*len(fields)}
     x = np.zeros(len(trls), dtype=dt)
     for i, t in enumerate(trls):
+        x[i]['code_numbers'] = bhv['CodeNumbers'][0,0][0, i]
+        x[i]['code_times'] = bhv['CodeTimes'][0,0][0, i]
+        x[i]['trial_starts'] = get_bhvcode_time(start_trial, 
+                                                x[i]['code_numbers'],
+                                                x[i]['code_times'], first=True)
+        x[i]['ISI_end'] = get_bhvcode_time(start_trial, x[i]['code_numbers'],
+                                           x[i]['code_times'], first=True)
+        x[i]['spike_times'] = dict((k, neurons[k][i] + x[i]['trial_starts']) 
+                                   for k in neurons)
         x[i]['trial_type'] = bhv['ConditionNumber'][0,0][i, 0]
         x[i]['task_cond_num'] = bhv['ConditionNumber'][0,0][i, 0]
         x[i]['TrialError'] = bhv['TrialError'][0,0][i, 0]
         x[i]['block_number'] = bhv['BlockNumber'][0,0][i, 0]
-        x[i]['code_numbers'] = bhv['CodeNumbers'][0,0][0, i]
-        x[i]['code_times'] = bhv['CodeTimes'][0,0][0, i]
-        x[i]['trial_starts'] = get_bhvcode_time(start_trial, x[i]['code_numbers'],
-                                                x[i]['code_times'], first=True)
-        x[i]['ISI_end'] = get_bhvcode_time(start_trial, x[i]['code_numbers'],
-                                           x[i]['code_times'], first=True)
         x[i]['ISI_start'] = get_bhvcode_time(end_trial, x[i]['code_numbers'],
                                              x[i]['code_times'], first=True)
         x[i]['datafile'] = bhv['DataFileName']
         x[i]['datanum'] = datanum
-        x[i]['centimgon'] = []
-        x[i]['centimgoff'] = []
+        x[i]['samp_img_on'] = get_bhvcode_time(centimgon,
+                                               x[i]['code_numbers'],
+                                               x[i]['code_times'], first=True)
+        x[i]['samp_img_off'] = get_bhvcode_time(centimgoff,
+                                                x[i]['code_numbers'],
+                                                x[i]['code_times'], first=True)
+        x[i]['test_array_on'] = get_bhvcode_time(centimgon,
+                                                 x[i]['code_numbers'],
+                                                 x[i]['code_times'], 
+                                                 first=False)
+        x[i]['test_array_off'] = get_bhvcode_time(centimgoff,
+                                                  x[i]['code_numbers'],
+                                                  x[i]['code_times'], 
+                                                  first=False)
         x[i]['trialnum'] = bhv['TrialNumber'][0,0][i, 0]
         x[i]['image_nos'] = []
-        if x[i]['trial_type'] in plt_conds and log is not None:
+        if (x[i]['trial_type'] in plt_conds 
+            or x[i]['trial_type'] in sdms_conds) and log is not None:
             entry1 = log.pop(0)
-            entry1 = entry1.strip('\r\n').split('\t')
+            entry1 = entry1.strip(b'\r\n').split(b'\t')
             tn1, s1, _, cond1, vs1, cat1, img1 = entry1
             entry2 = log.pop(0)
-            entry2 = entry2.strip('\r\n').split('\t')
+            entry2 = entry2.strip(b'\r\n').split(b'\t')
             tn2, s2, _, cond2, vs2, cat2, img2 = entry2
             assert tn1 == tn2
             assert int(tn1) == int(x[i]['trialnum'])
@@ -337,15 +441,19 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True, prevlog_dict=None,
         x[i]['right_img_off'] = get_bhvcode_time(right_img_off,
                                                  x[i]['code_numbers'],
                                                  x[i]['code_times'], first=True)
-        x[i]['eyepos'] = bhv['AnalogData'][0,0][0, i]['EyeSignal'][0,0]
+        ep = bhv['AnalogData'][0,0][0, i]['EyeSignal'][0,0]
+        x[i]['eyepos'] = ep # [int(x[i]['ISI_end']):, :]
         if ('UserVars' in bhv.dtype.names 
             and 'img1_xy' in bhv['UserVars'][0,0].dtype.names
-            and bhv['UserVars'][0,0]['img1_xy'].shape[1] > i):
+            and bhv['UserVars'][0,0]['img1_xy'].shape[1] > i 
+            and len(bhv['UserVars'][0,0]['img1_xy'][0, i]) > 1):
             x[i]['img1_xy'] = bhv['UserVars'][0,0]['img1_xy'][0, i]
             x[i]['img2_xy'] = bhv['UserVars'][0,0]['img2_xy'][0, i]
         else:
             x[i]['img1_xy'] = default_img1_xy
             x[i]['img2_xy'] = default_img2_xy
+        x[i]['angular_separation'] = compute_angular_separation(x[i]['img1_xy'],
+                                                                x[i]['img2_xy'])
         if ('UserVars' in bhv.dtype.names 
             and 'img_wid' in bhv['UserVars'][0,0].dtype.names
             and bhv['UserVars'][0,0]['img_wid'].shape[1] > i):
@@ -354,6 +462,17 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True, prevlog_dict=None,
         else:
             x[i]['img_wid'] = default_wid
             x[i]['img_hei'] = default_hei
+        sbs, ses, l, look = es.analyze_eyemove(ep, x[i]['img1_xy'], 
+                                               x[i]['img2_xy'], skips=skips,
+                                               filtwin=filtwin, thr=thr, 
+                                               wid=x[i]['img_wid'],
+                                               hei=x[i]['img_hei'],
+                                               postthr=x[i]['fixation_off'],
+                                               readdpost=False)
+        if len(look) > 0:
+            x[i]['left_first'] = look[0] == b'l'
+            x[i]['right_first'] = look[0] == b'r'
+            x[i]['first_sacc_time'] = sbs[0] + x[i]['fixation_off']
     if noerr:
         x = x[x['TrialError'] == 0]
     return x, log_dict
@@ -371,14 +490,37 @@ def get_bhvcode_time(codenum, trial_codenums, trial_codetimes, first=True):
     return ret
 
 def get_only_vplt(data, condrange=(7, 20), condfield='trial_type'):
-    mask =np.logical_and(data[condfield] >= condrange[0], 
+    mask = np.logical_and(data[condfield] >= condrange[0], 
                          data[condfield] <= condrange[1])
+    return data[mask]
+
+def compute_angular_separation(xy1, xy2):
+    theta1 = np.rad2deg(np.arctan2(xy1[1], xy1[0]))
+    theta2 = np.rad2deg(np.arctan2(xy2[1], xy2[0]))
+    diff = np.abs(theta1 - theta2) % 360
+    sep = np.min([diff, 360 - diff])
+    return sep    
+
+def get_only_conds(data, condlist, condfield='trial_type'):
+    mask = np.zeros(data.shape[0])
+    for c in condlist:
+        c_mask = data[condfield] == c
+        mask = np.logical_or(mask, c_mask)
     return data[mask]
 
 def nan_array(size, dtype=None):
     arr = np.ones(size, dtype=dtype)
     arr[:] = np.nan
     return arr
+
+def euclidean_distance(pt1, pt2):
+    pt1 = np.array(pt1)
+    if len(pt1.shape) == 1:
+        pt1 = pt1.reshape((1, pt1.shape[0]))
+    pt2 = np.array(pt2)
+    if len(pt2.shape) == 1:
+        pt2 = pt2.reshape((1, pt2.shape[0]))
+    return np.sqrt(np.sum((pt1 - pt2)**2, axis=1))
 
 def distribute_imglogs(il_path, out_path):
     il_list = os.listdir(il_path)
@@ -400,12 +542,52 @@ def distribute_imglogs(il_path, out_path):
             nomatch.append(il)
     return nomatch
 
+def iterate_function(func, args, kv_argdict):
+    """
+    Facilitates doing parameter sweeps for functions, recording results
+    as different arguments to the function are varied.
+
+    Parameters
+    ----------
+    func : function
+        The function to be swept, func(*args) must be a valid function call.
+    args : list
+        The default values for each function argument; note that when a 
+        particular parameter is varied, the other arguments will have the
+        value given here.
+    kv_argdict : dict
+        A dictionary with keys (k, ind) where k is the text name of a parameter
+        (used for output) and ind is the index of that parameter in args -- the
+        values are the different values of k to sweep.
+
+    Returns
+    -------
+    res_dict : dict
+        A dictionary with keys k from kv_argdict, the values are the lists of
+        results from the parameter sweep for that argument.
+    """
+    res_dict = {}
+    for kvs in kv_argdict.keys():
+        print(kvs)
+        k = kvs[0]
+        inds = kvs[1:]
+        vals = kv_argdict[kvs]
+        res_dict[k] = (vals, [])
+        for j in range(len(vals[0])):
+            new_args = args[:]
+            new_args = list(new_args)
+            for i, ind in enumerate(inds):
+                new_args[ind] = vals[i][j]
+            res = func(*new_args)
+            res_dict[k][1].append(res)
+    return res_dict
+
 def get_data_run_nums(data, drunfield):
     return np.unique(np.concatenate(data[drunfield], axis=0))
 
 def bootstrap_list(l, func, n=1000):
     stats = np.ones(n)
-    for i in xrange(n):
+    for i in range(n):
         samp = np.random.choice(l, len(l))
         stats[i] = func(samp)
     return stats

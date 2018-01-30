@@ -37,15 +37,15 @@ def plot_single_units(xs, sus, labels, colors, style=(), show=False,
     return f
                 
 def sem(dat, axis=0):
-    err_1d = np.std(dat, axis=axis)/np.sqrt(dat.shape[axis] - 1)
+    err_1d = np.nanstd(dat, axis=axis)/np.sqrt(dat.shape[axis] - 1)
     err = np.vstack((err_1d, -err_1d))
     return err
 
 def conf_interval(dat, axis=0, perc=95):
     lower = (100 - perc) / 2.
     upper = lower + perc
-    lower_err = np.percentile(dat, lower, axis=axis)
-    upper_err = np.percentile(dat, upper, axis=axis)
+    lower_err = np.nanpercentile(dat, lower, axis=axis)
+    upper_err = np.nanpercentile(dat, upper, axis=axis)
     err = np.vstack((upper_err - np.nanmean(dat, axis), 
                      lower_err - np.nanmean(dat, axis)))
     return err
@@ -73,6 +73,13 @@ def plot_trial_structure(transition_times=(), labels=(), transition_dict=None,
                     fontsize=fontsize)
     return ax
 
+def pcolormesh_axes(axvals, val_len):
+    if len(axvals) == val_len:
+        diff = np.diff(axvals)[0]
+        axvals_shift = axvals - diff/2
+        axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
+    return axvals
+
 def plot_decoding_heatmap(xs, decmat, colormap=None, show=False, title='',
                           ax=None, style=(), colorbar=True, cb_wid=.05,
                           cutoff=.5, vmax=1.):
@@ -84,7 +91,6 @@ def plot_decoding_heatmap(xs, decmat, colormap=None, show=False, title='',
             diff = np.diff(xs)[0]
             xs = xs - diff/2
             xs = np.append(xs, (xs[-1] + diff))
-            xs_surr = np.arange(xs.shape[0])
         trmap = np.nanmean(decmat, axis=0)
         trmap[trmap < cutoff] = cutoff
         img = ax.pcolormesh(xs, xs, trmap, cmap=colormap, 
@@ -120,25 +126,87 @@ def plot_trajectories(mean_traj, indiv_trajs, color=None, label='', show=False,
         plt.show(block=False)
     return ax
         
-def plot_trace_werr(xs, dat, color=None, label='', show=False, title='', 
+def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
-                    style=(), central_tendency=np.nanmean):
+                    style=(), central_tendency=np.nanmean, legend=True,
+                    linestyle=None, fill=True):
     with plt.style.context(style):
         if ax is None:
             f = plt.figure()
             ax = f.add_subplot(1,1,1)
-        tr = central_tendency(dat, axis=0)
-        er = error_func(dat, axis=0)
-        trl = ax.plot(xs, tr, label=label, color=color)
-        if color is None:
-            color = trl[0].get_color()
-        ax.fill_between(xs, tr+er[1, :], tr+er[0, :], color=color, alpha=alpha)
+        if len(dat.shape) > 1:
+            tr = central_tendency(dat, axis=0)
+            er = error_func(dat, axis=0)
+        else: 
+            tr = dat
+        if len(xs_orig.shape) > 1:
+            xs_er = error_func(xs_orig, axis=0)
+            xs = central_tendency(xs_orig, axis=0)
+        else:
+            xs = xs_orig
+        trl = ax.plot(xs, tr, label=label, color=color, linestyle=linestyle)
+        if len(dat.shape) > 1:
+            if color is None:
+                color = trl[0].get_color()
+            if fill:
+                ax.fill_between(xs, tr+er[1, :], tr+er[0, :], color=color, 
+                                alpha=alpha)
+            else:
+                ax.errorbar(xs, tr, (-er[1, :], er[0, :]), color=color,
+                            linestyle=linestyle)
+        if len(xs_orig.shape) > 1:
+            if fill:
+                ax.fill_betweenx(tr, xs+xs_er[1, :], xs+xs_er[0, :], 
+                                 color=color, alpha=alpha)
+            else:
+                ax.errorbar(xs, tr, yerr=None, xerr=(-er[1, :], er[0, :]),
+                            color=color, linestyle=linestyle)
         ax.set_title(title)
-        if len(label) > 0:
-            ax.legend()
+        ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        if len(label) > 0 and legend:
+            ax.legend(frameon=False)
     if show:
         plt.show(block=False)
-    return ax
+    return trl
+
+def plot_parameter_sweep_results(res_dicts, names, errorbar=True, 
+                                 error_func=conf95_interval, style=(), 
+                                 central_tendency=np.nanmean, f=None,
+                                 y_axis_label='', figsize=(12, 4),
+                                 sharey=False, colors=None, linestyles=None):
+    entries = len(res_dicts[0])
+    if f is None:
+        f = plt.figure(figsize=figsize)
+    for i, k in enumerate(res_dicts[0].keys()):
+        if i > 0 and sharey:
+            ax_i = f.add_subplot(1, entries, i+1, sharey=ax_i)
+        else:
+            ax_i = f.add_subplot(1, entries, i+1)
+        ax_i.set_xlabel(k)
+        if sharey and i > 0:
+            plt.setp(ax_i.get_yticklabels(), visible=False)
+        else:
+            ax_i.set_ylabel(y_axis_label)
+        if i > 0:
+            legend = False
+        else: 
+            legend = True
+        for j, res_dict in enumerate(res_dicts):
+            x_ax, y_ax = res_dict[k]
+            if colors is not None:
+                col = colors[j]
+            else: 
+                col = None
+            if linestyles is not None:
+                linest = linestyles[j]
+            else:
+                linest = None
+            plot_trace_werr(np.array(x_ax)[0], np.array(y_ax).T, 
+                            label=names[j], error_func=error_func, 
+                            central_tendency=central_tendency, errorbar=errorbar,
+                            ax=ax_i, legend=legend, color=col, linestyle=linest)
+    return f
 
 def plot_distrib(dat, color=None, bins=None, label='', show=False, title='', 
                  errorbar=True, alpha=1, ax=None, style=(), histtype='step',
