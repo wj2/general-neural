@@ -4,11 +4,93 @@ import os
 import re
 import shutil
 import scipy.io as sio
-import pref_looking.eyes as es
+from pref_looking.eyes import analyze_eyemove
 
 monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May', 
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
+
+def voronoi_finite_polygons_2d(vor, radius=None):
+    """
+    TAKEN FROM: https://gist.github.com/pv/8036995
+
+    Reconstruct infinite voronoi regions in a 2D diagram to finite
+    regions.
+    Parameters
+    ----------
+    vor : Voronoi
+        Input diagram
+    radius : float, optional
+        Distance to 'points at infinity'.
+    Returns
+    -------
+    regions : list of tuples
+        Indices of vertices in each revised Voronoi regions.
+    vertices : list of tuples
+        Coordinates for revised Voronoi vertices. Same as coordinates
+        of input vertices, with 'points at infinity' appended to the
+        end.
+    """
+
+    if vor.points.shape[1] != 2:
+        raise ValueError("Requires 2D input")
+
+    new_regions = []
+    new_vertices = vor.vertices.tolist()
+
+    center = vor.points.mean(axis=0)
+    if radius is None:
+        radius = vor.points.ptp().max()*2
+
+    # Construct a map containing all ridges for a given point
+    all_ridges = {}
+    for (p1, p2), (v1, v2) in zip(vor.ridge_points, vor.ridge_vertices):
+        all_ridges.setdefault(p1, []).append((p2, v1, v2))
+        all_ridges.setdefault(p2, []).append((p1, v1, v2))
+
+    # Reconstruct infinite regions
+    for p1, region in enumerate(vor.point_region):
+        vertices = vor.regions[region]
+
+        if all(v >= 0 for v in vertices):
+            # finite region
+            new_regions.append(vertices)
+            continue
+
+        # reconstruct a non-finite region
+        ridges = all_ridges[p1]
+        new_region = [v for v in vertices if v >= 0]
+
+        for p2, v1, v2 in ridges:
+            if v2 < 0:
+                v1, v2 = v2, v1
+            if v1 >= 0:
+                # finite ridge: already in the region
+                continue
+
+            # Compute the missing endpoint of an infinite ridge
+
+            t = vor.points[p2] - vor.points[p1] # tangent
+            t /= np.linalg.norm(t)
+            n = np.array([-t[1], t[0]])  # normal
+
+            midpoint = vor.points[[p1, p2]].mean(axis=0)
+            direction = np.sign(np.dot(midpoint - center, n)) * n
+            far_point = vor.vertices[v2] + direction * radius
+
+            new_region.append(len(new_vertices))
+            new_vertices.append(far_point.tolist())
+
+        # sort region counterclockwise
+        vs = np.asarray([new_vertices[v] for v in new_region])
+        c = vs.mean(axis=0)
+        angles = np.arctan2(vs[:,1] - c[1], vs[:,0] - c[0])
+        new_region = np.array(new_region)[np.argsort(angles)]
+
+        # finish
+        new_regions.append(new_region.tolist())
+
+    return new_regions, np.asarray(new_vertices)
 
 def make_trial_constraint_func(fields, targets, relationships, 
                                combfunc=np.logical_and, begin=True):
@@ -79,7 +161,7 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
 
 def load_collection_bhvmats(datadir, params, expr='.*\.mat', 
                             log_suffix='_imglog.txt', make_log_name=True,
-                            trial_cutoff=300):
+                            trial_cutoff=300, max_trials=None):
     dirfiles = os.listdir(datadir)
     matchfiles = filter(lambda x: re.match(expr, x) is not None, dirfiles)
     ld = {}
@@ -94,6 +176,9 @@ def load_collection_bhvmats(datadir, params, expr='.*\.mat',
         try:
             bhv, ld = load_bhvmat_imglog(full_mf, imglog, datanum=i, 
                                          prevlog_dict=ld, **params)
+            print('loaded')
+            if max_trials is not None:
+                bhv = bhv[:max_trials]
             print(i, len(bhv))
             if len(bhv) > trial_cutoff:
                 if full_bhv is None:
@@ -321,13 +406,18 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                        plt_conds=(7,8,9,10,11,12,13,14,15,16), 
                        sdms_conds=(1,2,3,4,5,6,7,8), ephys=False,
                        centimgon=25, centimgoff=26, filtwin=40, thr=.1,
-                       skips=1):
+                       skips=1, eyedata_len=500):
     if prevlog_dict is None:
         log_dict = {}
     else:
         log_dict = prevlog_dict
-    data = sio.loadmat(path_bhv)['data'][0]
-    bhv = data['BHV'][0]
+    data = sio.loadmat(path_bhv)
+    if ephys:
+        data = data['data'][0]
+        bhv = data['BHV'][0]
+    else:
+        data = data['bhv']
+        bhv = data
     if path_log is None and 'imglog' in data.dtype.names:
         path_log = data['imglog'][0][0]
     if ephys:
@@ -361,8 +451,11 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                                                 x[i]['code_times'], first=True)
         x[i]['ISI_end'] = get_bhvcode_time(start_trial, x[i]['code_numbers'],
                                            x[i]['code_times'], first=True)
-        x[i]['spike_times'] = dict((k, neurons[k][i] + x[i]['trial_starts']) 
-                                   for k in neurons)
+        if ephys:
+            x[i]['spike_times'] = dict((k, neurons[k][i] + x[i]['trial_starts']) 
+                                       for k in neurons)
+        else:
+            x[i]['spike_times'] = None
         x[i]['trial_type'] = bhv['ConditionNumber'][0,0][i, 0]
         x[i]['task_cond_num'] = bhv['ConditionNumber'][0,0][i, 0]
         x[i]['TrialError'] = bhv['TrialError'][0,0][i, 0]
@@ -462,17 +555,18 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         else:
             x[i]['img_wid'] = default_wid
             x[i]['img_hei'] = default_hei
-        sbs, ses, l, look = es.analyze_eyemove(ep, x[i]['img1_xy'], 
-                                               x[i]['img2_xy'], skips=skips,
-                                               filtwin=filtwin, thr=thr, 
-                                               wid=x[i]['img_wid'],
-                                               hei=x[i]['img_hei'],
-                                               postthr=x[i]['fixation_off'],
-                                               readdpost=False)
-        if len(look) > 0:
-            x[i]['left_first'] = look[0] == b'l'
-            x[i]['right_first'] = look[0] == b'r'
-            x[i]['first_sacc_time'] = sbs[0] + x[i]['fixation_off']
+        if ep.shape[0] > eyedata_len:
+            sbs, ses, l, look = analyze_eyemove(ep, x[i]['img1_xy'], 
+                                                x[i]['img2_xy'], skips=skips,
+                                                filtwin=filtwin, thr=thr, 
+                                                wid=x[i]['img_wid'],
+                                                hei=x[i]['img_hei'],
+                                                postthr=x[i]['fixation_off'],
+                                                readdpost=False)
+            if len(look) > 0:
+                x[i]['left_first'] = look[0] == b'l'
+                x[i]['right_first'] = look[0] == b'r'
+                x[i]['first_sacc_time'] = sbs[0] + x[i]['fixation_off']
     if noerr:
         x = x[x['TrialError'] == 0]
     return x, log_dict
@@ -503,8 +597,12 @@ def compute_angular_separation(xy1, xy2):
 
 def get_only_conds(data, condlist, condfield='trial_type'):
     mask = np.zeros(data.shape[0])
+    if max(data[condfield].shape) == 1:
+        for_masking = data[condfield][0,0]
+    else:
+        for_masking = data[condfield]
     for c in condlist:
-        c_mask = data[condfield] == c
+        c_mask = for_masking == c
         mask = np.logical_or(mask, c_mask)
     return data[mask]
 

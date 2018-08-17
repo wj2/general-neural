@@ -567,7 +567,7 @@ def _generate_label_list(n_factors, ref_string=string.ascii_lowercase):
     return labels
 
 def _generate_interaction_terms(inter, labels, with_replace=True):
-    x = filter(lambda x: x[0] in inter, labels)
+    x = list(filter(lambda x: x[0] in inter, labels))
     if with_replace:
         combos = list(itertools.combinations_with_replacement(x, 
                                                               len(inter)))
@@ -599,9 +599,10 @@ def _generate_factor_labels(factors, labels=None, interactions=(),
 
 def _generate_cond_refs(labels, comb, cond_labels, ind_sizes):
     labs = np.zeros(len(labels))
+    prod_size = np.product(ind_sizes)
     for i, l in enumerate(labels):
-        if i >= len(ind_sizes):
-            prod = [labs[:len(ind_sizes)][labels.index(x)] for x in l]
+        if i >= prod_size:
+            prod = [labs[:prod_size][labels.index(x)] for x in l]
             labs[i] = np.product(prod)
         else:
             ind = cond_labels.index(l[0])
@@ -673,30 +674,42 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
             format_cond[i, j] = cs
     return format_data, format_cond
 
-def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False):
+def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False,
+                             demean=False):
+    if demean:
+        coeff_add = 0
+    else:
+        coeff_add = 1
     null_coeff_pop = np.zeros((perms, data.shape[1], data.shape[0], 
-                               conds.shape[2] + 1))
+                               conds.shape[2] + coeff_add))
     for i in range(perms):
         shuff_conds = u.resample_on_axis(conds, conds.shape[1], axis=1, 
                                          with_replace=False)
-        _, null_coeff_pop[i] = fit_glms(data, shuff_conds, use_stan=use_stan)
+        _, null_coeff_pop[i] = fit_glms(data, shuff_conds, use_stan=use_stan,
+                                        demean=demean)
     return null_coeff_pop
 
-def fit_glms_with_perm(data, conds, perms=100, use_stan=False):
-    mp, cp = fit_glms(data, conds, use_stan=use_stan)
-    null_cp = generate_null_glm_coeffs(data, conds, perms, use_stan=use_stan)
+def fit_glms_with_perm(data, conds, perms=100, use_stan=False, demean=False):
+    mp, cp = fit_glms(data, conds, use_stan=use_stan, demean=demean)
+    null_cp = generate_null_glm_coeffs(data, conds, perms, use_stan=use_stan,
+                                       demean=demean)
     exp_cp = np.expand_dims(cp, axis=0)
-    higher = np.sum(exp_cp > null_cp, axis=0) / perms
-    lower = np.sum(exp_cp < null_cp, axis=0) / perms
+    higher = np.sum(exp_cp >= null_cp, axis=0) / perms
+    lower = np.sum(exp_cp <= null_cp, axis=0) / perms
     ps = np.min(np.stack((lower, higher), axis=0), axis=0)
     return mp, cp, ps, null_cp
 
-def fit_glms(data, conds, use_stan=False):
+def fit_glms(data, conds, use_stan=False, demean=False):
     model_pop = []
-    coeffs_pop = np.zeros((data.shape[1], data.shape[0], conds.shape[2] + 1))
+    if demean:
+        coeff_add = 0
+    else:
+        coeff_add = 1
+    coeffs_pop = np.zeros((data.shape[1], data.shape[0],
+                           conds.shape[2] + coeff_add))
     for i, neur in enumerate(conds):
         ms, cs = generalized_linear_model(data[:, i, :], neur, 
-                                          use_stan=use_stan)
+                                          use_stan=use_stan, demean=demean)
         model_pop.append(ms)
         coeffs_pop[i] = cs
     return model_pop, coeffs_pop
@@ -705,7 +718,8 @@ stan_file_trunk = '/Users/wjj/Dropbox/research/uc/freedman/analysis/general/'
 stan_file_gaussian = os.path.join(stan_file_trunk, 'glm_fitting.stan')
 
 def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
-                             stan_iters=10000, stan_file=stan_file_gaussian):
+                             stan_iters=10000, stan_file=stan_file_gaussian,
+                             demean=False):
     """
     Fit a generalized linear model to data.
 
@@ -730,7 +744,14 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
         in the order of the labels, with the mean term in the zeroeth position.
     """
     models = []
-    coeffs = np.zeros((data.shape[0], conds.shape[1] + 1))
+    if demean:
+        data = data - np.mean(data, axis=1).reshape((-1, 1))
+        fit_inter = False
+        coeff_add = 0
+    else:
+        fit_inter = True
+        coeff_add = 1
+    coeffs = np.zeros((data.shape[0], conds.shape[1] + coeff_add))    
     for t in range(data.shape[0]):
         if use_stan:
             stan_data = {'N':data.shape[1], 'K':conds.shape[1], 'x':conds, 
@@ -739,10 +760,13 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
                         chains=stan_chains)
             coeffs[t] = m.get_posterior_mean()[:conds.shape[1]+1, 0]
         else:
-            m = linear_model.LinearRegression(fit_intercept=True)
+            m = linear_model.LassoCV(fit_intercept=fit_inter)
             m.fit(conds, data[t, :])
-            coeffs[t, 0] = m.intercept_
-            coeffs[t, 1:] = m.coef_
+            if demean:
+                coeffs[t] = m.coef_
+            else:
+                coeffs[t, 0] = m.intercept_
+                coeffs[t, 1:] = m.coef_
         models.append(m)
     return models, coeffs
     

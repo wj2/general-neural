@@ -1,6 +1,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import general.utility as u
 
 def plot_single_units(xs, sus, labels, colors, style=(), show=False,
                       errorbar=True, alpha=.5, trial_color=(.8, .8, .8),
@@ -125,15 +126,41 @@ def plot_trajectories(mean_traj, indiv_trajs, color=None, label='', show=False,
     if show:
         plt.show(block=False)
     return ax
+
+def plot_smooth_cumu(dat, bins='auto', color=None, label='', title='', 
+                     ax=None, legend=True, linestyle=None, normed=True,
+                     start=None):
+    cts, base = np.histogram(dat, bins)
+    cum_cts = np.cumsum(cts)
+    cum_cts = cum_cts/np.max(cum_cts)
+    base = base[:-1] + np.diff(base)[0]/2
+    if ax is None:
+        f = plt.figure()
+        ax = f.add_subplot(1,1,1)
+    if start is not None:
+        base = np.concatenate(([start[0]], base))
+        cum_cts = np.concatenate(([start[1]], cum_cts))
+    ax.plot(base, cum_cts, color=color, label=label, linestyle=linestyle)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    if len(label) > 0 and legend:
+        ax.legend(frameon=False)
+    if len(title) > 0:
+        ax.set_title(title)
+    return ax    
         
 def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
-                    linestyle=None, fill=True):
+                    fill=True, log_x=False, log_y=False, **kwargs):
     with plt.style.context(style):
         if ax is None:
             f = plt.figure()
             ax = f.add_subplot(1,1,1)
+        if log_x:
+            ax.set_xscale('log')
+        if log_y:
+            ax.set_yscale('log')
         if len(dat.shape) > 1:
             tr = central_tendency(dat, axis=0)
             er = error_func(dat, axis=0)
@@ -144,7 +171,7 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
             xs = central_tendency(xs_orig, axis=0)
         else:
             xs = xs_orig
-        trl = ax.plot(xs, tr, label=label, color=color, linestyle=linestyle)
+        trl = ax.plot(xs, tr, label=label, color=color, **kwargs)
         if len(dat.shape) > 1:
             if color is None:
                 color = trl[0].get_color()
@@ -153,14 +180,14 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                                 alpha=alpha)
             else:
                 ax.errorbar(xs, tr, (-er[1, :], er[0, :]), color=color,
-                            linestyle=linestyle)
+                            **kwargs)
         if len(xs_orig.shape) > 1:
             if fill:
                 ax.fill_betweenx(tr, xs+xs_er[1, :], xs+xs_er[0, :], 
                                  color=color, alpha=alpha)
             else:
                 ax.errorbar(xs, tr, yerr=None, xerr=(-er[1, :], er[0, :]),
-                            color=color, linestyle=linestyle)
+                            color=color, **kwargs)
         ax.set_title(title)
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
@@ -250,10 +277,33 @@ def plot_dpca_results(xs, res, dims=(1,), color_dict=None, title_dict=None,
         plt.show(block=False)
     return ax
 
+def label_line(start, end, text, ax, buff=.1, lat_offset=0, **kwargs):
+    lv = end - start
+    lv = lv/np.sqrt(np.sum(lv**2))
+    center_pt = np.mean(np.array((start, end)), axis=0)
+    orth_ang = ax.transData.transform_angles(np.array((90,)),
+                                             center_pt.reshape((1,2)))[0]
+    
+    ov = np.array((1, -lv[0]/lv[1]))
+    ov = ov/np.sqrt(np.sum(ov**2))
+    center_pt = center_pt + lat_offset*lv
+    ang = -u.vector_angle(lv, (1,0), degrees=True)
+    if ang < -90:
+        ang = -(180 - ang)
+        ov = -ov
+    txt_pt = center_pt + ov*buff
+    trans_ang = ax.transData.transform_angles(np.array((ang,)),
+                                              txt_pt.reshape((1,2)))[0]
+    ax.text(txt_pt[0], txt_pt[1], text, 
+            rotation=trans_ang, verticalalignment='center',
+            horizontalalignment='center', rotation_mode='anchor', **kwargs)
+    return ax
+
 def plot_glm_coeffs(coeffs, ps, pcoeffs=(1, 2), p_thr=.05, style=(), ax=None, 
                     show=False, xlabel='', ylabel='', ns_alpha=.2, 
                     legend=True, legend_labels=('ns', 'coeff_1', 'coeff_2', 
-                                                'both')):
+                                                'both'),
+                    colors=None):
     p_thr = p_thr/2
     coeffs = coeffs[:, pcoeffs]
     ps = ps[:, pcoeffs]
@@ -267,15 +317,20 @@ def plot_glm_coeffs(coeffs, ps, pcoeffs=(1, 2), p_thr=.05, style=(), ax=None,
         if ax is None:
             f = plt.figure()
             ax = f.add_subplot(1,1,1)
+        if colors is None:
+            colors = (None,)*4
         ax.plot(coeffs[n_sig, 0], coeffs[n_sig, 1], 'o', alpha=ns_alpha, 
-                label=legend_labels[0])
-        ax.plot(coeffs[f_sig, 0], coeffs[f_sig, 1], 'o', label=legend_labels[1])
-        ax.plot(coeffs[s_sig, 0], coeffs[s_sig, 1], 'o', label=legend_labels[2])
-        ax.plot(coeffs[b_sig, 0], coeffs[b_sig, 1], 'o', label=legend_labels[3])
+                label=legend_labels[0], color=colors[0])
+        ax.plot(coeffs[f_sig, 0], coeffs[f_sig, 1], 'o', label=legend_labels[1],
+                color=colors[1])
+        ax.plot(coeffs[s_sig, 0], coeffs[s_sig, 1], 'o', label=legend_labels[2],
+                color=colors[2])
+        ax.plot(coeffs[b_sig, 0], coeffs[b_sig, 1], 'o', label=legend_labels[3],
+                color=colors[3])
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         if legend:
-            ax.legend()
+            ax.legend(frameon=False)
     if show:
         plt.show(block=False)
     return ax
