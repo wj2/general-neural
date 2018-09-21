@@ -675,7 +675,7 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
     return format_data, format_cond
 
 def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False,
-                             demean=False):
+                             demean=False, z_score=False):
     if demean:
         coeff_add = 0
     else:
@@ -686,20 +686,22 @@ def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False,
         shuff_conds = u.resample_on_axis(conds, conds.shape[1], axis=1, 
                                          with_replace=False)
         _, null_coeff_pop[i] = fit_glms(data, shuff_conds, use_stan=use_stan,
-                                        demean=demean)
+                                        demean=demean, z_score=z_score)
     return null_coeff_pop
 
-def fit_glms_with_perm(data, conds, perms=100, use_stan=False, demean=False):
-    mp, cp = fit_glms(data, conds, use_stan=use_stan, demean=demean)
+def fit_glms_with_perm(data, conds, perms=100, use_stan=False, demean=False,
+                       z_score=False):
+    mp, cp = fit_glms(data, conds, use_stan=use_stan, demean=demean,
+                      z_score=z_score)
     null_cp = generate_null_glm_coeffs(data, conds, perms, use_stan=use_stan,
-                                       demean=demean)
+                                       demean=demean, z_score=z_score)
     exp_cp = np.expand_dims(cp, axis=0)
     higher = np.sum(exp_cp >= null_cp, axis=0) / perms
     lower = np.sum(exp_cp <= null_cp, axis=0) / perms
     ps = np.min(np.stack((lower, higher), axis=0), axis=0)
     return mp, cp, ps, null_cp
 
-def fit_glms(data, conds, use_stan=False, demean=False):
+def fit_glms(data, conds, use_stan=False, demean=False, z_score=False):
     model_pop = []
     if demean:
         coeff_add = 0
@@ -709,7 +711,8 @@ def fit_glms(data, conds, use_stan=False, demean=False):
                            conds.shape[2] + coeff_add))
     for i, neur in enumerate(conds):
         ms, cs = generalized_linear_model(data[:, i, :], neur, 
-                                          use_stan=use_stan, demean=demean)
+                                          use_stan=use_stan, demean=demean,
+                                          z_score=z_score)
         model_pop.append(ms)
         coeffs_pop[i] = cs
     return model_pop, coeffs_pop
@@ -719,7 +722,7 @@ stan_file_gaussian = os.path.join(stan_file_trunk, 'glm_fitting.stan')
 
 def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
                              stan_iters=10000, stan_file=stan_file_gaussian,
-                             demean=False):
+                             demean=False, z_score=False):
     """
     Fit a generalized linear model to data.
 
@@ -751,6 +754,11 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
     else:
         fit_inter = True
         coeff_add = 1
+    if z_score:
+        m = np.mean(data, axis=1).reshape((-1, 1))
+        dm_data = data - m
+        zs_data = dm_data/np.std(dm_data, axis=1).reshape((-1, 1))
+        data = zs_data + m
     coeffs = np.zeros((data.shape[0], conds.shape[1] + coeff_add))    
     for t in range(data.shape[0]):
         if use_stan:
@@ -760,7 +768,7 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
                         chains=stan_chains)
             coeffs[t] = m.get_posterior_mean()[:conds.shape[1]+1, 0]
         else:
-            m = linear_model.LassoCV(fit_intercept=fit_inter)
+            m = linear_model.Lasso(fit_intercept=fit_inter)
             m.fit(conds, data[t, :])
             if demean:
                 coeffs[t] = m.coef_
