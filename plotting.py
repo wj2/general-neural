@@ -334,3 +334,144 @@ def plot_glm_coeffs(coeffs, ps, pcoeffs=(1, 2), p_thr=.05, style=(), ax=None,
     if show:
         plt.show(block=False)
     return ax
+
+def _cent_selectivity(inds, ps, mags, p_thr, eps, central_func=np.nanmedian):
+    ps = ps[inds]
+    mags = mags[inds]
+    use_d = mags[np.logical_and(ps < p_thr, mags > eps)]
+    return central_func(use_d)
+                            
+def _set_violin_color(vp, color):
+    for b in vp['bodies']:
+        b.set_facecolor(color)
+        b.set_edgecolor(color)
+
+
+def _clean_plot(ax, i, ticks=True, spines=True):
+    if spines:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    if i > 0:
+        if spines:
+            ax.spines['left'].set_visible(False)
+        if ticks:
+            plt.setp(ax.get_yticklabels(), visible=False)
+            ax.yaxis.set_tick_params(size=0)
+        
+def plot_conf_interval(x, y_distr, ax, color=None, error_func=conf95_interval,
+                       central_tend=np.nanmedian):
+    if len(y_distr.shape) < 2:
+        y_distr = y_distr.reshape((-1, 1))
+    plot_trace_werr(np.array([x]), y_distr, central_tendency=central_tend,
+                    error_func=error_func, ax=ax, color=color)
+    ax.plot([x], central_tend(y_distr), '_', color=color)
+    return ax
+
+def _preprocess_glm(coeffs, ps, subgroups=None, p_thr=.05, eps=None):
+    if subgroups is not None:
+        all_use = np.concatenate(subgroups)
+    else:
+        all_use = np.arange(coeffs.shape[1])
+        subgroups = (all_use,)
+    ps = ps[:, all_use]
+    coeffs = coeffs[:, all_use]
+    sig_filt = np.any(ps < p_thr, axis=1)
+    use_pop = coeffs[sig_filt]
+    use_ps = ps[sig_filt]
+    if eps is not None:
+        mask = np.any(use_pop > eps, axis=1)
+        use_pop = use_pop[mask]
+    return use_pop, subgroups, all_use, use_ps
+
+def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
+                                  boots=1000, figsize=None, colors=None,
+                                  eps=.001, group_xlabels=None, ylabel=None):
+    use_pop, subgroups, all_use, ps = _preprocess_glm(coeffs, ps, subgroups,
+                                                      p_thr)
+    use_pop = np.abs(use_pop)
+    f = plt.figure(figsize=figsize)
+    if colors is None:
+        colors = (None,)*len(subgroups)
+    share_ax = None
+    for i, sg in enumerate(subgroups):
+        ax = f.add_subplot(1, len(subgroups), i + 1, sharey=share_ax)
+        share_ax = ax
+        for j in sg:
+            sgm = use_pop[:, j]
+            psm = ps[:, j]
+            distr_func = lambda x: np.mean(np.logical_and(sgm[x] > eps,
+                                                          psm[x] < p_thr))
+            inds = np.arange(len(sgm))
+            prop_distr = u.bootstrap_list(inds, distr_func, n=boots)
+            plot_conf_interval(j, prop_distr, ax, color=colors[i])
+        _clean_plot(ax, i, ticks=True, spines=True)
+        if i == 0 and ylabel is not None:
+            ax.set_ylabel(ylabel)
+        if group_xlabels is not None:
+            ax.set_xlabel(group_xlabels[i])
+    return f
+
+def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
+                                 boots=1000, figsize=None, colors=None,
+                                 eps=.001, group_xlabels=None, ylabel=None):
+    out = _preprocess_glm(coeffs, ps, subgroups, p_thr)
+    use_pop, subgroups, all_use, ps = out
+    use_pop = np.abs(use_pop)
+    f = plt.figure(figsize=figsize)
+    if colors is None:
+        colors = (None,)*len(subgroups)
+    share_ax = None
+    for i, sg in enumerate(subgroups):
+        ax = f.add_subplot(1, len(subgroups), i + 1, sharey=share_ax)
+        share_ax = ax
+        sg_mags = ()
+        for j in sg:
+            sgm = use_pop[:, j]
+            psm = ps[:, j]
+            pop_mags = tuple(sgm[np.logical_and(sgm > eps, psm < p_thr)])
+            sg_mags = sg_mags + (pop_mags,)
+            distr_func = lambda x: _cent_selectivity(x, psm, sgm, p_thr,
+                                                     eps, np.nanmedian)
+            inds = np.arange(len(sgm))
+            sg_cent_dist = u.bootstrap_list(inds, distr_func, n=boots)
+            plot_conf_interval(j, sg_cent_dist, ax, color=colors[i])
+        p = ax.violinplot(sg_mags, positions=sg, showmedians=False,
+                          showextrema=False)
+        _set_violin_color(p, colors[i])
+        _clean_plot(ax, i, ticks=True, spines=True)
+        if i == 0 and ylabel is not None:
+            ax.set_ylabel(ylabel)
+        if group_xlabels is not None:
+            ax.set_xlabel(group_xlabels[i])
+    return f
+
+def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
+                               sort=True, figsize=None, cmap='RdBu',
+                               group_xlabels=None, ylabel=None):
+    use_pop, subgroups, all_use, ps = _preprocess_glm(coeffs, ps, subgroups,
+                                                      p_thr)
+    abs_coeffs = np.abs(use_pop)
+    maxterm_order = np.argsort(np.argmax(abs_coeffs, axis=1))
+    sorted_pop = use_pop[maxterm_order]
+
+    vmax = np.max(abs_coeffs)
+    vmin = -vmax
+    f = plt.figure(figsize=figsize)
+    yvals = pcolormesh_axes(np.arange(use_pop.shape[0]) + 1, use_pop.shape[0])
+    ax_list = ()
+    for i, sg in enumerate(subgroups):
+        xvals = pcolormesh_axes(sg, len(sg))
+        submap = sorted_pop[:, sg]
+
+        ax = f.add_subplot(1, len(subgroups), i + 1)
+        ax.invert_yaxis()
+        p = ax.pcolormesh(xvals, yvals, submap, cmap=cmap, vmin=vmin, vmax=vmax)
+        ax_list = ax_list + (ax,)
+        _clean_plot(ax, i, ticks=True, spines=False)
+        if i == 0 and ylabel is not None:
+            ax.set_ylabel(ylabel)
+        if group_xlabels is not None:
+            ax.set_xlabel(group_xlabels[i])
+
+    colbar = f.colorbar(p, ax=ax_list)
+    return f
