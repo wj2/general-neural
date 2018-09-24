@@ -498,7 +498,6 @@ def dpca_wrapper(data, labels, regularizer='auto', signif=False, protect='t',
     dpca = dPCA(labels=labels, regularizer=regularizer)
     dpca.protect = protect
     fd = dpca.fit_transform(data_mean, trialX=data)
-    print(data_mean.shape)
     ret = fd
     if signif: 
         s_mask = dpca.significance_analysis(data_mean, data, axis='t', 
@@ -675,7 +674,7 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
     return format_data, format_cond
 
 def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False,
-                             demean=False, z_score=False):
+                             demean=False, z_score=False, alpha=None):
     if demean:
         coeff_add = 0
     else:
@@ -686,22 +685,25 @@ def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False,
         shuff_conds = u.resample_on_axis(conds, conds.shape[1], axis=1, 
                                          with_replace=False)
         _, null_coeff_pop[i] = fit_glms(data, shuff_conds, use_stan=use_stan,
-                                        demean=demean, z_score=z_score)
+                                        demean=demean, z_score=z_score,
+                                        alpha=alpha)
     return null_coeff_pop
 
 def fit_glms_with_perm(data, conds, perms=100, use_stan=False, demean=False,
-                       z_score=False):
+                       z_score=False, alpha=None):
     mp, cp = fit_glms(data, conds, use_stan=use_stan, demean=demean,
-                      z_score=z_score)
+                      z_score=z_score, alpha=alpha)
     null_cp = generate_null_glm_coeffs(data, conds, perms, use_stan=use_stan,
-                                       demean=demean, z_score=z_score)
+                                       demean=demean, z_score=z_score,
+                                       alpha=alpha)
     exp_cp = np.expand_dims(cp, axis=0)
     higher = np.sum(exp_cp >= null_cp, axis=0) / perms
     lower = np.sum(exp_cp <= null_cp, axis=0) / perms
     ps = np.min(np.stack((lower, higher), axis=0), axis=0)
     return mp, cp, ps, null_cp
 
-def fit_glms(data, conds, use_stan=False, demean=False, z_score=False):
+def fit_glms(data, conds, use_stan=False, demean=False, z_score=False,
+             alpha=None):
     model_pop = []
     if demean:
         coeff_add = 0
@@ -712,7 +714,7 @@ def fit_glms(data, conds, use_stan=False, demean=False, z_score=False):
     for i, neur in enumerate(conds):
         ms, cs = generalized_linear_model(data[:, i, :], neur, 
                                           use_stan=use_stan, demean=demean,
-                                          z_score=z_score)
+                                          z_score=z_score, alpha=alpha)
         model_pop.append(ms)
         coeffs_pop[i] = cs
     return model_pop, coeffs_pop
@@ -722,7 +724,7 @@ stan_file_gaussian = os.path.join(stan_file_trunk, 'glm_fitting.stan')
 
 def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
                              stan_iters=10000, stan_file=stan_file_gaussian,
-                             demean=False, z_score=False):
+                             demean=False, z_score=False, alpha=None):
     """
     Fit a generalized linear model to data.
 
@@ -747,6 +749,8 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
         in the order of the labels, with the mean term in the zeroeth position.
     """
     models = []
+    if alpha is None:
+        alpha = 1
     if demean:
         data = data - np.mean(data, axis=1).reshape((-1, 1))
         fit_inter = False
@@ -759,6 +763,8 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
         dm_data = data - m
         zs_data = dm_data/np.std(dm_data, axis=1).reshape((-1, 1))
         data = zs_data + m
+        if alpha is None:
+            alpha = .1
     coeffs = np.zeros((data.shape[0], conds.shape[1] + coeff_add))    
     for t in range(data.shape[0]):
         if use_stan:
@@ -768,7 +774,7 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
                         chains=stan_chains)
             coeffs[t] = m.get_posterior_mean()[:conds.shape[1]+1, 0]
         else:
-            m = linear_model.Lasso(fit_intercept=fit_inter)
+            m = linear_model.Lasso(fit_intercept=fit_inter, alpha=alpha)
             m.fit(conds, data[t, :])
             if demean:
                 coeffs[t] = m.coef_
