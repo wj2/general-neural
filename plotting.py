@@ -385,7 +385,8 @@ def _preprocess_glm(coeffs, ps, subgroups=None, p_thr=.05, eps=None):
 
 def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
                                   boots=1000, figsize=None, colors=None,
-                                  eps=.001, group_xlabels=None, ylabel=None):
+                                  eps=.001, group_xlabels=None, ylabel=None,
+                                  group_term_labels=None):
     use_pop, subgroups, all_use, ps = _preprocess_glm(coeffs, ps, subgroups,
                                                       p_thr)
     use_pop = np.abs(use_pop)
@@ -404,6 +405,9 @@ def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
             inds = np.arange(len(sgm))
             prop_distr = u.bootstrap_list(inds, distr_func, n=boots)
             plot_conf_interval(j, prop_distr, ax, color=colors[i])
+        if group_term_labels is not None:
+            ax.set_xticks(sg)
+            ax.set_xticklabels(group_term_labels[i])
         _clean_plot(ax, i, ticks=True, spines=True)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
@@ -413,7 +417,8 @@ def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
 
 def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
                                  boots=1000, figsize=None, colors=None,
-                                 eps=.001, group_xlabels=None, ylabel=None):
+                                 eps=.001, group_xlabels=None, ylabel=None,
+                                 group_term_labels=None):
     out = _preprocess_glm(coeffs, ps, subgroups, p_thr)
     use_pop, subgroups, all_use, ps = out
     use_pop = np.abs(use_pop)
@@ -438,6 +443,9 @@ def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
         p = ax.violinplot(sg_mags, positions=sg, showmedians=False,
                           showextrema=False)
         _set_violin_color(p, colors[i])
+        if group_term_labels is not None:
+            ax.set_xticks(sg)
+            ax.set_xticklabels(group_term_labels[i])
         _clean_plot(ax, i, ticks=True, spines=True)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
@@ -447,7 +455,8 @@ def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
 
 def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
                                sort=True, figsize=None, cmap='RdBu',
-                               group_xlabels=None, ylabel=None):
+                               group_xlabels=None, ylabel=None,
+                               group_term_labels=None):
     use_pop, subgroups, all_use, ps = _preprocess_glm(coeffs, ps, subgroups,
                                                       p_thr)
     abs_coeffs = np.abs(use_pop)
@@ -467,11 +476,13 @@ def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
         ax.invert_yaxis()
         p = ax.pcolormesh(xvals, yvals, submap, cmap=cmap, vmin=vmin, vmax=vmax)
         ax_list = ax_list + (ax,)
+        if group_term_labels is not None:
+            ax.set_xticks(sg)
+            ax.set_xticklabels(group_term_labels[i])
         _clean_plot(ax, i, ticks=True, spines=False)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
         if group_xlabels is not None:
             ax.set_xlabel(group_xlabels[i])
-
     colbar = f.colorbar(p, ax=ax_list)
     return f
