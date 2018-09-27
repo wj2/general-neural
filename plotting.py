@@ -363,7 +363,7 @@ def plot_conf_interval(x, y_distr, ax, color=None, error_func=conf95_interval,
     if len(y_distr.shape) < 2:
         y_distr = y_distr.reshape((-1, 1))
     plot_trace_werr(np.array([x]), y_distr, central_tendency=central_tend,
-                    error_func=error_func, ax=ax, color=color)
+                    error_func=error_func, ax=ax, color=color, fill=False)
     ax.plot([x], central_tend(y_distr), '_', color=color)
     return ax
 
@@ -386,16 +386,27 @@ def _preprocess_glm(coeffs, ps, subgroups=None, p_thr=.05, eps=None):
 def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
                                   boots=1000, figsize=None, colors=None,
                                   eps=.001, group_xlabels=None, ylabel=None,
-                                  group_term_labels=None):
+                                  group_term_labels=None, fig=None,
+                                  label_rotation='horizontal'):
     use_pop, subgroups, all_use, ps = _preprocess_glm(coeffs, ps, subgroups,
                                                       p_thr)
     use_pop = np.abs(use_pop)
-    f = plt.figure(figsize=figsize)
+    if fig is None:
+        f = plt.figure(figsize=figsize)
+        rows = 1
+        i_buff = 1
+        share_x = (None,)*len(subgroups)
+    else:
+        f = fig
+        rows = 2
+        share_x = f.get_axes()
+        i_buff = len(share_x) + 1
     if colors is None:
         colors = (None,)*len(subgroups)
     share_ax = None
     for i, sg in enumerate(subgroups):
-        ax = f.add_subplot(1, len(subgroups), i + 1, sharey=share_ax)
+        ax = f.add_subplot(rows, len(subgroups), i + i_buff, sharey=share_ax,
+                           sharex=share_x[i])
         share_ax = ax
         for j in sg:
             sgm = use_pop[:, j]
@@ -407,7 +418,7 @@ def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
             plot_conf_interval(j, prop_distr, ax, color=colors[i])
         if group_term_labels is not None:
             ax.set_xticks(sg)
-            ax.set_xticklabels(group_term_labels[i])
+            ax.set_xticklabels(group_term_labels[i], rotation=label_rotation)
         _clean_plot(ax, i, ticks=True, spines=True)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
@@ -418,16 +429,21 @@ def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
 def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
                                  boots=1000, figsize=None, colors=None,
                                  eps=.001, group_xlabels=None, ylabel=None,
-                                 group_term_labels=None):
+                                 group_term_labels=None, combined_fig=False,
+                                 label_rotation='horizontal'):
     out = _preprocess_glm(coeffs, ps, subgroups, p_thr)
     use_pop, subgroups, all_use, ps = out
     use_pop = np.abs(use_pop)
+    if combined_fig:
+        rows = 2
+    else:
+        rows = 1
     f = plt.figure(figsize=figsize)
     if colors is None:
         colors = (None,)*len(subgroups)
     share_ax = None
     for i, sg in enumerate(subgroups):
-        ax = f.add_subplot(1, len(subgroups), i + 1, sharey=share_ax)
+        ax = f.add_subplot(rows, len(subgroups), i + 1, sharey=share_ax)
         share_ax = ax
         sg_mags = ()
         for j in sg:
@@ -443,20 +459,24 @@ def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
         p = ax.violinplot(sg_mags, positions=sg, showmedians=False,
                           showextrema=False)
         _set_violin_color(p, colors[i])
-        if group_term_labels is not None:
+        if (not combined_fig) and group_term_labels is not None:
             ax.set_xticks(sg)
-            ax.set_xticklabels(group_term_labels[i])
+            ax.set_xticklabels(group_term_labels[i], rotation=label_rotation)
         _clean_plot(ax, i, ticks=True, spines=True)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
-        if group_xlabels is not None:
+        if (not combined_fig) and group_xlabels is not None:
             ax.set_xlabel(group_xlabels[i])
+        if combined_fig:
+            plt.setp(ax.get_xticklabels(), visible=False)
     return f
 
 def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
                                sort=True, figsize=None, cmap='RdBu',
                                group_xlabels=None, ylabel=None,
-                               group_term_labels=None):
+                               group_term_labels=None, sep_cb=False,
+                               cb_size=(.75, 1), label_rotation='horizontal',
+                               cb_label=''):
     use_pop, subgroups, all_use, ps = _preprocess_glm(coeffs, ps, subgroups,
                                                       p_thr)
     abs_coeffs = np.abs(use_pop)
@@ -478,11 +498,20 @@ def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
         ax_list = ax_list + (ax,)
         if group_term_labels is not None:
             ax.set_xticks(sg)
-            ax.set_xticklabels(group_term_labels[i])
+            ax.set_xticklabels(group_term_labels[i], rotation=label_rotation)
         _clean_plot(ax, i, ticks=True, spines=False)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
         if group_xlabels is not None:
             ax.set_xlabel(group_xlabels[i])
-    colbar = f.colorbar(p, ax=ax_list)
-    return f
+    if sep_cb:
+        f2 = plt.figure(figsize=cb_size)
+        ax_list = None
+        ret = (f, f2)
+    else:
+        f2 = f
+        ret = (f,)
+    colbar = f2.colorbar(p, ax=ax_list)
+    colbar.set_ticks([round(vmin, 1), 0, round(vmax, 1)])
+    colbar.set_label(cb_label)
+    return ret
