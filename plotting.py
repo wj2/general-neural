@@ -129,7 +129,7 @@ def plot_trajectories(mean_traj, indiv_trajs, color=None, label='', show=False,
 
 def plot_smooth_cumu(dat, bins='auto', color=None, label='', title='', 
                      ax=None, legend=True, linestyle=None, normed=True,
-                     start=None):
+                     start=None, log_x=False, log_y=False):
     cts, base = np.histogram(dat, bins)
     cum_cts = np.cumsum(cts)
     cum_cts = cum_cts/np.max(cum_cts)
@@ -143,6 +143,10 @@ def plot_smooth_cumu(dat, bins='auto', color=None, label='', title='',
     ax.plot(base, cum_cts, color=color, label=label, linestyle=linestyle)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
+    if log_x:
+        ax.set_xscale('log')
+    if log_y:
+        ax.set_yscale('log')
     if len(label) > 0 and legend:
         ax.legend(frameon=False)
     if len(title) > 0:
