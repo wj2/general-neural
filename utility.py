@@ -10,6 +10,9 @@ monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May',
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
 
+def h2(p):
+    return -p*np.log2(p) - (1 - p)*np.log2(1 - p)
+
 def voronoi_finite_polygons_2d(vor, radius=None):
     """
     TAKEN FROM: https://gist.github.com/pv/8036995
