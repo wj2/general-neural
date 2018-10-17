@@ -4,11 +4,41 @@ import os
 import re
 import shutil
 import scipy.io as sio
+import pystan as ps
+import pickle
+import itertools as it 
 from pref_looking.eyes import analyze_eyemove
 
 monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May', 
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
+
+def generate_all_combinations(size, starting_order):
+    combs = []
+    for i in range(starting_order, size + 1):
+        c = list(it.combinations(range(size), i))
+        combs = combs + c
+    return combs
+
+def pickle_all_stan_models(folder='general/stan_models/', pattern='.*\.stan$',
+                           decoder='utf-8'):
+    fls = os.listdir(folder)
+    print(fls)
+    fls = filter(lambda x: re.match(pattern, x) is not None, fls)
+    for f in fls:
+        print(f)
+        path = os.path.join(folder, f)
+        pickle_stan_model(path, decoder)
+        
+def pickle_stan_model(path, decoder='utf-8'):
+    name, ext = os.path.splitext(path)
+    with open(path, 'rb') as f:
+        s = f.read().decode(decoder)
+    newname = name + '.pkl'
+    sm = ps.StanModel(model_code=s)
+    with open(newname, 'wb') as f:
+        pickle.dump(sm, f)
+    return newname
 
 def h2(p):
     return -p*np.log2(p) - (1 - p)*np.log2(1 - p)

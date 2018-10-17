@@ -7,7 +7,6 @@ from sklearn import discriminant_analysis as da
 from sklearn.decomposition import PCA
 from dPCA.dPCA import dPCA
 import string, itertools
-import pystan as ps
 import os
 
 ### ORGANIZE SPIKES ###
@@ -721,8 +720,10 @@ def fit_glms(data, conds, use_stan=False, demean=False, z_score=False,
         coeffs_pop[i] = cs
     return model_pop, coeffs_pop
 
-stan_file_trunk = '/Users/wjj/Dropbox/research/uc/freedman/analysis/general/'
-stan_file_gaussian = os.path.join(stan_file_trunk, 'glm_fitting.stan')
+stan_file_trunk = ('/Users/wjj/Dropbox/research/uc/freedman/analysis/general/'
+                   'stan_models/')
+stan_file_glm_mean = os.path.join(stan_file_trunk, 'glm_fitting.pkl')
+stan_file_glm_nomean = os.path.join(stan_file_trunk, 'glm_fitting_nomean.pkl')
 
 def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
                              stan_iters=10000, stan_file=stan_file_gaussian,
@@ -770,11 +771,17 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
     coeffs = np.zeros((data.shape[0], conds.shape[1] + coeff_add))    
     for t in range(data.shape[0]):
         if use_stan:
+            conds = conds.astype(int)
+            if demean:
+                sf = stan_file_glm_nomean
+            else:
+                sf = stan_file_glm_mean
             stan_data = {'N':data.shape[1], 'K':conds.shape[1], 'x':conds, 
                          'y':data[t, :]}
-            m = ps.stan(file=stan_file, data=stan_data, iter=stan_iters, 
-                        chains=stan_chains)
-            coeffs[t] = m.get_posterior_mean()[:conds.shape[1]+1, 0]
+            sm = pickle.load(open(sf, 'rb'))
+            m = sm.sampling(data=stan_data, iter=stan_iters, 
+                            chains=stan_chains)
+            coeffs[t] = m.get_posterior_mean()[:conds.shape[1], 0]
         else:
             m = linear_model.Lasso(fit_intercept=fit_inter, alpha=alpha)
             m.fit(conds, data[t, :])
