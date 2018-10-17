@@ -598,7 +598,7 @@ def _generate_factor_labels(factors, labels=None, interactions=(),
 
 def _generate_cond_refs(labels, comb, cond_labels, ind_sizes):
     labs = np.zeros(len(labels))
-    prod_size = np.product(ind_sizes)
+    prod_size = np.sum(ind_sizes)
     for i, l in enumerate(labels):
         if i >= prod_size:
             prod = [labs[:prod_size][labels.index(x)] for x in l]
@@ -617,7 +617,7 @@ def _generate_cond_refs(labels, comb, cond_labels, ind_sizes):
     return labs
 
 def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
-                    double_factors=None):
+                    double_factors=None, full_interactions=False):
     """
     Format array data for production of (generalized) linear models.
 
@@ -648,6 +648,8 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
         An array of shape (N, K*(F_1 + ... + F_C), F_1*...*F_C) with the 
         conditions to be fit to. 
     """
+    if full_interactions:
+        interactions = u.generate_all_combinations(len(data.shape) - 3, 2)
     n_trials = data.shape[0]*np.sum(data.shape[3:])
     factors = list(data.shape[3:])
     for sc in single_conds:
