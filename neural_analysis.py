@@ -368,12 +368,12 @@ def _array_format_helper(data, require_trials, shape=(), inds=(),
     try:
         ks = list(data.keys())
         ts = data[ks[0]].shape[1]
-        mkb = np.array([data[ks[0]].shape[0] > require_trials for k in ks])
+        mkb = np.array([data[k].shape[0] >= require_trials for k in ks])
         datarr = np.zeros((require_trials, len(ks), ts) + shape)
         for j, k in enumerate(ks):
             if mkb[j]:
                 ref = (slice(0, require_trials), j, slice(0, ts)) + inds
-                data_samp = u.resample_on_axis(data[k], require_trials, axis=0, 
+                data_samp = u.resample_on_axis(data[k], require_trials, axis=0,
                                                with_replace=with_replace)
                 datarr[ref] = data_samp
     except:
