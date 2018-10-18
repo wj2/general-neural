@@ -6,7 +6,8 @@ from sklearn import svm, linear_model
 from sklearn import discriminant_analysis as da
 from sklearn.decomposition import PCA
 from dPCA.dPCA import dPCA
-import string, itertools
+import itertools as it
+import string
 import os
 
 ### ORGANIZE SPIKES ###
@@ -394,7 +395,7 @@ def _array_format_helper(data, require_trials, shape=(), inds=(),
 def angle_distribution(vecs, axis=0, degrees=True):
     vecs = np.swapaxes(vecs, axis, 0)
     n_vecs = vecs.shape[0]
-    pairs = list(itertools.combinations(range(n_vecs), 2))
+    pairs = list(it.combinations(range(n_vecs), 2))
     angs = np.zeros(len(pairs))
     for i, p in enumerate(pairs):
         angs[i] = u.vector_angle(vecs[p[0]], vecs[p[1]], degrees=degrees)
@@ -447,7 +448,7 @@ def compare_angles_tc(vs1, vs2, degrees=True, within_samp=False, shuff=False):
         assert(vs1.shape[0] == vs2.shape[0])
         pairs = list(zip(range(vs1.shape[0]), range(vs2.shape[0])))
     else:
-        pairs = list(itertools.product(range(vs1.shape[0]), 
+        pairs = list(it.product(range(vs1.shape[0]), 
                                        range(vs2.shape[0])))
     n_pairs = len(pairs)
     comps = np.zeros((n_pairs, vs1.shape[1]))
@@ -567,35 +568,32 @@ def _generate_label_list(n_factors, ref_string=string.ascii_lowercase):
 def _generate_interaction_terms(inter, labels, with_replace=True):
     x = list(filter(lambda x: x[0] in inter, labels))
     if with_replace:
-        combos = list(itertools.combinations_with_replacement(x, 
+        combos = list(it.combinations_with_replacement(x, 
                                                               len(inter)))
     else:
-        combos = list(itertools.combinations(x, len(inter)))
+        combos = list(it.combinations(x, len(inter)))
     return combos
 
 def _generate_factor_labels(factors, labels=None, interactions=(),
-                            double_factors=None):
+                            double_factors=None, factor_labels=None):
     if labels is None:
         labels = _generate_label_list(len(factors))
     if double_factors is None:
         double_factors = len(factors)*(True,)
+    if factor_labels is None:
+        factor_labels = [list(range(f)) for f in factors]
     full_labels = []
-    for i, f in enumerate(factors):
-        if f == 1:
-            full_labels.append((labels[i],))
-        else:
-            for j in range(f):
-                l = (labels[i], str(j))
-                full_labels.append(l)
+    factor_singles = [list(it.product((l,), factor_labels[i]))
+                      for i, l in enumerate(labels)]
+    for x in factor_singles:
+        full_labels = full_labels + x
     for inter in interactions:
-        lab_inter = [labels[x] for x in inter]
-        wr = np.product([double_factors[i] for i in inter])
-        new_terms = _generate_interaction_terms(lab_inter, full_labels,
-                                                with_replace=wr)
+        singles = [factor_singles[i] for i in inter]
+        new_terms = list(it.product(*singles))
         full_labels = full_labels + new_terms
-    return full_labels, labels
+    return full_labels, labels, factor_labels
 
-def _generate_cond_refs(labels, comb, cond_labels, ind_sizes):
+def _generate_cond_refs(labels, comb, cond_labels, ind_sizes, factor_labels):
     labs = np.zeros(len(labels))
     prod_size = np.sum(ind_sizes)
     for i, l in enumerate(labels):
@@ -605,7 +603,7 @@ def _generate_cond_refs(labels, comb, cond_labels, ind_sizes):
         else:
             ind = cond_labels.index(l[0])
             x = comb[ind]
-            if len(l) > 1 and x == int(l[1]):
+            if len(l) > 1 and x == factor_labels[ind].index(l[1]):
                 labs[i] = 1
             elif len(l) > 1:
                 labs[i] = 0
@@ -615,8 +613,9 @@ def _generate_cond_refs(labels, comb, cond_labels, ind_sizes):
                 labs[i] = -1
     return labs
 
-def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
-                    double_factors=None, full_interactions=False):
+def condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
+                   double_factors=None, full_interactions=False,
+                   factor_labels=None):
     """
     Format array data for production of (generalized) linear models.
 
@@ -649,20 +648,20 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
     """
     if full_interactions:
         interactions = u.generate_all_combinations(len(data.shape) - 3, 2)
-    n_trials = data.shape[0]*np.sum(data.shape[3:])
+    n_trials = data.shape[0]*np.product(data.shape[3:])
     factors = list(data.shape[3:])
-    for sc in single_conds:
-        factors[sc] = 1
-    labels, cond_labels = _generate_factor_labels(factors, cond_labels, 
-                                                  interactions, 
-                                                  double_factors=double_factors)
+    out = _generate_factor_labels(factors, cond_labels, 
+                                  interactions,
+                                  factor_labels=factor_labels,
+                                  double_factors=double_factors)
+    labels, cond_labels, factor_labels = out
     n_factors = len(labels)
     format_data = np.zeros((data.shape[2], data.shape[1], n_trials))
     format_cond = np.zeros((data.shape[1], n_trials, n_factors))
     for i in range(data.shape[1]):
         neur = data[:, i]
         ind_sizes = data.shape[3:]
-        inds = list(itertools.product(*[range(x) for x in ind_sizes]))
+        inds = list(it.product(*[range(x) for x in ind_sizes]))
         for j in range(n_trials):
             comb_ind = int(np.floor(j/data.shape[0]))
             comb = inds[comb_ind]
@@ -670,9 +669,12 @@ def _condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
             data_ind = (trl_ind, i, slice(0, data.shape[2])) + comb
             format_data[:, i, j] = data[data_ind]
             cs = _generate_cond_refs(labels, comb, cond_labels, 
-                                     ind_sizes)
+                                     ind_sizes, factor_labels)
             format_cond[i, j] = cs
-    return format_data, format_cond
+    cm = format_cond[0].sum(axis=0) > 0
+    format_cond = format_cond[:, :, cm]
+    labels = np.array(labels)[cm]
+    return format_data, format_cond, labels
 
 def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False,
                              demean=False, z_score=False, alpha=None):
@@ -713,6 +715,7 @@ def fit_glms(data, conds, use_stan=False, demean=False, z_score=False,
     coeffs_pop = np.zeros((data.shape[1], data.shape[0],
                            conds.shape[2] + coeff_add))
     for i, neur in enumerate(conds):
+        print('neur {} / {}'.format(i + 1, len(conds)))
         ms, cs = generalized_linear_model(data[:, i, :], neur, 
                                           use_stan=use_stan, demean=demean,
                                           z_score=z_score, alpha=alpha)
@@ -726,7 +729,7 @@ stan_file_glm_mean = os.path.join(stan_file_trunk, 'glm_fitting.pkl')
 stan_file_glm_nomean = os.path.join(stan_file_trunk, 'glm_fitting_nomean.pkl')
 
 def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
-                             stan_iters=10000, stan_file=stan_file_gaussian,
+                             stan_iters=10000, stan_file=stan_file_glm_mean,
                              demean=False, z_score=False, alpha=None):
     """
     Fit a generalized linear model to data.
@@ -770,26 +773,30 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
             alpha = .1
     coeffs = np.zeros((data.shape[0], conds.shape[1] + coeff_add))    
     for t in range(data.shape[0]):
-        if use_stan:
-            conds = conds.astype(int)
-            if demean:
-                sf = stan_file_glm_nomean
+        if not np.all(np.isnan(data[t, :])):
+            if use_stan:
+                conds = conds.astype(int)
+                if demean:
+                    sf = stan_file_glm_nomean
+                else:
+                    sf = stan_file_glm_mean
+                stan_data = {'N':data.shape[1], 'K':conds.shape[1], 'x':conds, 
+                             'y':data[t, :]}
+                sm = pickle.load(open(sf, 'rb'))
+                m = sm.sampling(data=stan_data, iter=stan_iters, 
+                                chains=stan_chains)
+                coeffs[t] = m.get_posterior_mean()[:conds.shape[1], 0]
             else:
-                sf = stan_file_glm_mean
-            stan_data = {'N':data.shape[1], 'K':conds.shape[1], 'x':conds, 
-                         'y':data[t, :]}
-            sm = pickle.load(open(sf, 'rb'))
-            m = sm.sampling(data=stan_data, iter=stan_iters, 
-                            chains=stan_chains)
-            coeffs[t] = m.get_posterior_mean()[:conds.shape[1], 0]
+                m = linear_model.Lasso(fit_intercept=fit_inter, alpha=alpha)
+                m.fit(conds, data[t, :])
+                if demean:
+                    coeffs[t] = m.coef_
+                else:
+                    coeffs[t, 0] = m.intercept_
+                    coeffs[t, 1:] = m.coef_
         else:
-            m = linear_model.Lasso(fit_intercept=fit_inter, alpha=alpha)
-            m.fit(conds, data[t, :])
-            if demean:
-                coeffs[t] = m.coef_
-            else:
-                coeffs[t, 0] = m.intercept_
-                coeffs[t, 1:] = m.coef_
+            m = None
+            coeffs[t, :] = np.nan
         models.append(m)
     return models, coeffs
     
