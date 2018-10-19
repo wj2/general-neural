@@ -350,7 +350,6 @@ def _set_violin_color(vp, color):
         b.set_facecolor(color)
         b.set_edgecolor(color)
 
-
 def _clean_plot(ax, i, ticks=True, spines=True):
     if spines:
         ax.spines['top'].set_visible(False)
@@ -386,6 +385,31 @@ def _preprocess_glm(coeffs, ps, subgroups=None, p_thr=.05, eps=None):
         mask = np.any(use_pop > eps, axis=1)
         use_pop = use_pop[mask]
     return use_pop, subgroups, all_use, use_ps
+
+def plot_stanglm_selectivity_scatter(ms, params, labels, ax=None, figsize=None,
+                                     time_ind=None):
+    if ax is None:
+        f = plt.figure(figsize=figsize)
+        ax = f.add_subplot(1,1,1)
+    if time_ind is not None:
+        pairs = np.zeros((len(ms), len(params)))
+    for i, m in enumerate(ms):
+        if time_ind is not None and m[time_ind] is not None:
+            pm = m[time_ind].get_posterior_mean()[params, :]
+            pairs[i] = np.mean(pm, axis=1)
+        elif m[0] is not None:
+            n_pairs = np.zeros((len(m), len(params)))
+            for j, t in enumerate(m):
+                n_pair = t.get_posterior_mean()[params, :]
+                n_pairs[j] = np.mean(n_pair, axis=1)
+            ax.plot(n_pairs[:, 0], n_pairs[:, 1], 'o')
+        elif time_ind is not None:
+            pairs[i] = np.nan
+    if time_ind is not None:
+        ax.plot(pairs[:, 0], pairs[:, 1], 'o')
+    ax.set_xlabel(labels[params[0]])
+    ax.set_ylabel(labels[params[1]])
+    return ax
 
 def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
                                   boots=1000, figsize=None, colors=None,
