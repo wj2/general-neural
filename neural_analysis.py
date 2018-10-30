@@ -673,7 +673,7 @@ def condition_mask(data, cond_labels=None, single_conds=(), interactions=(),
             format_cond[i, j] = cs
     cm = format_cond[0].sum(axis=0) > 0
     format_cond = format_cond[:, :, cm]
-    labels = np.array(labels)[cm]
+    labels = np.array(labels, dtype=object)[cm]
     return format_data, format_cond, labels
 
 def generate_null_glm_coeffs(data, conds, perms=100, use_stan=False,
@@ -786,6 +786,9 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
                 m = sm.sampling(data=stan_data, iter=stan_iters, 
                                 chains=stan_chains)
                 coeffs[t] = m.get_posterior_mean()[:conds.shape[1], 0]
+                if not u.stan_model_valid(m):
+                    m = None
+                    coeffs[t] = np.nan
             else:
                 m = linear_model.Lasso(fit_intercept=fit_inter, alpha=alpha)
                 m.fit(conds, data[t, :])
