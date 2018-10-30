@@ -387,29 +387,60 @@ def _preprocess_glm(coeffs, ps, subgroups=None, p_thr=.05, eps=None):
     return use_pop, subgroups, all_use, use_ps
 
 def plot_stanglm_selectivity_scatter(ms, params, labels, ax=None, figsize=None,
-                                     time_ind=None):
+                                     time_ind=None, param_funcs=None,
+                                     check_valid=False, format_labels=True,
+                                     link_string=None, conn=True,
+                                     conn_alpha=.3):
     if ax is None:
         f = plt.figure(figsize=figsize)
         ax = f.add_subplot(1,1,1)
-    if time_ind is not None:
-        pairs = np.zeros((len(ms), len(params)))
+    if param_funcs is None:
+        param_funcs = (lambda x, y: x[y],)*len(params)
+        params = tuple((p,) for p in params)
     for i, m in enumerate(ms):
-        if time_ind is not None and m[time_ind] is not None:
-            pm = m[time_ind].get_posterior_mean()[params, :]
-            pairs[i] = np.mean(pm, axis=1)
-        elif m[0] is not None:
-            n_pairs = np.zeros((len(m), len(params)))
-            for j, t in enumerate(m):
-                n_pair = t.get_posterior_mean()[params, :]
-                n_pairs[j] = np.mean(n_pair, axis=1)
-            ax.plot(n_pairs[:, 0], n_pairs[:, 1], 'o')
-        elif time_ind is not None:
-            pairs[i] = np.nan
-    if time_ind is not None:
-        ax.plot(pairs[:, 0], pairs[:, 1], 'o')
-    ax.set_xlabel(labels[params[0]])
-    ax.set_ylabel(labels[params[1]])
+        if time_ind is not None:
+            m = (m[time_ind],)
+        n_pairs = np.zeros((len(m), len(params)))
+        for j, t in enumerate(m):
+            if (t is not None and ((not check_valid)
+                or (check_valid and u.stan_model_valid(t)))):
+                pm = np.mean(t.get_posterior_mean(), axis=1)
+                for k, p in enumerate(params):
+                    n_pairs[j, k] = param_funcs[k](pm, *p)
+            else:
+                n_pairs[j] = np.nan # do I want to set all entries to nan? 
+        l = ax.plot(n_pairs[:, 0], n_pairs[:, 1], 'o')
+        if conn:
+            col = l[0].get_color()
+            ax.plot(n_pairs[:, 0], n_pairs[:, 1], alpha=conn_alpha, color=col,
+                    linewidth=3)
+    if format_labels:
+        ax.set_xlabel(format_lm_label(params[0], labels,
+                                      link_string=link_string))
+        ax.set_ylabel(format_lm_label(params[1], labels,
+                                      link_string=link_string))
+    else:
+        ax.set_xlabel(list(labels[p] for p in params[0]))
+        ax.set_ylabel(list(labels[p] for p in params[1]))
     return ax
+
+def format_lm_label(params, labels, second_only=True, link_string=None,
+                    cat_l_joiner='-', interaction_joiner=' x '):
+    if link_string is None:
+        link_string = ' '.join(('{}',)*len(params))
+    ls = []
+    for i, p in enumerate(params):
+        lg = []
+        for l_groups in labels[p]:
+            if second_only:
+                l = l_groups[1]
+            else:
+                l = cat_l_joiner.join(l_groups)
+            lg.append(l)
+        lg_l = interaction_joiner.join(lg)
+        ls.append(lg_l)
+    full_l = link_string.format(*ls)
+    return full_l            
 
 def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
                                   boots=1000, figsize=None, colors=None,
