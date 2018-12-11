@@ -3,9 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import general.utility as u
 
-def plot_single_units(xs, sus, labels, colors, style=(), show=False,
+def plot_single_units(xs, sus, labels, colors=None, style=(), show=False,
                       errorbar=True, alpha=.5, trial_color=(.8, .8, .8),
-                      trial_style='dashed', trial_struct=None):
+                      trial_style='dashed', trial_struct=None, ax_spec=None,
+                      fs=None, min_trials=None):
     """
     construct a plot according to a particular style
 
@@ -20,22 +21,99 @@ def plot_single_units(xs, sus, labels, colors, style=(), show=False,
     style - matplotlib style to use for the plots
     """
     with plt.style.context(style):
-        for k in sus[0].keys():
-            f = plt.figure()
-            ax = f.add_subplot(1, 1, 1)
+        if colors is None:
+            colors = (None,)*len(sus)
+        if ax_spec is None:
+            ax_spec = (1,1,1)
+        if fs is None:
+            fs = list([plt.figure() for k in sus[0].keys()])
+        axs = list([f.add_subplot(*ax_spec) for f in fs])
+        for j, k in enumerate(sus[0].keys()):
             for i, c in enumerate(sus):
                 ax = plot_trace_werr(xs, sus[i][k], colors[i], label=labels[i],
                                      show=False, errorbar=True, alpha=alpha,
-                                     error_func=sem, title=k, ax=ax)
+                                     error_func=sem, title=k, ax=axs[j])
             if trial_struct is not None:
                 plot_trial_structure(trial_struct['transitions'],
                                      trial_struct['labels'],
                                      color=trial_color,
                                      linestyle=trial_style,
-                                     ax=ax)
+                                     ax=axs[j])
     if show:
         plt.show(block=False)
-    return f
+    return fs
+
+
+def plot_population_average(xs, sus, labels, colors=None, style=(),
+                            errorbar=True, alpha=.5, trial_color=(.8, .8, 8),
+                            trial_style='dashed', trial_struct=None,
+                            ax_spec=None, fs=None, boots=1000,
+                            subsample_min=None, include_min=None):
+    with plt.style.context(style):
+        if colors is None:
+            colors = (None,)*len(sus)
+        if ax_spec is None:
+            ax_spec = (1,1,1)
+        if fs is None:
+            fs = plt.figure()
+        ax = fs.add_subplot(*ax_spec)
+        for i, c in enumerate(sus):
+            su_avgs = np.zeros((boots, len(xs)))
+            for y in range(boots):
+                su_ms = np.zeros((len(c.keys()), len(xs)))
+                for j, k in enumerate(c.keys()):
+                    if subsample_min is not None:
+                        n_samps = subsample_min
+                    elif include_min is not None:
+                        n_samps = max(c[k].shape[0], include_min)
+                    else:
+                        n_samps = c[k].shape[0]
+                    spks = u.resample_on_axis(c[k], n_samps, axis=0,
+                                              with_replace=True)
+                    su_ms[j] = np.nanmean(spks, axis=0)
+                su_avgs[y] = np.nanmean(su_ms, axis=0)
+                kb = ~np.isnan(su_ms[:, 0])
+            if i == 0:
+                mkb = kb
+            else:
+                mkb = mkb*kb
+            print(np.sum(mkb))
+            _ = plot_trace_werr(xs, su_avgs, colors[i], label=labels[i],
+                                show=False, errorbar=True, alpha=alpha,
+                                error_func=conf95_interval,
+                                ax=ax)
+    return fs        
+
+def plot_collection_views(xs_l, sus_l, labels, colors=None, style=(),
+                          errorbar=True, alpha=.5,
+                          trial_color=(.8, .8, .8), trial_style='dashed',
+                          trial_struct=None, ax_gs=None,
+                          add_expansion=True, plotter_func=None):
+    fig_list = []
+    n_views = len(xs_l)
+    if ax_gs is None:
+        ax_gs = list((n_views, 1, i + 1) for i in range(n_views))
+    elif add_expansion:
+        ax_gs = list((x,) for x in ax_gs)
+    if colors is None:
+        colors = (None,)*n_views
+    if trial_struct is None:
+        trial_struct = (None,)*n_views
+    if plotter_func is None:
+        plotter_func = plot_single_units
+    for i, sus in enumerate(sus_l):
+        xs = xs_l[i]
+        labs = labels[i]
+        cols = colors[i]
+        ts = trial_struct[i]
+        if i == 0:
+            fs = None
+        fs = plotter_func(xs, sus, labs, cols, style, errorbar=errorbar,
+                          alpha=alpha, trial_color=trial_color,
+                          trial_style=trial_style,
+                          trial_struct=trial_struct[i], ax_spec=ax_gs[i],
+                          fs=fs)
+    return fs    
                 
 def sem(dat, axis=0):
     err_1d = np.nanstd(dat, axis=axis)/np.sqrt(dat.shape[axis] - 1)
@@ -156,7 +234,8 @@ def plot_smooth_cumu(dat, bins='auto', color=None, label='', title='',
 def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
-                    fill=True, log_x=False, log_y=False, **kwargs):
+                    fill=True, log_x=False, log_y=False, line_alpha=1,
+                    **kwargs):
     with plt.style.context(style):
         if ax is None:
             f = plt.figure()
@@ -175,7 +254,9 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
             xs = central_tendency(xs_orig, axis=0)
         else:
             xs = xs_orig
-        trl = ax.plot(xs, tr, label=label, color=color, **kwargs)
+        trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha,
+                      **kwargs)
+        alpha = min(line_alpha, alpha)
         if len(dat.shape) > 1:
             if color is None:
                 color = trl[0].get_color()
@@ -350,16 +431,23 @@ def _set_violin_color(vp, color):
         b.set_facecolor(color)
         b.set_edgecolor(color)
 
-def _clean_plot(ax, i, ticks=True, spines=True):
+def clean_plot(ax, i, max_i=None, ticks=True, spines=True, horiz=True):
     if spines:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-    if i > 0:
-        if spines:
-            ax.spines['left'].set_visible(False)
-        if ticks:
-            plt.setp(ax.get_yticklabels(), visible=False)
-            ax.yaxis.set_tick_params(size=0)
+    if horiz:
+        if i > 0:
+            if spines:
+                ax.spines['left'].set_visible(False)
+            if ticks:
+                plt.setp(ax.get_yticklabels(), visible=False)
+                ax.yaxis.set_tick_params(size=0)
+    else:
+        if max_i is not None and i < max_i:
+            if ticks:
+                plt.setp(ax.get_xticklabels(), visible=False)
+                ax.xaxis.set_tick_params(size=0)
+                
         
 def plot_conf_interval(x, y_distr, ax, color=None, error_func=conf95_interval,
                        central_tend=np.nanmedian):
@@ -397,6 +485,7 @@ def plot_stanglm_selectivity_scatter(ms, params, labels, ax=None, figsize=None,
     if param_funcs is None:
         param_funcs = (lambda x, y: x[y],)*len(params)
         params = tuple((p,) for p in params)
+    all_pairs = np.zeros((len(ms), len(ms[0]), len(params)))
     for i, m in enumerate(ms):
         if time_ind is not None:
             m = (m[time_ind],)
@@ -408,7 +497,8 @@ def plot_stanglm_selectivity_scatter(ms, params, labels, ax=None, figsize=None,
                 for k, p in enumerate(params):
                     n_pairs[j, k] = param_funcs[k](pm, *p)
             else:
-                n_pairs[j] = np.nan # do I want to set all entries to nan? 
+                n_pairs[j] = np.nan
+        all_pairs[i] = n_pairs
         l = ax.plot(n_pairs[:, 0], n_pairs[:, 1], 'o')
         if conn:
             col = l[0].get_color()
@@ -422,7 +512,7 @@ def plot_stanglm_selectivity_scatter(ms, params, labels, ax=None, figsize=None,
     else:
         ax.set_xlabel(list(labels[p] for p in params[0]))
         ax.set_ylabel(list(labels[p] for p in params[1]))
-    return ax
+    return ax, all_pairs
 
 def format_lm_label(params, labels, second_only=True, link_string=None,
                     cat_l_joiner='-', interaction_joiner=' x '):
@@ -478,7 +568,7 @@ def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
         if group_term_labels is not None:
             ax.set_xticks(sg)
             ax.set_xticklabels(group_term_labels[i], rotation=label_rotation)
-        _clean_plot(ax, i, ticks=True, spines=True)
+        clean_plot(ax, i, ticks=True, spines=True)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
         if group_xlabels is not None:
@@ -521,7 +611,7 @@ def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
         if (not combined_fig) and group_term_labels is not None:
             ax.set_xticks(sg)
             ax.set_xticklabels(group_term_labels[i], rotation=label_rotation)
-        _clean_plot(ax, i, ticks=True, spines=True)
+        clean_plot(ax, i, ticks=True, spines=True)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
         if (not combined_fig) and group_xlabels is not None:
@@ -558,7 +648,7 @@ def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
         if group_term_labels is not None:
             ax.set_xticks(sg)
             ax.set_xticklabels(group_term_labels[i], rotation=label_rotation)
-        _clean_plot(ax, i, ticks=True, spines=False)
+        clean_plot(ax, i, ticks=True, spines=False)
         if i == 0 and ylabel is not None:
             ax.set_ylabel(ylabel)
         if group_xlabels is not None:

@@ -46,11 +46,12 @@ def collect_ISIs(spts, binsize, bounds, binstep=None, accumulate=False):
         rel_spks = spts[np.logical_and(spts >= beg, spts < end)]
         isis[i] = np.diff(rel_spks)
     return isis
-        
+
 def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime, 
                           binsize, binstep=None, cumulative=False, 
                           drunfield='datanum', spikefield='spike_times',
-                          func_out=(bin_spiketimes, None)):
+                          func_out=(bin_spiketimes, None), min_trials=None,
+                          modulated_dict=None, min_spks=None):
     """
     Converts a sequence of MonkeyLogic trials over multiple days (with 
     associated neurons) into PSTHs oriented to markerfunc
@@ -92,8 +93,13 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
             for k, trial in enumerate(udt):
                 for l, neurname in enumerate(trial[spikefield].keys()):
                     key = (run, neurname)
-                    if not np.isnan(marks[k]):
-                        spikes = trial[spikefield][neurname] - marks[k]
+                    spikes = trial[spikefield][neurname]
+                    if min_spks is not None:
+                        enough_spks = len(spikes) >= min_spks
+                    else:
+                        enough_spks = True
+                    if not np.isnan(marks[k]) and enough_spks:
+                        spikes = spikes - marks[k]
                         psth = spk_func(spikes, binsize, 
                                         (pretime, posttime), binstep,
                                         accumulate=cumulative)
@@ -101,9 +107,75 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
                         psth = np.ones_like(xs)
                         psth[:] = np.nan
                     neurs[key][k, :] = psth
+            for key in neurs.keys():
+                all_psth = neurs[key]
+                mask = np.logical_not(np.all(np.isnan(all_psth), axis=1))
+                keep_psth = all_psth[mask]
+                neurs[key] = keep_psth
         all_discs.append(neurs)
+    if modulated_dict is not None:
+        all_discs = filter_modulated(all_discs, modulated_dict)
+    if min_trials is not None:
+        all_discs = filter_min_trials(all_discs, min_trials)
     return all_discs, xs
-        
+
+def filter_trial_selective(data, pre_marker, pre_offset, post_marker,
+                           post_offset=0, binsize=500, sig_thr=.05, boots=1000,
+                           drunfield='datanum', spike_field='spike_times',
+                           errorfield='TrialError',
+                           noerr_code=0):
+    trl_select = u.make_trial_constraint_func((errorfield,),
+                                              (noerr_code,), 
+                                              (np.equal,),
+                                              combfunc=np.logical_and)  
+    pre_timer = u.make_time_field_func(pre_marker)
+    ns_pre, xs_pre = organize_spiking_data(data, (trl_select,), (pre_timer,),
+                                           pre_offset, binsize + pre_offset,
+                                           binsize + 1)
+
+    post_timer = u.make_time_field_func(post_marker)
+    ns_post, xs_post = organize_spiking_data(data, (trl_select,), (post_timer,),
+                                             post_offset, binsize + post_offset,
+                                             binsize + 1)
+    pre = ns_pre[0]
+    post = ns_post[0]
+    modulated = {}
+    for k in pre.keys():
+        num_trls = pre[k].shape[0]
+        pre_k = pre[k]
+        post_k = post[k]
+        diffs = np.zeros(boots)
+        for i in range(boots):
+            pre_samp = u.resample_on_axis(pre[k], num_trls, axis=0)
+            post_samp = u.resample_on_axis(post[k], num_trls, axis=0)
+            diffs[i] = np.nanmean(pre_samp) - np.nanmean(post_samp)
+        high_p = np.sum(diffs > 0)/boots
+        low_p = 1 - high_p
+        p = min(high_p, low_p)
+        modulated[k] = p < sig_thr/2
+    return modulated
+
+def filter_modulated(all_discs, md):
+    for k in list(all_discs[0].keys()):
+        if not md[k]:
+            for i in range(len(all_discs)):
+                all_discs[i].pop(k)
+                all_discs[i] = all_discs[i]
+    return all_discs
+
+def filter_min_trials(all_discs, min_trials):
+    for k in list(all_discs[0].keys()):
+        include = np.zeros(len(all_discs))
+        for i in range(len(all_discs)):
+            n_trls = all_discs[i][k].shape[0]
+            include[i] = n_trls >= min_trials
+        final_include = np.product(include)
+        if not final_include:
+            for j in range(len(all_discs)):
+                all_discs[j].pop(k)
+                all_discs[j] = all_discs[j]
+    return all_discs
+
 def fano_factor_tc(spks_tc, boots=1000, spks_per_s=False, window_size=None):
     ffs = np.zeros((boots, spks_tc.shape[-1]))
     ms = np.zeros_like(ffs)
@@ -239,13 +311,15 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
 
 def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  with_replace=False, shuff_labels=False, stability=False,
-                 kernel='linear', penalty=1, format_=True):
-    spec_params = {'C':penalty, 'kernel':kernel}
-    model = svm.SVC
+                 kernel='linear', penalty=1, format_=True, model=svm.LinearSVC,
+                 collapse_time=False, regularizer='l1'):
+    # spec_params = {'C':penalty, 'kernel':kernel, 'penalty':'l1'}
+    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':False}
     out = decoding(cat1, cat2, leave_out=leave_out, 
                    require_trials=require_trials, resample=resample,
                    with_replace=with_replace, shuff_labels=shuff_labels,
-                   stability=stability, params=spec_params, format_=format_)
+                   stability=stability, params=spec_params, format_=format_,
+                   model=model, collapse_time=collapse_time)
     return out
 
 def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
@@ -274,7 +348,7 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
         cat1_samp = sample_trials_svm(cat1_f, require_trials, with_replace)
         cat2_samp = sample_trials_svm(cat2_f, require_trials, with_replace)
         out = _fold_model(cat1_samp, cat2_samp, leave_out, model=model,
-                         shuff_labels=shuff_labels, stability=stability, 
+                          shuff_labels=shuff_labels, stability=stability, 
                           params=params, collapse_time=collapse_time)
         tcs[i], _, _, ms[i] = out
     return tcs, cat1_f, cat2_f, ms
@@ -352,7 +426,7 @@ def array_format(data, require_trials, with_replace=True, normalize=None,
     -------
     out : ndarray
         Array of shape (require_trials, N, T, ...) where N is the number of 
-        neurons with trials > require_trials for each condition and T is the
+        neurons with trials >= require_trials for each condition and T is the
         number of timepoints in the original data. The rest of the dimensions
         come from the structure of the input. 
     """
@@ -376,7 +450,7 @@ def _array_format_helper(data, require_trials, shape=(), inds=(),
                 data_samp = u.resample_on_axis(data[k], require_trials, axis=0,
                                                with_replace=with_replace)
                 datarr[ref] = data_samp
-    except:
+    except AttributeError:
         shape = shape + (len(data),)
         for i, ent in enumerate(data):
             ent_inds = inds + (i,)
@@ -582,11 +656,10 @@ def _generate_factor_labels(factors, labels=None, interactions=(),
         double_factors = len(factors)*(True,)
     if factor_labels is None:
         factor_labels = [list(range(f)) for f in factors]
-    full_labels = []
     factor_singles = [list(it.product((l,), factor_labels[i]))
                       for i, l in enumerate(labels)]
-    for x in factor_singles:
-        full_labels = full_labels + x
+    full_labels = list(it.chain(*factor_singles))
+    full_labels = list([(x,) for x in full_labels])
     for inter in interactions:
         singles = [factor_singles[i] for i in inter]
         new_terms = list(it.product(*singles))
@@ -598,14 +671,14 @@ def _generate_cond_refs(labels, comb, cond_labels, ind_sizes, factor_labels):
     prod_size = np.sum(ind_sizes)
     for i, l in enumerate(labels):
         if i >= prod_size:
-            prod = [labs[:prod_size][labels.index(x)] for x in l]
+            prod = [labs[:prod_size][labels.index((x,))] for x in l]
             labs[i] = np.product(prod)
         else:
-            ind = cond_labels.index(l[0])
+            ind = cond_labels.index(l[0][0])
             x = comb[ind]
-            if len(l) > 1 and x == factor_labels[ind].index(l[1]):
+            if len(l[0]) > 1 and x == factor_labels[ind].index(l[0][1]):
                 labs[i] = 1
-            elif len(l) > 1:
+            elif len(l[0]) > 1:
                 labs[i] = 0
             elif x == 1:
                 labs[i] = 1
@@ -715,7 +788,8 @@ def fit_glms(data, conds, use_stan=False, demean=False, z_score=False,
     coeffs_pop = np.zeros((data.shape[1], data.shape[0],
                            conds.shape[2] + coeff_add))
     for i, neur in enumerate(conds):
-        print('neur {} / {}'.format(i + 1, len(conds)))
+        if use_stan:
+            print('neur {} / {}'.format(i + 1, len(conds)))
         ms, cs = generalized_linear_model(data[:, i, :], neur, 
                                           use_stan=use_stan, demean=demean,
                                           z_score=z_score, alpha=alpha)

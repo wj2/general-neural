@@ -228,7 +228,7 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
 
 def load_collection_bhvmats(datadir, params, expr='.*\.mat', 
                             log_suffix='_imglog.txt', make_log_name=True,
-                            trial_cutoff=300, max_trials=None):
+                            trial_cutoff=300, max_trials=None, dates=None):
     dirfiles = os.listdir(datadir)
     matchfiles = filter(lambda x: re.match(expr, x) is not None, dirfiles)
     ld = {}
@@ -242,7 +242,8 @@ def load_collection_bhvmats(datadir, params, expr='.*\.mat',
         full_mf = os.path.join(datadir, mf)
         try:
             bhv, ld = load_bhvmat_imglog(full_mf, imglog, datanum=i, 
-                                         prevlog_dict=ld, **params)
+                                         prevlog_dict=ld, dates=dates,
+                                         **params)
             print('loaded')
             if max_trials is not None:
                 bhv = bhv[:max_trials]
@@ -459,173 +460,7 @@ def load_separate(paths, pattern=None, varname='x'):
             alldata = d
         else:
             alldata = np.concatenate((alldata, d), axis=0)
-    return alldata
-
-def load_krithika_itc(path, path_log=None, noerr=True,
-                      trial_field='task_cond_num', prevlog_dict=None,
-                      fixation_on=35, fixation_off=36, start_trial=9, datanum=0, 
-                      lever_release=4, lever_hold=7, reward_given=48,
-                      end_trial=18, fixation_acq=8, left_img_on=191,
-                      left_img_off=192, right_img_on=195, right_img_off=196,
-                      default_wid=6, default_hei=6, default_img1_xy=(-5, 0),
-                      default_img2_xy=(5, 0), spks_buff=1000,
-                      plt_conds=(7,8,9,10,11,12,13,14,15,16), 
-                      sdms_conds=(1,2,3,4,5,6,7,8), ephys=False,
-                      centimgon=25, centimgoff=26, filtwin=40, thr=.1,
-                      skips=1, eyedata_len=500):
-    if prevlog_dict is None:
-        log_dict = {}
-    else:
-        log_dict = prevlog_dict
-    data = sio.loadmat(path)
-    data = data['x']
-    bhv = data
-    if path_log is not None:
-        log = open(path_log, 'rb').readlines()
-    else:
-        log = None
-    trls = bhv[trial_field][0, 0]
-    fields = ['trial_type', 'TrialError', 'block_number', 'code_numbers',
-              'code_times', 'trial_starts', 'datafile', 'datanum',
-              'samp_img_on','samp_img_off','trialnum','image_nos','leftimg',
-              'rightimg', 'leftviews', 'rightviews','fixation_on','fixation_off',
-              'lever_release','lever_hold','reward_time','ISI_start',
-              'ISI_end','fixation_acquired','left_img_on','left_img_off',
-              'right_img_on','right_img_off','eyepos','spike_times','LFP',
-              'task_cond_num', 'img1_xy', 'img2_xy', 'img_wid', 'img_hei',
-              'test_array_on', 'test_array_off', 'left_first', 'right_first',
-              'first_sacc_time', 'angular_separation']
-    dt = {'names':fields, 'formats':['O']*len(fields)}
-    x = np.zeros(len(trls), dtype=dt)
-    for i, t in enumerate(trls):
-        x[i]['code_numbers'] = bhv['code_numbers'][0, i]
-        x[i]['code_times'] = bhv['code_times'][0, i]
-        x[i]['trial_starts'] = get_bhvcode_time(start_trial, 
-                                                x[i]['code_numbers'],
-                                                x[i]['code_times'], first=True)
-        x[i]['ISI_end'] = get_bhvcode_time(start_trial, x[i]['code_numbers'],
-                                           x[i]['code_times'], first=True)
-        x[i]['code_times'] = x[i]['code_times'] - x[i]['trial_starts']
-        if ephys:
-            neurs = data['spike_times'][0, i][0]
-            x[i]['spike_times'] = dict((j, neurs[j]) for j in range(len(neurs)))
-        else:
-            x[i]['spike_times'] = None
-        x[i]['trial_type'] = bhv['task_cond_num'][i, 0]
-        x[i]['task_cond_num'] = bhv['task_cond_num'][0,0][i, 0]
-        x[i]['TrialError'] = bhv['TrialError'][0,0][i, 0]
-        x[i]['block_number'] = bhv['block_number'][0,0][i, 0]
-        x[i]['ISI_start'] = get_bhvcode_time(end_trial, x[i]['code_numbers'],
-                                             x[i]['code_times'], first=True)
-        x[i]['datafile'] = path.split('/')[-1]
-        x[i]['datanum'] = datanum
-        x[i]['samp_img_on'] = get_bhvcode_time(centimgon,
-                                               x[i]['code_numbers'],
-                                               x[i]['code_times'], first=True)
-        x[i]['samp_img_off'] = get_bhvcode_time(centimgoff,
-                                                x[i]['code_numbers'],
-                                                x[i]['code_times'], first=True)
-        x[i]['test_array_on'] = get_bhvcode_time(centimgon,
-                                                 x[i]['code_numbers'],
-                                                 x[i]['code_times'], 
-                                                 first=False)
-        x[i]['test_array_off'] = get_bhvcode_time(centimgoff,
-                                                  x[i]['code_numbers'],
-                                                  x[i]['code_times'], 
-                                                  first=False)
-        # x[i]['trialnum'] = bhv['TrialNumber'][0,0][i, 0]
-        x[i]['image_nos'] = []
-        if (x[i]['trial_type'] in plt_conds 
-            or x[i]['trial_type'] in sdms_conds) and log is not None:
-            entry1 = log.pop(0)
-            entry1 = entry1.strip(b'\r\n').split(b'\t')
-            tn1, s1, _, cond1, vs1, cat1, img1 = entry1
-            entry2 = log.pop(0)
-            entry2 = entry2.strip(b'\r\n').split(b'\t')
-            tn2, s2, _, cond2, vs2, cat2, img2 = entry2
-            assert tn1 == tn2
-            assert int(tn1) == int(x[i]['trialnum'])
-            img1_n, ext1 = os.path.splitext(img1)
-            img2_n, ext2 = os.path.splitext(img2)
-            log_dict[img1_n] = log_dict.get(img1_n, 0) + 1
-            log_dict[img2_n] = log_dict.get(img2_n, 0) + 1
-            x[i]['leftimg'] = img1_n
-            x[i]['rightimg'] = img2_n
-            x[i]['leftviews'] = log_dict[img1_n]
-            x[i]['rightviews'] = log_dict[img2_n]
-        else:
-            x[i]['leftimg'] = ''
-            x[i]['rightimg'] = ''
-            x[i]['leftviews'] = 0
-            x[i]['rightviews'] = 0
-        x[i]['fixation_on'] = get_bhvcode_time(fixation_on, 
-                                               x[i]['code_numbers'],
-                                               x[i]['code_times'], first=True)
-        x[i]['fixation_off'] = get_bhvcode_time(fixation_off, 
-                                                x[i]['code_numbers'],
-                                                x[i]['code_times'], first=True)
-        x[i]['lever_release'] = get_bhvcode_time(lever_release,
-                                                 x[i]['code_numbers'],
-                                                 x[i]['code_times'], first=True)
-        x[i]['lever_hold'] = get_bhvcode_time(lever_hold,
-                                              x[i]['code_numbers'],
-                                              x[i]['code_times'], first=True)
-        x[i]['reward_time'] = get_bhvcode_time(reward_given,
-                                               x[i]['code_numbers'],
-                                               x[i]['code_times'], first=True)
-        x[i]['fixation_acquired'] = get_bhvcode_time(fixation_acq,
-                                                     x[i]['code_numbers'],
-                                                     x[i]['code_times'], 
-                                                     first=True)
-        x[i]['left_img_on'] = get_bhvcode_time(left_img_on, 
-                                               x[i]['code_numbers'],
-                                               x[i]['code_times'], first=True)
-        x[i]['left_img_off'] = get_bhvcode_time(left_img_off,
-                                                x[i]['code_numbers'],
-                                                x[i]['code_times'], first=True)
-        x[i]['right_img_on'] = get_bhvcode_time(right_img_on, 
-                                                x[i]['code_numbers'],
-                                                x[i]['code_times'], first=True)
-        x[i]['right_img_off'] = get_bhvcode_time(right_img_off,
-                                                 x[i]['code_numbers'],
-                                                 x[i]['code_times'], first=True)
-        ep = bhv['AnalogData'][0,0][0, i]['EyeSignal'][0,0]
-        x[i]['eyepos'] = ep # [int(x[i]['ISI_end']):, :]
-        if ('UserVars' in bhv.dtype.names 
-            and 'img1_xy' in bhv['UserVars'][0,0].dtype.names
-            and bhv['UserVars'][0,0]['img1_xy'].shape[1] > i 
-            and len(bhv['UserVars'][0,0]['img1_xy'][0, i]) > 1):
-            x[i]['img1_xy'] = bhv['UserVars'][0,0]['img1_xy'][0, i]
-            x[i]['img2_xy'] = bhv['UserVars'][0,0]['img2_xy'][0, i]
-        else:
-            x[i]['img1_xy'] = default_img1_xy
-            x[i]['img2_xy'] = default_img2_xy
-        x[i]['angular_separation'] = compute_angular_separation(x[i]['img1_xy'],
-                                                                x[i]['img2_xy'])
-        if ('UserVars' in bhv.dtype.names 
-            and 'img_wid' in bhv['UserVars'][0,0].dtype.names
-            and bhv['UserVars'][0,0]['img_wid'].shape[1] > i):
-            x[i]['img_wid'] = bhv['UserVars'][0,0]['img_wid'][0, i]
-            x[i]['img_hei'] = bhv['UserVars'][0,0]['img_hei'][0, i]
-        else:
-            x[i]['img_wid'] = default_wid
-            x[i]['img_hei'] = default_hei
-        if ep.shape[0] > eyedata_len:
-            sbs, ses, l, look = analyze_eyemove(ep, x[i]['img1_xy'], 
-                                                x[i]['img2_xy'], skips=skips,
-                                                filtwin=filtwin, thr=thr, 
-                                                wid=x[i]['img_wid'],
-                                                hei=x[i]['img_hei'],
-                                                postthr=x[i]['fixation_off'],
-                                                readdpost=False)
-            if len(look) > 0:
-                x[i]['left_first'] = look[0] == b'l'
-                x[i]['right_first'] = look[0] == b'r'
-                x[i]['first_sacc_time'] = sbs[0] + x[i]['fixation_off']
-    if noerr:
-        x = x[x['TrialError'] == 0]
-    return x, log_dict
-    
+    return alldata    
 
 def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True, 
                        prevlog_dict=None,
@@ -634,12 +469,12 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                        lever_release=4, lever_hold=7, reward_given=48,
                        end_trial=18, fixation_acq=8, left_img_on=191,
                        left_img_off=192, right_img_on=195, right_img_off=196,
-                       default_wid=6, default_hei=6, default_img1_xy=(-5, 0),
+                       default_wid=5, default_hei=5, default_img1_xy=(-5, 0),
                        default_img2_xy=(5, 0), spks_buff=1000,
                        plt_conds=(7,8,9,10,11,12,13,14,15,16), 
                        sdms_conds=(1,2,3,4,5,6,7,8), ephys=False,
                        centimgon=25, centimgoff=26, filtwin=40, thr=.1,
-                       skips=1, eyedata_len=500):
+                       skips=1, eyedata_len=500, dates=None):
     if prevlog_dict is None:
         log_dict = {}
     else:
@@ -663,6 +498,17 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         log = open(path_log, 'rb').readlines()
     else:
         log = None
+    if dates is not None:
+        print('checking date')
+        date_pattern = '[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}'
+        m = re.search(date_pattern, path_bhv)
+        if m is not None:
+            included_date = m[0] in dates
+        else:
+            print('no date found in file name')
+            included_date = False
+    else:
+        included_date = None
     trls = bhv[trial_field][0,0]
     fields = ['trial_type', 'TrialError', 'block_number', 'code_numbers',
               'code_times', 'trial_starts', 'datafile', 'datanum',
@@ -673,10 +519,11 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
               'right_img_on','right_img_off','eyepos','spike_times','LFP',
               'task_cond_num', 'img1_xy', 'img2_xy', 'img_wid', 'img_hei',
               'test_array_on', 'test_array_off', 'left_first', 'right_first',
-              'first_sacc_time', 'angular_separation']
+              'first_sacc_time', 'angular_separation', 'included_date']
     dt = {'names':fields, 'formats':['O']*len(fields)}
     x = np.zeros(len(trls), dtype=dt)
     for i, t in enumerate(trls):
+        x[i]['included_date'] = included_date
         x[i]['code_numbers'] = bhv['CodeNumbers'][0,0][0, i]
         x[i]['code_times'] = bhv['CodeTimes'][0,0][0, i]
         x[i]['trial_starts'] = get_bhvcode_time(start_trial, 
@@ -768,7 +615,7 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                                                  x[i]['code_numbers'],
                                                  x[i]['code_times'], first=True)
         ep = bhv['AnalogData'][0,0][0, i]['EyeSignal'][0,0]
-        x[i]['eyepos'] = ep # [int(x[i]['ISI_end']):, :]
+        x[i]['eyepos'] = ep
         if ('UserVars' in bhv.dtype.names 
             and 'img1_xy' in bhv['UserVars'][0,0].dtype.names
             and bhv['UserVars'][0,0]['img1_xy'].shape[1] > i 
@@ -916,6 +763,14 @@ def iterate_function(func, args, kv_argdict):
 def get_data_run_nums(data, drunfield):
     return np.unique(np.concatenate(data[drunfield], axis=0))
 
+def index_func(a, b, axis=0):
+    m_a = np.nanmean(a, axis=axis)
+    m_b = np.nanmean(b, axis=axis)
+    ind = (m_a - m_b)/(m_a + m_b)
+    mask = (m_a == 0)*(m_b == 0)
+    ind[mask] = 0
+    return ind
+
 def bootstrap_list(l, func, n=1000):
     stats = np.ones(n)
     for i in range(n):
@@ -924,12 +779,27 @@ def bootstrap_list(l, func, n=1000):
     return stats
 
 def resample_on_axis(d, n, axis=0, with_replace=True):
-    inds = np.random.choice(d.shape[axis], n, replace=with_replace)
-    ref = [slice(0, d.shape[i]) for i in range(len(d.shape))]
-    ref[axis] = inds
-    samp = d[ref]
+    if d.shape[axis] >= n  and n > 0:
+        inds = np.random.choice(d.shape[axis], n, replace=with_replace)
+        ref = [slice(0, d.shape[i]) for i in range(len(d.shape))]
+        ref[axis] = inds
+        samp = d[ref]
+    else:
+        samp_shp = list(d.shape)
+        samp_shp[axis] = 1
+        samp = np.zeros(samp_shp)
+        samp[:] = np.nan
     return samp
     
+def mean_axis0(x):
+    return np.mean(x, axis=0)
+
+def bootstrap_on_axis(d, func, axis=0, n=500, with_replace=True):
+    stats = np.zeros((n,) + d.shape[1:])
+    for i in range(n):
+        samp = resample_on_axis(d, n, axis=axis)
+        stats[i] = func(samp)
+    return stats
 
 def collapse_list_dict(ld):
     for i, k in enumerate(ld.keys()):

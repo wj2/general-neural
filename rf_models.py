@@ -124,6 +124,9 @@ def make_flat_square_rf(cent, sizes, scale, baseline, sub_dim=None):
         return out
     return flat_rf
 
+def eval_gaussian_rf_fi(coords, cent, sizes, scale, baseline, sub_dim=None):
+    pass
+
 def eval_gaussian_rf(coords, cent, sizes, scale, baseline, sub_dim=None):
     if len(coords.shape) == 1:
         coords = np.reshape(coords, (1, -1))
