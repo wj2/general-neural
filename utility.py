@@ -771,12 +771,34 @@ def index_func(a, b, axis=0):
     ind[mask] = 0
     return ind
 
-def bootstrap_list(l, func, n=1000):
-    stats = np.ones(n)
+def bootstrap_test(a, b, func, n=1000):
+    a_m, b_m = np.nanmean(a), np.nanmean(b)
+    a_l, b_l = len(a), len(b)
+    a_s, b_s = np.var(a)/a_l, np.var(b)/b_l
+    t = (a_m - b_m)/np.sqrt((a_s/a_l) + (b_s/b_l))
+    z = np.nanmean(np.concatenate((a,b)))
+    a_i = a - a_m + z
+    b_i = b - b_m + z
+    a_stars, a_sems = bootstrap_list(a_i, np.nanmean, n=n, ret_sem=True)
+    b_stars, b_sems = bootstrap_list(b_i, np.nanmean, n=n, ret_sem=True)
+    t_stars = (a_stars - b_stars)/np.sqrt((a_sems/a_l) + (b_sems/b_l))
+    p = np.sum(t_stars >= t)/n
+    return p
+
+def bootstrap_list(l, func, n=1000, ret_sem=False):
+    stats = np.zeros(n)
+    if ret_sem:
+        sems = np.zeros_like(stats)
     for i in range(n):
         samp = np.random.choice(l, len(l))
         stats[i] = func(samp)
-    return stats
+        if ret_sem:
+            sems[i] = np.var(samp)/len(l)
+    if ret_sem:
+        out = (stats, sems)
+    else:
+        out = stats
+    return out
 
 def resample_on_axis(d, n, axis=0, with_replace=True):
     if d.shape[axis] >= n  and n > 0:
