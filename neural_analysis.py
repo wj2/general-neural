@@ -10,6 +10,17 @@ import itertools as it
 import string
 import os
 
+def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum'):
+    data = args[data_ind]
+    runs = np.unique(data[drunfield])
+    outs = []
+    for run in runs:
+        run_data = data[data[drunfield] == run]
+        args[data_ind] = run_data
+        out = func(*args)
+        outs.append(out)
+    return outs
+
 ### ORGANIZE SPIKES ###
 
 def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False):
@@ -51,7 +62,8 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
                           binsize, binstep=None, cumulative=False, 
                           drunfield='datanum', spikefield='spike_times',
                           func_out=(bin_spiketimes, None), min_trials=None,
-                          modulated_dict=None, min_spks=None):
+                          modulated_dict=None, min_spks=None, zscore=False,
+                          collapse_time_zscore=False):
     """
     Converts a sequence of MonkeyLogic trials over multiple days (with 
     associated neurons) into PSTHs oriented to markerfunc
@@ -117,7 +129,25 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
         all_discs = filter_modulated(all_discs, modulated_dict)
     if min_trials is not None:
         all_discs = filter_min_trials(all_discs, min_trials)
+    if zscore:
+        if collapse_time_zscore:
+            axis = None
+        else:
+            axis = 0
+        all_discs = zscore_organized_data(all_discs, axis=axis)
     return all_discs, xs
+
+def zscore_organized_data(all_discs, axis=0):
+    for k in all_discs[0].keys():
+        spks_list = [d[k] for d in all_discs]
+        all_trials = np.concatenate(spks_list, axis=0)
+        m = np.nanmean(all_trials, axis=axis)
+        v = np.nanstd(all_trials, axis=axis)
+        if axis is not None:
+            v[v == 0] = 1
+        for d in all_discs:
+            d[k] = (d[k] - m)/v
+    return all_discs    
 
 def filter_trial_selective(data, pre_marker, pre_offset, post_marker,
                            post_offset=0, binsize=500, sig_thr=.05, boots=1000,
@@ -312,9 +342,9 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
 def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  with_replace=False, shuff_labels=False, stability=False,
                  kernel='linear', penalty=1, format_=True, model=svm.LinearSVC,
-                 collapse_time=False, regularizer='l1'):
+                 collapse_time=False, regularizer='l1', dual=True):
     # spec_params = {'C':penalty, 'kernel':kernel, 'penalty':'l1'}
-    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':False}
+    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual}
     out = decoding(cat1, cat2, leave_out=leave_out, 
                    require_trials=require_trials, resample=resample,
                    with_replace=with_replace, shuff_labels=shuff_labels,
@@ -403,6 +433,41 @@ def multi_decoding(data, model=svm.SVC, leave_out=1, require_trials=15,
             tcs[i, j], _, _, ms[i, j] = out
         used_arrs[i] = arr
     return tcs, ms, used_arrs
+
+def glm_fitting_diff_trials(dat, ind_structure, req_trials=15, use_trials=None,
+                            with_replace=False, cond_labels=None,
+                            interactions=None, double_factors=None,
+                            perms=5000, demean=True, zscore=True, alpha=1,
+                            xs_mask=None):
+    neur_form_shape = np.max(ind_structure, axis=0) + 1
+    glm_coeffs = []
+    glm_ps = []
+    glms = []
+    if zscore:
+        alpha = alpha*.1
+    for k in dat[0].keys():
+        neur_form = np.zeros(neur_form_shape, dtype=dict)
+        trls = np.inf
+        for j, d_j in enumerate(dat):
+            trls = int(np.min((trls, len(d_j[k]))))
+            neur_form[ind_structure[j]] = {k:d_j[k]}
+        if trls >= req_trials:
+            arr_form = array_format(neur_form, trls, with_replace=with_replace)
+            out = condition_mask(arr_form, cond_labels=cond_labels,
+                                 interactions=interactions,
+                                 double_factors=double_factors)
+            glm_dat, glm_conds, _ = out
+            out = fit_glms_with_perm(glm_dat[xs_mask], glm_conds, alpha=alpha,
+                                     perms=perms, demean=demean, z_score=zscore)
+            models, coeffs, ps_coeff, null_coeffs = out
+            if not np.any(np.isnan(coeffs)):
+                glm_coeffs.append(coeffs)
+                glm_ps.append(ps_coeff)
+                glms.append(models)
+
+    full_coeffs = np.concatenate(glm_coeffs, axis=0)
+    full_ps = np.concatenate(glm_ps, axis=0)
+    return full_coeffs, full_ps, glms
 
 def array_format(data, require_trials, with_replace=True, normalize=None,
                  norm_func=None):

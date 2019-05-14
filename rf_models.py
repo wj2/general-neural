@@ -124,9 +124,6 @@ def make_flat_square_rf(cent, sizes, scale, baseline, sub_dim=None):
         return out
     return flat_rf
 
-def eval_gaussian_rf_fi(coords, cent, sizes, scale, baseline, sub_dim=None):
-    pass
-
 def eval_gaussian_rf(coords, cent, sizes, scale, baseline, sub_dim=None):
     if len(coords.shape) == 1:
         coords = np.reshape(coords, (1, -1))
@@ -136,6 +133,45 @@ def eval_gaussian_rf(coords, cent, sizes, scale, baseline, sub_dim=None):
     r = np.exp(-np.sum(((coords - cent)**2)/(2*sizes), axis=1))
     r = ((scale - baseline)*r + baseline)
     return r
+
+def eval_gaussian_vector_rf(coords, cents, sizes, scale, baseline,
+                            sub_dim=None):
+    coords = np.array(coords)
+    if len(coords.shape) == 1:
+        coords = np.reshape(coords, (1, -1))
+    if sub_dim is not None:
+        coords = coords[:, sub_dim]
+    coords = np.expand_dims(coords, axis=1)
+    r = np.exp(-np.sum(((coords - cents)**2)/(2*sizes), axis=2))
+    r = (scale - baseline)*r + baseline
+    return r
+
+def eval_gaussian_vector_deriv(x, cents, sizes, scale, baseline, sub_dim=None):
+    x = np.array(x)
+    if len(x.shape) == 1:
+        x = np.reshape(x, (-1, 1))
+    if sub_dim is not None:
+        x = x[:, sub_dim]
+    x = np.expand_dims(x, axis=1)
+    inner = -np.sum(((x - cents)**2)/(2*sizes), axis=2)
+    inner = np.expand_dims(inner, axis=2)
+    out = -(scale - baseline)*np.exp(inner)*(x - cents)/sizes
+    return out
+
+def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None):
+    cents = np.array(cents)
+    sizes = np.array(sizes)
+    if len(cents.shape) <= 1:
+        cents = np.reshape(cents, (-1, 1))
+    if len(sizes.shape) <= 1:
+        sizes = np.reshape(sizes, (1, -1))
+    cents = np.expand_dims(cents, axis=0)
+    sizes = np.expand_dims(sizes, axis=0)
+    rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,
+                     scale=scale, baseline=baseline)
+    drfs = ft.partial(eval_gaussian_vector_deriv, cents=cents, sizes=sizes,
+                      scale=scale, baseline=baseline)
+    return rfs, drfs
 
 def make_gaussian_rf(cent, sizes, scale, baseline, sub_dim=None):
     sizes = np.reshape(sizes, (1, -1))
@@ -287,4 +323,3 @@ def construct_rf_pop(sig_rfs, sizes, reses=None, resp=1, base=0,
 def get_codewords(stims, rfs):
     words = np.array([rf(stims) for rf in rfs]).T
     return words
-

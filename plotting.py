@@ -534,7 +534,7 @@ def format_lm_label(params, labels, second_only=True, link_string=None,
     return full_l            
 
 def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
-                                  boots=1000, figsize=None, colors=None,
+                                  boots=10000, figsize=None, colors=None,
                                   eps=.001, group_xlabels=None, ylabel=None,
                                   group_term_labels=None, fig=None,
                                   label_rotation='horizontal'):
@@ -599,6 +599,7 @@ def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
     coeff_groups = {}
     for i, sg in enumerate(subgroups):
         ax = f.add_subplot(rows, len(subgroups), i + 1, sharey=share_ax)
+        ax.set_yticks([0, .5, 1])
         share_ax = ax
         sg_mags = ()
         for j in sg:

@@ -244,10 +244,8 @@ def load_collection_bhvmats(datadir, params, expr='.*\.mat',
             bhv, ld = load_bhvmat_imglog(full_mf, imglog, datanum=i, 
                                          prevlog_dict=ld, dates=dates,
                                          **params)
-            print('loaded')
             if max_trials is not None:
                 bhv = bhv[:max_trials]
-            print(i, len(bhv))
             if len(bhv) > trial_cutoff:
                 if full_bhv is None:
                     full_bhv = bhv
@@ -499,7 +497,6 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
     else:
         log = None
     if dates is not None:
-        print('checking date')
         date_pattern = '[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}'
         m = re.search(date_pattern, path_bhv)
         if m is not None:
