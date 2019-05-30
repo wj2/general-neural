@@ -642,7 +642,11 @@ def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
                                group_xlabels=None, ylabel=None,
                                group_term_labels=None, sep_cb=False,
                                cb_size=(.75, 1), label_rotation='horizontal',
-                               cb_label=''):
+                               cb_label='', remove_nans=True):
+    if remove_nans:
+        neur_mask = np.logical_not(np.sum(np.isnan(coeffs), axis=1) > 0)
+        coeffs = coeffs[neur_mask]
+        ps = ps[neur_mask]
     use_pop, subgroups, all_use, ps = _preprocess_glm(coeffs, ps, subgroups,
                                                       p_thr)
     abs_coeffs = np.abs(use_pop)

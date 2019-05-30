@@ -9,6 +9,7 @@ from dPCA.dPCA import dPCA
 import itertools as it
 import string
 import os
+import pickle
 
 def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum'):
     data = args[data_ind]
@@ -22,6 +23,32 @@ def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum'):
     return outs
 
 ### ORGANIZE SPIKES ###
+
+def format_raw_glm(data, constraint_funcs, shape, labels, marker_func,
+                   start_time, end_time, binsize, binstep, cond_labels=None,
+                   min_trials=15, min_spks=5, zscore=False,
+                   full_interactions=True, double_factors=None,
+                   collapse_time_zscore=False):
+    marker_funcs = (marker_func,)*len(constraint_funcs)
+    out = organize_spiking_data(data, constraint_funcs, marker_funcs,
+                                start_time, end_time, binsize, binstep,
+                                min_trials=min_trials, min_spks=min_spks,
+                                zscore=zscore,
+                                collapse_time_zscore=collapse_time_zscore)
+    spks, xs = out
+    spks = np.array(spks, dtype=object)
+    spks = np.reshape(spks, shape)
+    full_arr = array_format(spks, min_trials)
+    if cond_labels is None:
+        cond_labels = range(len(shape))
+    if double_factors is None:
+        double_factors = (False,)*len(shape)
+    out = condition_mask(full_arr, cond_labels=cond_labels,
+                         factor_labels=labels,
+                         full_interactions=full_interactions,
+                         double_factors=double_factors)
+    dat_full, conds_full, labels_full = out 
+    return dat_full, conds_full, labels_full, xs
 
 def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False):
     binedges = make_binedges(binsize, bounds, binstep)
@@ -342,9 +369,10 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
 def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  with_replace=False, shuff_labels=False, stability=False,
                  kernel='linear', penalty=1, format_=True, model=svm.LinearSVC,
-                 collapse_time=False, regularizer='l1', dual=True):
+                 collapse_time=False, regularizer='l1', dual=False,
+                 loss='squared_hinge'):
     # spec_params = {'C':penalty, 'kernel':kernel, 'penalty':'l1'}
-    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual}
+    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual, 'loss':loss}
     out = decoding(cat1, cat2, leave_out=leave_out, 
                    require_trials=require_trials, resample=resample,
                    with_replace=with_replace, shuff_labels=shuff_labels,
@@ -437,7 +465,7 @@ def multi_decoding(data, model=svm.SVC, leave_out=1, require_trials=15,
 def glm_fitting_diff_trials(dat, ind_structure, req_trials=15, use_trials=None,
                             with_replace=False, cond_labels=None,
                             interactions=None, double_factors=None,
-                            perms=5000, demean=True, zscore=True, alpha=1,
+                            perms=5000, demean=True, z_score=True, alpha=1,
                             xs_mask=None):
     neur_form_shape = np.max(ind_structure, axis=0) + 1
     glm_coeffs = []

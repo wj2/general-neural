@@ -226,7 +226,8 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
         arrs.append(arr[inds])
     return np.concatenate(arrs, axis=stack_dim)
 
-def load_collection_bhvmats(datadir, params, expr='.*\.mat', 
+def load_collection_bhvmats(datadir, params, expr='.*\.mat',
+                            forget_imglog=False,
                             log_suffix='_imglog.txt', make_log_name=True,
                             trial_cutoff=300, max_trials=None, dates=None):
     dirfiles = os.listdir(datadir)
@@ -240,6 +241,8 @@ def load_collection_bhvmats(datadir, params, expr='.*\.mat',
         else:
             imglog = None
         full_mf = os.path.join(datadir, mf)
+        if forget_imglog:
+            ld = {}
         try:
             bhv, ld = load_bhvmat_imglog(full_mf, imglog, datanum=i, 
                                          prevlog_dict=ld, dates=dates,
@@ -254,8 +257,9 @@ def load_collection_bhvmats(datadir, params, expr='.*\.mat',
             else:
                 print('file {} has less than {} trials and was '
                       'excluded'.format(mf, trial_cutoff))
-        except:
+        except Exception as ex:
             print('error on {}'.format(full_mf))
+            print(ex)
     return full_bhv
 
 code_to_direc_saccdmc = {201:0, 219:270, 213:180, 207:90}
@@ -471,8 +475,9 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                        default_img2_xy=(5, 0), spks_buff=1000,
                        plt_conds=(7,8,9,10,11,12,13,14,15,16), 
                        sdms_conds=(1,2,3,4,5,6,7,8), ephys=False,
-                       centimgon=25, centimgoff=26, filtwin=40, thr=.1,
-                       skips=1, eyedata_len=500, dates=None):
+                       centimgon=25, centimgoff=26, eyedata_len=500,
+                       eye_params={}, dates=None, xy1_loc_dict=None,
+                       xy2_loc_dict=None):
     if prevlog_dict is None:
         log_dict = {}
     else:
@@ -516,7 +521,9 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
               'right_img_on','right_img_off','eyepos','spike_times','LFP',
               'task_cond_num', 'img1_xy', 'img2_xy', 'img_wid', 'img_hei',
               'test_array_on', 'test_array_off', 'left_first', 'right_first',
-              'first_sacc_time', 'angular_separation', 'included_date']
+              'first_sacc_time', 'angular_separation', 'included_date',
+              'saccade_begs', 'saccade_ends', 'saccade_lens', 'saccade_targ',
+              'leftimg_type', 'rightimg_type', 'first_look']
     dt = {'names':fields, 'formats':['O']*len(fields)}
     x = np.zeros(len(trls), dtype=dt)
     for i, t in enumerate(trls):
@@ -575,6 +582,8 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
             x[i]['rightimg'] = img2_n
             x[i]['leftviews'] = log_dict[img1_n]
             x[i]['rightviews'] = log_dict[img2_n]
+            x[i]['leftimg_type'] = cat1
+            x[i]['rightimg_type'] = cat2
         else:
             x[i]['leftimg'] = ''
             x[i]['rightimg'] = ''
@@ -619,6 +628,10 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
             and len(bhv['UserVars'][0,0]['img1_xy'][0, i]) > 1):
             x[i]['img1_xy'] = bhv['UserVars'][0,0]['img1_xy'][0, i]
             x[i]['img2_xy'] = bhv['UserVars'][0,0]['img2_xy'][0, i]
+        elif (xy1_loc_dict is not None
+              and not np.any(np.isnan(xy1_loc_dict[datanum]))):
+            x[i]['img1_xy'] = xy1_loc_dict[datanum]
+            x[i]['img2_xy'] = xy2_loc_dict[datanum]
         else:
             x[i]['img1_xy'] = default_img1_xy
             x[i]['img2_xy'] = default_img2_xy
@@ -634,16 +647,20 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
             x[i]['img_hei'] = default_hei
         if ep.shape[0] > eyedata_len:
             sbs, ses, l, look = analyze_eyemove(ep, x[i]['img1_xy'], 
-                                                x[i]['img2_xy'], skips=skips,
-                                                filtwin=filtwin, thr=thr, 
+                                                x[i]['img2_xy'],
                                                 wid=x[i]['img_wid'],
                                                 hei=x[i]['img_hei'],
                                                 postthr=x[i]['fixation_off'],
-                                                readdpost=False)
+                                                readdpost=False, **eye_params)
+            x[i]['saccade_begs'] = sbs
+            x[i]['saccade_ends'] = ses
+            x[i]['saccade_lens'] = l
+            x[i]['saccade_targ'] = look
             if len(look) > 0:
                 x[i]['left_first'] = look[0] == b'l'
                 x[i]['right_first'] = look[0] == b'r'
                 x[i]['first_sacc_time'] = sbs[0] + x[i]['fixation_off']
+                x[i]['first_look'] = look[0]
     if noerr:
         x = x[x['TrialError'] == 0]
     return x, log_dict
