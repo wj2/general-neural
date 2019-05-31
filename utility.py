@@ -227,7 +227,7 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
     return np.concatenate(arrs, axis=stack_dim)
 
 def load_collection_bhvmats(datadir, params, expr='.*\.mat',
-                            forget_imglog=False,
+                            forget_imglog=False, repl_logpath=None,
                             log_suffix='_imglog.txt', make_log_name=True,
                             trial_cutoff=300, max_trials=None, dates=None):
     dirfiles = os.listdir(datadir)
@@ -246,6 +246,7 @@ def load_collection_bhvmats(datadir, params, expr='.*\.mat',
         try:
             bhv, ld = load_bhvmat_imglog(full_mf, imglog, datanum=i, 
                                          prevlog_dict=ld, dates=dates,
+                                         repl_logpath=repl_logpath,
                                          **params)
             if max_trials is not None:
                 bhv = bhv[:max_trials]
@@ -477,7 +478,7 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                        sdms_conds=(1,2,3,4,5,6,7,8), ephys=False,
                        centimgon=25, centimgoff=26, eyedata_len=500,
                        eye_params={}, dates=None, xy1_loc_dict=None,
-                       xy2_loc_dict=None):
+                       xy2_loc_dict=None, repl_logpath=None):
     if prevlog_dict is None:
         log_dict = {}
     else:
@@ -498,6 +499,9 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                                         neuro['TrialDurations'][0,0], 
                                         buff=spks_buff)
     if path_log is not None:
+        if repl_logpath is not None:
+            p, name = os.path.split(path_log)
+            path_log = os.path.join(repl_logpath, name)
         log = open(path_log, 'rb').readlines()
     else:
         log = None
