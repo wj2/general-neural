@@ -155,7 +155,7 @@ def plot_trial_structure(transition_times=(), labels=(), transition_dict=None,
 
 def pcolormesh_axes(axvals, val_len):
     if len(axvals) == val_len:
-        diff = np.diff(axvals)[0]
+        diff = np.diff(axvals)[-1]
         axvals_shift = axvals - diff/2
         axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
     return axvals
