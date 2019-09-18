@@ -413,14 +413,18 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
 
 def svm_multi_decoding(data, leave_out=1, require_trials=15, resample=50,
                        with_replace=False, shuff_labels=False, stability=False,
-                       kernel='linear', penalty=1, collapse_time=False):
-    spec_params = {'C':penalty, 'kernel':kernel}
-    model = svm.SVC
+                       kernel='linear', penalty=1, collapse_time=False,
+                       norm=True, regularizer='l1', dual=False,
+                       loss='squared_hinge'):
+    # spec_params = {'C':penalty, 'kernel':kernel, 'penalty':'l1'}
+    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual, 'loss':loss}
+    model = svm.LinearSVC
     out = multi_decoding(data, model=model, leave_out=leave_out, 
                          require_trials=require_trials,
                          resample=resample, with_replace=with_replace, 
                          shuff_labels=shuff_labels, stability=stability,
-                         params=spec_params, collapse_time=collapse_time)
+                         params=spec_params, collapse_time=collapse_time,
+                         norm=norm)
     return out
 
 def lda_multi_decoding(data, leave_out=1, require_trials=15, resample=50,
@@ -437,7 +441,8 @@ def lda_multi_decoding(data, leave_out=1, require_trials=15, resample=50,
                          
 def multi_decoding(data, model=svm.SVC, leave_out=1, require_trials=15, 
                    resample=50, with_replace=False, shuff_labels=False, 
-                   stability=False, params=None, collapse_time=False):
+                   stability=False, params=None, collapse_time=False,
+                   norm=True):
     arr = array_format(data, require_trials)
     arr = np.swapaxes(arr, 0, 1)
     if stability:
@@ -457,7 +462,7 @@ def multi_decoding(data, model=svm.SVC, leave_out=1, require_trials=15,
             out = _fold_model(col_arr[..., 0], col_arr[..., 1], leave_out,
                               model=model, shuff_labels=shuff_labels, 
                               stability=stability, params=params, 
-                              collapse_time=collapse_time)
+                              collapse_time=collapse_time, norm=norm)
             tcs[i, j], _, _, ms[i, j] = out
         used_arrs[i] = arr
     return tcs, ms, used_arrs
@@ -465,7 +470,7 @@ def multi_decoding(data, model=svm.SVC, leave_out=1, require_trials=15,
 def glm_fitting_diff_trials(dat, ind_structure, req_trials=15, use_trials=None,
                             with_replace=False, cond_labels=None,
                             interactions=None, double_factors=None,
-                            perms=5000, demean=True, z_score=True, alpha=1,
+                            perms=5000, demean=True, zscore=True, alpha=1,
                             xs_mask=None):
     neur_form_shape = np.max(ind_structure, axis=0) + 1
     glm_coeffs = []
