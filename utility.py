@@ -564,7 +564,7 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         x[i]['block_number'] = bhv['BlockNumber'][0,0][i, 0]
         x[i]['ISI_start'] = get_bhvcode_time(end_trial, x[i]['code_numbers'],
                                              x[i]['code_times'], first=True)
-        x[i]['datafile'] = bhv['DataFileName']
+        x[i]['datafile'] = bhv['DataFileName'][0][0][0]
         x[i]['datanum'] = datanum
         x[i]['samp_img_on'] = get_bhvcode_time(centimgon,
                                                x[i]['code_numbers'],
