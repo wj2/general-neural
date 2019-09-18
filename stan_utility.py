@@ -3,6 +3,7 @@ import numpy as np
 import os
 import pickle
 import pystan as ps
+import re
 
 def recompile_model(mp):
     p, ext = os.path.splitext(mp)
