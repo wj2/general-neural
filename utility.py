@@ -265,6 +265,20 @@ def load_collection_bhvmats(datadir, params, expr='.*\.mat',
 
 code_to_direc_saccdmc = {201:0, 219:270, 213:180, 207:90}
 
+def load_saccdmc(datapaths, pattern='rcl[mj][0-9]*.mat', varname='data'):
+    rawd = load_separate(datapaths, pattern, varname=varname)
+    combed = []
+    for i, ud in enumerate(rawd):
+        try:
+            c = merge_neuro_bhv_saccdmc(ud['NEURO'][0], ud['BHV'][0],
+                                          datanum=i)
+            combed.append(c)
+        except ValueError:
+            msg = 'error formatting file {} (ind {})'
+            print(msg.format(ud['BHV'][0]['DataFileName'][0,0], i))
+    d = np.concatenate(combed)
+    return d 
+
 def merge_neuro_bhv_saccdmc(neuro, bhv, noerr=True, fixation_on=35, 
                             fixation_off=36, start_trial=9, datanum=0, 
                             lever_release=4, lever_hold=7, reward_given=48,
