@@ -19,6 +19,16 @@ def store_models(model_collection):
         new_collection[k] = (new_fit, params, diags)
     return new_collection
 
+def get_stan_params_ind(mf, param_name, ind_set, mask=None, skip_end=1,
+                        stan_dict=False):
+    ind_set = (str(i) for i in ind_set)
+    param = param_name + '[' + ','.join(ind_set) +']'
+    if stan_dict:
+        out = mf[param]
+    else:
+        out = get_stan_params(mf, param, mask=mask, skip_end=skip_end)
+    return out
+
 def get_stan_params(mf, param, mask=None, skip_end=1):
     names = mf.flatnames
     means = mf.get_posterior_mean()[:-skip_end]
@@ -28,6 +38,12 @@ def get_stan_params(mf, param, mask=None, skip_end=1):
     if mask is not None:
         par_means = par_means[mask]
     return par_means
+
+def make_stan_model_dict(mf):
+    d = {}
+    for i, n in enumerate(mf.flatnames):
+        d[n] = mf.get_posterior_mean()[i]
+    return d
 
 class ModelFitContainer(object):
 
