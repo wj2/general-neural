@@ -90,7 +90,7 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
                           drunfield='datanum', spikefield='spike_times',
                           func_out=(bin_spiketimes, None), min_trials=None,
                           modulated_dict=None, min_spks=None, zscore=False,
-                          collapse_time_zscore=False):
+                          collapse_time_zscore=False, bhv_extract_func=None):
     """
     Converts a sequence of MonkeyLogic trials over multiple days (with 
     associated neurons) into PSTHs oriented to markerfunc
@@ -110,6 +110,8 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
     spk_func, out_type = func_out
     druns = np.unique(data[drunfield])
     all_discs = []
+    if bhv_extract_func is not None:
+        all_bhvs = []
     if binstep is not None and binstep < binsize:
         xs = np.arange(pretime + binsize/2., posttime + binsize/2. + binstep,
                        binstep)
@@ -119,6 +121,8 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
         mf = marker_funcs[i]
         d_trials = data[df(data)]
         neurs = {}
+        if bhv_extract_func is not None:
+            bhv_vals = {}
         for j, run in enumerate(druns):
             all_dictnames = data[data[drunfield] == run][spikefield]
             nr_names = np.concatenate([list(x.keys()) for x in all_dictnames])
@@ -126,10 +130,17 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
             udt = d_trials[d_trials[drunfield] == run]
             n_kvs = [((run, name), u.nan_array((udt.shape[0], xs.shape[0]),
                                                dtype=out_type)) 
-                      for name in n_names]
+                     for name in n_names]
             neurs.update(n_kvs)
+            if bhv_extract_func is not None:
+                bhv_kvs = [((run, name),
+                            u.nan_array((udt.shape[0],), dtype=object))
+                           for name in n_names]
+                bhv_vals.update(bhv_kvs)
             marks = mf(udt)
             for k, trial in enumerate(udt):
+                if bhv_extract_func is not None:
+                    val = bhv_extract_func(trial)
                 for l, neurname in enumerate(trial[spikefield].keys()):
                     key = (run, neurname)
                     spikes = trial[spikefield][neurname]
@@ -146,12 +157,18 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
                         psth = np.ones_like(xs)
                         psth[:] = np.nan
                     neurs[key][k, :] = psth
+                    if bhv_extract_func is not None:
+                        bhv_vals[key][k] = val
             for key in neurs.keys():
                 all_psth = neurs[key]
                 mask = np.logical_not(np.all(np.isnan(all_psth), axis=1))
                 keep_psth = all_psth[mask]
                 neurs[key] = keep_psth
+                if bhv_extract_func is not None:
+                    bhv_vals[key] = bhv_vals[key][mask]
         all_discs.append(neurs)
+        if bhv_extract_func is not None:
+            all_bhvs.append(bhv_vals)
     if modulated_dict is not None:
         all_discs = filter_modulated(all_discs, modulated_dict)
     if min_trials is not None:
@@ -162,7 +179,10 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
         else:
             axis = 0
         all_discs = zscore_organized_data(all_discs, axis=axis)
-    return all_discs, xs
+    out = all_discs, xs
+    if bhv_extract_func is not None:
+        out = out + (all_bhvs,)
+    return out
 
 def zscore_organized_data(all_discs, axis=0):
     for k in all_discs[0].keys():
