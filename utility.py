@@ -683,6 +683,12 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         x = x[x['TrialError'] == 0]
     return x, log_dict
 
+def copy_struct_array(new_arr, old_arr):
+    names = old_arr.dtype.names
+    for n in names:
+        new_arr[n] = old_arr[n]
+    return new_arr
+
 def get_bhvcode_time(codenum, trial_codenums, trial_codetimes, first=True):
     i = np.where(codenum == trial_codenums)[0]
     if len(i) > 0:
