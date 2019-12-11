@@ -153,9 +153,9 @@ def plot_trial_structure(transition_times=(), labels=(), transition_dict=None,
                     fontsize=fontsize)
     return ax
 
-def pcolormesh_axes(axvals, val_len):
+def pcolormesh_axes(axvals, val_len, diff_ind=0):
     if len(axvals) == val_len:
-        diff = np.diff(axvals)[-1]
+        diff = np.diff(axvals)[diff_ind]
         axvals_shift = axvals - diff/2
         axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
     return axvals
@@ -231,7 +231,13 @@ def plot_smooth_cumu(dat, bins='auto', color=None, label='', title='',
     if len(title) > 0:
         ax.set_title(title)
     return ax    
-        
+
+def add_color(color, add_amt):
+    new_col = color + add_amt
+    nc = np.min(np.stack((new_col, np.ones_like(new_col)), axis=0),
+                axis=0)
+    return nc
+
 def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
@@ -568,7 +574,6 @@ def plot_glm_pop_selectivity_prop(coeffs, ps, subgroups=None, p_thr=.05,
             prop_distr = u.bootstrap_list(inds, distr_func, n=boots)
             plot_conf_interval(j, prop_distr, ax, color=colors[i])
             sg_means[ind] = np.mean(prop_distr)
-        print(np.mean(sg_means))
         if group_term_labels is not None:
             ax.set_xticks(sg)
             ax.set_xticklabels(group_term_labels[i], rotation=label_rotation)
@@ -641,8 +646,8 @@ def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
                                sort=True, figsize=None, cmap='RdBu',
                                group_xlabels=None, ylabel=None,
                                group_term_labels=None, sep_cb=False,
-                               cb_size=(.75, 1), label_rotation='horizontal',
-                               cb_label='', remove_nans=True):
+                               cb_size=(1.2, .8), label_rotation='horizontal',
+                               cb_label='', remove_nans=True, cb_wid=8):
     if remove_nans:
         neur_mask = np.logical_not(np.sum(np.isnan(coeffs), axis=1) > 0)
         coeffs = coeffs[neur_mask]
@@ -652,7 +657,6 @@ def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
     abs_coeffs = np.abs(use_pop)
     maxterm_order = np.argsort(np.argmax(abs_coeffs, axis=1))
     sorted_pop = use_pop[maxterm_order]
-
     vmax = np.max(abs_coeffs)
     vmin = -vmax
     f = plt.figure(figsize=figsize)
@@ -681,7 +685,7 @@ def plot_glm_indiv_selectivity(coeffs, ps, subgroups=None, p_thr=.05,
     else:
         f2 = f
         ret = (f,)
-    colbar = f2.colorbar(p, ax=ax_list)
+    colbar = f2.colorbar(p, ax=ax_list, aspect=cb_wid)
     colbar.set_ticks([round(vmin, 1) + .1, 0, round(vmax, 1) - .1])
     colbar.set_label(cb_label)
     return ret

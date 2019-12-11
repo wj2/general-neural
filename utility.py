@@ -843,7 +843,7 @@ def resample_on_axis(d, n, axis=0, with_replace=True):
         inds = np.random.choice(d.shape[axis], n, replace=with_replace)
         ref = [slice(0, d.shape[i]) for i in range(len(d.shape))]
         ref[axis] = inds
-        samp = d[ref]
+        samp = d[tuple(ref)]
     else:
         samp_shp = list(d.shape)
         samp_shp[axis] = 1
