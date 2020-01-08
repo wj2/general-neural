@@ -525,11 +525,56 @@ def multi_decoding(data, model=svm.SVC, leave_out=1, require_trials=15,
         used_arrs[i] = arr
     return tcs, ms, used_arrs
 
-def glm_fitting_diff_trials(dat, ind_structure, req_trials=15, use_trials=None,
+def glm_fit_full(data, ind_structure, constr_funcs, marker_func, start_time,
+                 end_time, binsize, binstep, req_trials=15, cond_labels=None,
+                 double_factors=None, perms=5000, demean=True, zscore=True,
+                 alpha=1, min_spks=1, interactions=None, with_replace=False,
+                 use_all=True):
+    marker_funcs = (marker_func,)*len(constr_funcs)
+    out = organize_spiking_data(data, constr_funcs, marker_funcs,
+                                start_time, end_time, binsize, binstep,
+                                min_spks=min_spks)
+    spks, xs = out
+    out = glm_fitting_diff_trials(spks, ind_structure, req_trials=req_trials,
+                                  with_replace=with_replace,
+                                  cond_labels=cond_labels,
+                                  interactions=interactions, use_all=use_all,
+                                  double_factors=double_factors, perms=perms,
+                                  demean=demean, zscore=zscore, alpha=alpha)
+    return out, xs
+
+def glm_asymm_trials_format(neurs, key, ind_structure, cond_labels=None,
+                            single_conds=(), interactions=(),
+                            double_factors=None, full_interactions=False,
+                            factor_labels=None):
+    inds_arr = np.array(ind_structure)
+    n_vals = np.max(inds_arr, axis=0) + 1
+    dum_arr = np.zeros((1, 1, 1,) + tuple(n_vals))
+    out = condition_mask(dum_arr, cond_labels=cond_labels,
+                         single_conds=single_conds,
+                         interactions=interactions,
+                         double_factors=double_factors,
+                         full_interactions=full_interactions,
+                         factor_labels=factor_labels)
+    _, conds, labels = out
+    for i, ind in enumerate(ind_structure):
+        curr_dat = neurs[ind][key].T
+        curr_cond = conds[0, i]
+        if i == 0:
+            full_dat = curr_dat
+            full_cond = (curr_cond,)*curr_dat.shape[1]
+        else:
+            full_dat = np.concatenate((full_dat, curr_dat), axis=1)
+            full_cond = full_cond + (curr_cond,)*curr_dat.shape[1]
+    full_dat = np.expand_dims(full_dat, 1)
+    full_cond = np.expand_dims(np.array(full_cond), 0)
+    return full_dat, full_cond, labels
+
+def glm_fitting_diff_trials(dat, ind_structure, req_trials=15, 
                             with_replace=False, cond_labels=None,
                             interactions=None, double_factors=None,
                             perms=5000, demean=True, zscore=True, alpha=1,
-                            xs_mask=None):
+                            xs_mask=None, use_all=True):
     neur_form_shape = np.max(ind_structure, axis=0) + 1
     glm_coeffs = []
     glm_ps = []
@@ -543,18 +588,28 @@ def glm_fitting_diff_trials(dat, ind_structure, req_trials=15, use_trials=None,
             trls = int(np.min((trls, len(d_j[k]))))
             neur_form[ind_structure[j]] = {k:d_j[k]}
         if trls >= req_trials:
-            arr_form = array_format(neur_form, trls, with_replace=with_replace)
-            out = condition_mask(arr_form, cond_labels=cond_labels,
-                                 interactions=interactions,
-                                 double_factors=double_factors)
+            if use_all:
+                out = glm_asymm_trials_format(neur_form, k, ind_structure,
+                                              cond_labels=cond_labels,
+                                              interactions=interactions,
+                                              double_factors=double_factors)
+            else:
+                arr_form = array_format(neur_form, trls,
+                                        with_replace=with_replace)
+                out = condition_mask(arr_form, cond_labels=cond_labels,
+                                     interactions=interactions,
+                                     double_factors=double_factors)
             glm_dat, glm_conds, _ = out
+            
+            if xs_mask is None:
+                xs_mask = np.ones(glm_dat.shape[0], dtype=bool)
             out = fit_glms_with_perm(glm_dat[xs_mask], glm_conds, alpha=alpha,
                                      perms=perms, demean=demean, z_score=zscore)
             models, coeffs, ps_coeff, null_coeffs = out
             if not np.any(np.isnan(coeffs)):
                 glm_coeffs.append(coeffs)
                 glm_ps.append(ps_coeff)
-                glms.append(models)
+                glms.append((k, models))
 
     full_coeffs = np.concatenate(glm_coeffs, axis=0)
     full_ps = np.concatenate(glm_ps, axis=0)
@@ -997,7 +1052,8 @@ def generalized_linear_model(data, conds, use_stan=False, stan_chains=4,
     if z_score:
         m = np.mean(data, axis=1).reshape((-1, 1))
         dm_data = data - m
-        zs_data = dm_data/np.std(dm_data, axis=1).reshape((-1, 1))
+        stdvar = np.std(dm_data, axis=1).reshape((-1, 1))
+        zs_data = dm_data/stdvar
         data = zs_data + m
         if alpha is None:
             alpha = .1
