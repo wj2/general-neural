@@ -823,12 +823,16 @@ def bootstrap_test(a, b, func, n=1000):
     p = np.sum(t_stars >= t)/n
     return p
 
-def bootstrap_list(l, func, n=1000, ret_sem=False):
-    stats = np.zeros(n)
+def bootstrap_list(l, func, n=1000, out_shape=None, ret_sem=False):
+    if out_shape is None:
+        stats = np.zeros(n)
+    else:
+        stats = np.zeros((n,)+out_shape)
     if ret_sem:
         sems = np.zeros_like(stats)
     for i in range(n):
-        samp = np.random.choice(l, len(l))
+        inds = np.random.choice(np.arange(len(l)), len(l))
+        samp = l[inds]
         stats[i] = func(samp)
         if ret_sem:
             sems[i] = np.var(samp)/len(l)
