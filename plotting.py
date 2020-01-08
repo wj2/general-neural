@@ -116,10 +116,15 @@ def plot_collection_views(xs_l, sus_l, labels, colors=None, style=(),
                           fs=fs)
     return fs    
                 
-def sem(dat, axis=0):
-    err_1d = np.nanstd(dat, axis=axis)/np.sqrt(dat.shape[axis] - 1)
+def sem(dat, axis=0, sub=1):
+    err_1d = np.nanstd(dat, axis=axis)/np.sqrt(dat.shape[axis] - sub)
     err = np.vstack((err_1d, -err_1d))
     return err
+
+def biased_sem(dat, axis=0):
+    err = sem(dat, axis=axis, sub=0)
+    return err
+    
 
 def conf_interval(dat, axis=0, perc=95):
     lower = (100 - perc) / 2.
