@@ -266,6 +266,44 @@ def fano_factor_tc(spks_tc, boots=1000, spks_per_s=False, window_size=None):
         ffs[i, :] = vs[i, :]/ms[i, :]
     return ffs, ms, vs
 
+def _compute_snr(samps, ct=np.median, var=np.var, min_samps=2):
+    m_samps = list(filter(lambda x: len(x) >= min_samps, samps))
+    list_cents = list(ct(x, axis=0) for x in m_samps)
+    list_vars = list(var(x, axis=0) for x in m_samps)
+    snrs = var(list_cents, axis=0) / ct(list_vars, axis=0)
+    return snrs
+
+def _null_snr(samps, ct=np.median, var=np.var, min_samps=2):
+    filt_samps = list(filter(lambda x: len(x) >= min_samps, samps))
+    ns = (len(x) for x in filt_samps)
+    flat_samps = np.concatenate(filt_samps, axis=0)
+    np.random.shuffle(flat_samps)
+    m_samps = []
+    accum = 0
+    for i, n in enumerate(ns):
+        m_samps.append(flat_samps[accum:accum+n])
+        accum = accum + n
+    list_cents = list(ct(x, axis=0) for x in m_samps)
+    list_vars = list(var(x, axis=0) for x in m_samps)
+    snrs = var(list_cents, axis=0) / ct(list_vars, axis=0)
+    return snrs
+
+def snr_tc(ns, central_tend=np.median, variance=np.var, boots=1000):
+    n_neurs = len(ns[0])
+    ns = np.array(ns, dtype=object)
+    snr_func = lambda x: _compute_snr(x, central_tend, variance)
+    null_snr_func = lambda x: _null_snr(x, central_tend, variance)
+    for i, k in enumerate(ns[0].keys()):
+        if i == 0:
+            t = ns[0][k].shape[1]
+            snrs = np.zeros((n_neurs, boots, t))
+            null_snrs = np.zeros_like(snrs)
+        samps = np.array(list(n[k] for n in ns), dtype=object)
+        snrs[i] = u.bootstrap_list(samps, snr_func, n=boots, out_shape=(t,))
+        null_snrs[i] = u.bootstrap_list(samps, null_snr_func, n=boots,
+                                        out_shape=(t,))
+    return snrs, null_snrs
+
 ### ROC ###
                     
 def roc_tc(s1_tc, s2_tc, boots=1000):
