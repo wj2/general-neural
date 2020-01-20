@@ -223,7 +223,7 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
     arrs = []
     for i in range(arr.shape[col_dim]):
         inds[col_dim] = i
-        arrs.append(arr[inds])
+        arrs.append(arr[tuple(inds)])
     return np.concatenate(arrs, axis=stack_dim)
 
 def load_collection_bhvmats(datadir, params, expr='.*\.mat',

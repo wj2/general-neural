@@ -11,16 +11,23 @@ import string
 import os
 import pickle
 
-def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum'):
+def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum',
+                           ret_index=False):
     data = args[data_ind]
     runs = np.unique(data[drunfield])
     outs = []
+    store_inds = []
     for run in runs:
         run_data = data[data[drunfield] == run]
         args[data_ind] = run_data
         out = func(*args)
         outs.append(out)
-    return outs
+        store_inds.append(run)
+    if ret_index:
+        out = (outs, store_inds)
+    else:
+        out = outs
+    return out
 
 ### ORGANIZE SPIKES ###
 
@@ -421,16 +428,22 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
         else:
             preds = s.predict(test[:, :, i].T)
             percent_corr[i] = np.sum(preds == testlabels) / n_labels
-        svs[i] = s.coef_[0]
+        if s.kernel == 'linear':
+            svs[i] = s.coef_[0]
     return percent_corr, svs
 
 def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  with_replace=False, shuff_labels=False, stability=False,
-                 kernel='linear', penalty=1, format_=True, model=svm.LinearSVC,
+                 penalty=1, format_=True, model=svm.LinearSVC, kernel='linear',
                  collapse_time=False, regularizer='l1', dual=False,
-                 loss='squared_hinge'):
-    # spec_params = {'C':penalty, 'kernel':kernel, 'penalty':'l1'}
-    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual, 'loss':loss}
+                 loss='squared_hinge', max_iter=1000, gamma='scale'):
+    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual, 'loss':loss,
+                   'max_iter':max_iter, 'gamma':gamma}
+    if kernel != 'linear':
+        spec_params.update((('kernel', kernel),))
+        spec_params.pop('penalty')
+        spec_params.pop('dual')
+        spec_params.pop('loss')
     out = decoding(cat1, cat2, leave_out=leave_out, 
                    require_trials=require_trials, resample=resample,
                    with_replace=with_replace, shuff_labels=shuff_labels,
@@ -473,9 +486,10 @@ def svm_multi_decoding(data, leave_out=1, require_trials=15, resample=50,
                        with_replace=False, shuff_labels=False, stability=False,
                        kernel='linear', penalty=1, collapse_time=False,
                        norm=True, regularizer='l1', dual=False,
-                       loss='squared_hinge'):
+                       loss='squared_hinge', max_iter=1000):
     # spec_params = {'C':penalty, 'kernel':kernel, 'penalty':'l1'}
-    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual, 'loss':loss}
+    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual, 'loss':loss,
+                   'max_iter':max_iter}
     model = svm.LinearSVC
     out = multi_decoding(data, model=model, leave_out=leave_out, 
                          require_trials=require_trials,
@@ -792,6 +806,27 @@ def dpca_wrapper(data, labels, regularizer='auto', signif=False, protect='t',
         ret = (fd, s_mask)
     return ret, dpca
 
+def estimate_pca(data, require_trials=15, normalize=None, norm_func=None,
+                 ests=1000):
+    pcas = []
+    
+    for i in range(ests):
+        arr = array_format(data, require_trials=require_trials,
+                           normalize=normalize, norm_func=norm_func)
+        if i == 0:
+            coeffs = np.zeros((ests, arr.shape[1], arr.shape[1]))
+            exp_var = np.zeros((ests, arr.shape[1]))
+            trans_pts = np.zeros((ests,)+arr.shape)
+        pca = pca_wrapper(arr)
+        coeffs[i] = pca.components_
+        exp_var[i] = pca.explained_variance_ratio_
+        for j in range(arr.shape[-1]):
+            out = pca_trajectories(arr[..., j], pca,
+                                   n_comp=arr.shape[1])
+            trans_pts[i, ..., j] = out[1]
+        pcas.append(pca)
+    return coeffs, exp_var, trans_pts, pcas
+        
 def pca_wrapper(data):
     sh = data.shape
     flat_data = np.reshape(data, (-1, sh[1]))
@@ -811,7 +846,7 @@ def pca_trajectories(data, pca, n_comp=None, comps=(0,1)):
 def function_on_dim(data, func, dims=None, norm_dims=True,
                     boots=1000):
     """
-    Bootstrap a function on some colelction of dimensions across some
+    Bootstrap a function on some collection of dimensions across some
     timecourse.
 
     Parameters

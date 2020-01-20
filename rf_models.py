@@ -164,7 +164,7 @@ def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None):
     if len(cents.shape) <= 1:
         cents = np.reshape(cents, (-1, 1))
     if len(sizes.shape) <= 1:
-        sizes = np.reshape(sizes, (1, -1))
+        sizes = np.reshape(sizes, (-1, 1))
     cents = np.expand_dims(cents, axis=0)
     sizes = np.expand_dims(sizes, axis=0)
     rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,
