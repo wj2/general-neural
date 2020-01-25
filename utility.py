@@ -8,6 +8,7 @@ import pystan as ps
 import pickle
 import itertools as it 
 from pref_looking.eyes import analyze_eyemove
+from pref_looking.bias import get_look_img
 
 monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May', 
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
@@ -541,7 +542,8 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
               'test_array_on', 'test_array_off', 'left_first', 'right_first',
               'first_sacc_time', 'angular_separation', 'included_date',
               'saccade_begs', 'saccade_ends', 'saccade_lens', 'saccade_targ',
-              'leftimg_type', 'rightimg_type', 'first_look']
+              'leftimg_type', 'rightimg_type', 'first_look', 'on_left_img',
+              'on_right_img', 'not_on_img']
     dt = {'names':fields, 'formats':['O']*len(fields)}
     x = np.zeros(len(trls), dtype=dt)
     for i, t in enumerate(trls):
@@ -679,6 +681,15 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                 x[i]['right_first'] = look[0] == b'r'
                 x[i]['first_sacc_time'] = sbs[0] + x[i]['fixation_off']
                 x[i]['first_look'] = look[0]
+            tlen = x[i]['eyepos'].shape[0] - x[i]['fixation_off']
+            all_eyes = get_look_img((x[i],), 2, 1, 0, x[i]['img1_xy'],
+                                    x[i]['img2_xy'], x[i]['img_wid'],
+                                    x[i]['img_hei'], fix_time=0, tlen=tlen,
+                                    eye_field='eyepos',
+                                    eyemove_flag='fixation_off')
+            x[i]['on_left_img'] = all_eyes[0, :, 2]
+            x[i]['on_right_img'] = all_eyes[0, :, 1]
+            x[i]['not_on_img'] = all_eyes[0, :, 0]
     if noerr:
         x = x[x['TrialError'] == 0]
     return x, log_dict
