@@ -247,7 +247,7 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
                     fill=True, log_x=False, log_y=False, line_alpha=1,
-                    **kwargs):
+                    jagged=False, **kwargs):
     with plt.style.context(style):
         if ax is None:
             f = plt.figure()
@@ -256,7 +256,10 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
             ax.set_xscale('log')
         if log_y:
             ax.set_yscale('log')
-        if len(dat.shape) > 1:
+        if jagged:
+            tr = np.array(list(central_tendency(d) for d in dat))
+            er = np.array(list(error_func(d)[:, 0] for d in dat)).T
+        elif len(dat.shape) > 1:
             tr = central_tendency(dat, axis=0)
             er = error_func(dat, axis=0)
         else: 
@@ -269,7 +272,7 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
         trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha,
                       **kwargs)
         alpha = min(line_alpha, alpha)
-        if len(dat.shape) > 1:
+        if len(dat.shape) > 1 or jagged:
             if color is None:
                 color = trl[0].get_color()
             if fill:

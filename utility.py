@@ -227,6 +227,11 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
         arrs.append(arr[tuple(inds)])
     return np.concatenate(arrs, axis=stack_dim)
 
+def get_matching_files(datadir, expr):
+    dirfiles = os.listdir(datadir)
+    matchfiles = filter(lambda x: re.match(expr, x) is not None, dirfiles)
+    return matchfiles
+
 def load_collection_bhvmats(datadir, params, expr='.*\.mat',
                             forget_imglog=False, repl_logpath=None,
                             log_suffix='_imglog.txt', make_log_name=True,
