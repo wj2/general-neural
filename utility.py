@@ -235,7 +235,8 @@ def get_matching_files(datadir, expr):
 def load_collection_bhvmats(datadir, params, expr='.*\.mat',
                             forget_imglog=False, repl_logpath=None,
                             log_suffix='_imglog.txt', make_log_name=True,
-                            trial_cutoff=300, max_trials=None, dates=None):
+                            trial_cutoff=300, max_trials=None, dates=None,
+                            use_data_name=False):
     dirfiles = os.listdir(datadir)
     matchfiles = filter(lambda x: re.match(expr, x) is not None, dirfiles)
     ld = {}
@@ -253,6 +254,7 @@ def load_collection_bhvmats(datadir, params, expr='.*\.mat',
             bhv, ld = load_bhvmat_imglog(full_mf, imglog, datanum=i, 
                                          prevlog_dict=ld, dates=dates,
                                          repl_logpath=repl_logpath,
+                                         use_data_name=use_data_name,
                                          **params)
             if max_trials is not None:
                 bhv = bhv[:max_trials]
@@ -498,7 +500,8 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                        sdms_conds=(1,2,3,4,5,6,7,8), ephys=False,
                        centimgon=25, centimgoff=26, eyedata_len=500,
                        eye_params={}, dates=None, xy1_loc_dict=None,
-                       xy2_loc_dict=None, repl_logpath=None):
+                       xy2_loc_dict=None, repl_logpath=None,
+                       use_data_name=False):
     if prevlog_dict is None:
         log_dict = {}
     else:
@@ -512,19 +515,32 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         bhv = data
     if path_log is None and 'imglog' in data.dtype.names:
         path_log = data['imglog'][0][0]
+    elif path_log is None and use_data_name:
+        filename = bhv['DataFileName'][0][0][0]
+        fn, ext = os.path.splitext(filename)
+        logname = fn + '_imglog.txt'
+        folder, end = os.path.split(path_bhv)
+        path_log = os.path.join(folder, logname)
+    log = None
+    if 'imglog_data' in data.dtype.names:
+        raw_log = data['imglog_data'][0][0]
+        log = list(x[0].encode() for x in raw_log)
     if ephys:
         neuro = data['NEURO'][0]
         neurons = split_spikes_startdur(neuro['Neuron'][0,0], 
                                         neuro['TrialTimes'][0,0],
                                         neuro['TrialDurations'][0,0], 
                                         buff=spks_buff)
-    if path_log is not None:
+    if path_log is not None and not os.path.exists(path_log) and log is None:
+        print('imglog path does not exist')
+        print(path_log)
+        print('and no log data provided; not attempting to load')
+        path_log = None
+    if path_log is not None and log is None:
         if repl_logpath is not None:
             p, name = os.path.split(path_log)
             path_log = os.path.join(repl_logpath, name)
         log = open(path_log, 'rb').readlines()
-    else:
-        log = None
     if dates is not None:
         date_pattern = '[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}'
         m = re.search(date_pattern, path_bhv)
@@ -597,6 +613,10 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
             entry2 = log.pop(0)
             entry2 = entry2.strip(b'\r\n').split(b'\t')
             tn2, s2, _, cond2, vs2, cat2, img2 = entry2
+            # print(entry1)
+            # print(entry2)
+            # print(x[i]['trialnum'])
+            # print(filename)
             assert tn1 == tn2
             assert int(tn1) == int(x[i]['trialnum'])
             img1_n, ext1 = os.path.splitext(img1)
@@ -686,15 +706,20 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                 x[i]['right_first'] = look[0] == b'r'
                 x[i]['first_sacc_time'] = sbs[0] + x[i]['fixation_off']
                 x[i]['first_look'] = look[0]
-            tlen = x[i]['eyepos'].shape[0] - x[i]['fixation_off']
-            all_eyes = get_look_img((x[i],), 2, 1, 0, x[i]['img1_xy'],
-                                    x[i]['img2_xy'], x[i]['img_wid'],
-                                    x[i]['img_hei'], fix_time=0, tlen=tlen,
-                                    eye_field='eyepos',
-                                    eyemove_flag='fixation_off')
-            x[i]['on_left_img'] = all_eyes[0, :, 2]
-            x[i]['on_right_img'] = all_eyes[0, :, 1]
-            x[i]['not_on_img'] = all_eyes[0, :, 0]
+            if np.isnan(x[i]['fixation_off']):
+                x[i]['on_left_img'] = np.nan
+                x[i]['on_right_img'] = np.nan
+                x[i]['not_on_img'] = np.nan
+            else:
+                tlen = int(x[i]['eyepos'].shape[0] - x[i]['fixation_off'])
+                all_eyes = get_look_img((x[i],), 2, 1, 0, x[i]['img1_xy'],
+                                        x[i]['img2_xy'], x[i]['img_wid'],
+                                        x[i]['img_hei'], fix_time=0, tlen=tlen,
+                                        eye_field='eyepos',
+                                        eyemove_flag='fixation_off')
+                x[i]['on_left_img'] = all_eyes[0, :, 2]
+                x[i]['on_right_img'] = all_eyes[0, :, 1]
+                x[i]['not_on_img'] = all_eyes[0, :, 0]
     if noerr:
         x = x[x['TrialError'] == 0]
     return x, log_dict
