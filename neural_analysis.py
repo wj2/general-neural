@@ -6,6 +6,7 @@ from sklearn import svm, linear_model
 from sklearn import discriminant_analysis as da
 from sklearn.decomposition import PCA
 from dPCA.dPCA import dPCA
+from hmmlearn import hmm
 import itertools as it
 import string
 import os
@@ -191,6 +192,40 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
         out = out + (all_bhvs,)
     return out
 
+def organize_spiking_data_pop(data, discrim_funcs, marker_funcs, pretime,
+                              posttime, binsize, binstep=None, cumulative=False, 
+                              drunfield='datanum', spikefield='spike_times',
+                              func_out=(bin_spiketimes, None), min_trials=None,
+                              modulated_dict=None, min_spks=None, zscore=False,
+                              collapse_time_zscore=False,
+                              bhv_extract_func=None):
+    out = organize_spiking_data(data, discrim_funcs, marker_funcs, pretime,
+                                posttime, binsize, binstep, cumulative,
+                                drunfield, spikefield, func_out, min_trials,
+                                bhv_extract_func=bhv_extract_func)
+    if bhv_extract_func is not None:
+        spks_conds, xs, bhv = out
+    else:
+        spks_conds, xs = out
+    dnums_conds = []
+    bhvs_conds = []
+    for i, spks in enumerate(spks_conds):
+        dnums = {x[0]:() for x in spks.keys()}
+        bhvs = {x[0]:() for x in spks.keys()}
+        for (dn, s), v in spks.items():
+            dnums[dn] = dnums[dn] + (v,)
+            if bhv_extract_func is not None:
+                bhvs[dn] = bhv[i][(dn, s)]
+        for dn in dnums.keys():
+            dnums[dn] = np.array(dnums[dn])
+        dnums_conds.append(dnums)
+        bhvs_conds.append(bhvs)
+    if bhv_extract_func is None:
+        out = dnums_conds, xs
+    else:
+        out = dnums_conds, xs, bhvs_conds
+    return out
+
 def zscore_organized_data(all_discs, axis=0):
     for k in all_discs[0].keys():
         spks_list = [d[k] for d in all_discs]
@@ -350,7 +385,52 @@ def roc(samples1, samples2):
     auc = -np.trapz(p_hit, p_fa)
     return auc
 
+"""
+chapter sof thesis and their status
+-- what is the status of assignment problem work
+-- spend most of time sketching experimental work
 
+"""
+
+### HMM ###
+def _hmm_pop_format(pop):
+    """ 
+    a typical pop is neurons x trials x timepoints 
+    for hmmlearn, need trials*timepoints x neurons and a list of
+    all timepoint lengths
+    """
+    spop = np.swapaxes(pop, 0, 1)
+    pop_flat = np.concatenate(spop, axis=1).T
+    len_arr = np.ones(pop.shape[1], dtype=int)*pop.shape[2]
+    return pop_flat, len_arr
+
+def _hmm_trial_format(states, lens):
+    n_trls = int(states.shape[0]/lens[0])
+    trls = np.reshape(states, (n_trls, lens[0]))
+    return trls
+
+def fit_hmm_pops(pops, n_components, n_fits=1, min_size=2, print_pop=False):
+    models = {}
+    for k, pop in pops.items():
+        if pop.shape[0] > min_size:
+            pop_flat, len_arr = _hmm_pop_format(pop)
+            if print_pop:
+                print('pop {}'.format(k))
+            pop_fits = []
+            scores = []
+            all_states = []
+            for i in range(n_fits):
+                m = hmm.GaussianHMM(n_components=n_components)
+                fit_obj = m.fit(pop_flat, len_arr)
+                pop_fits.append(fit_obj)
+                score = fit_obj.score(pop_flat)
+                scores.append(score)
+                states = fit_obj.predict(pop_flat)
+                trl_states = _hmm_trial_format(states, len_arr)
+                all_states.append(trl_states)
+            models[k] = (pop_fits, scores, all_states)
+    return models
+        
 ### SVM ###
 
 def sample_trials_svm(dims, n, with_replace=False):
@@ -364,8 +444,8 @@ def _fold_model(cat1, cat2, leave_out=1, model=svm.SVC, norm=True, eps=.00001,
                 shuff_labels=False, stability=False, params=None, 
                 collapse_time=False):
     alltr = np.concatenate((cat1, cat2), axis=1)
-    alllabels = np.concatenate((np.zeros(cat1.shape[1]), 
-                                np.ones(cat2.shape[1])))
+    alllabels = np.concatenate((np.zeros(cat1.shape[1], dtype=int), 
+                                np.ones(cat2.shape[1], dtype=int)))
     inds = np.arange(alltr.shape[1])
     np.random.shuffle(inds)
     alltr = alltr[:, inds, :]
@@ -434,11 +514,9 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
 
 def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  with_replace=False, shuff_labels=False, stability=False,
-                 penalty=1, format_=True, model=svm.LinearSVC, kernel='linear',
-                 collapse_time=False, regularizer='l1', dual=False,
-                 loss='squared_hinge', max_iter=1000, gamma='scale'):
-    spec_params = {'C':penalty, 'penalty':regularizer, 'dual':dual, 'loss':loss,
-                   'max_iter':max_iter, 'gamma':gamma}
+                 penalty=1, format_=True, model=svm.SVC, kernel='linear',
+                 collapse_time=False, max_iter=1000, gamma='scale'):
+    spec_params = {'C':penalty, 'max_iter':max_iter, 'gamma':gamma}
     if kernel != 'linear':
         spec_params.update((('kernel', kernel),))
         spec_params.pop('penalty')
@@ -450,6 +528,51 @@ def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                    stability=stability, params=spec_params, format_=format_,
                    model=model, collapse_time=collapse_time)
     return out
+
+def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
+                 resample=100, with_replace=False, shuff_labels=False, 
+                 stability=False, params=None, collapse_time=False,
+                 min_population=1, gamma='scale'):
+    if params is None:
+        params = {}
+        params['gamma'] = gamma
+    else:
+        params.update(('gamma', gamma))
+    n_pops = len(cat1.keys())
+    pop_shape = list(cat1.values())[0].shape
+    n_times = pop_shape[2]
+    if stability:
+        tcs_shape = (resample, n_times, n_times)
+    else:
+        tcs_shape = (resample, n_times)
+    tcs_pops = {}
+    ms_pops = {}
+    for k, c1_pop in cat1.items():
+        print('pop {}'.format(k))
+        c2_pop = cat2[k]
+        print(c1_pop.shape, c2_pop.shape)
+        n_neurs = c1_pop.shape[0]
+        n1_trials = c1_pop.shape[1]
+        n2_trials = c2_pop.shape[1]
+        if (n_neurs >= min_population and n1_trials >= require_trials
+            and n2_trials >= require_trials):
+            use_trials = min(n1_trials, n2_trials)
+            folds_n = int(np.floor((use_trials*2)/leave_out))
+            ms_shape = (resample, folds_n, n_times, n_neurs)
+            tcs = np.zeros(tcs_shape)
+            ms = np.zeros(ms_shape)
+            for i in range(resample):
+                print('resample {}'.format(i+1))
+                c1_samp = u.resample_on_axis(c1_pop, use_trials, 1)
+                c2_samp = u.resample_on_axis(c2_pop, use_trials, 1)
+                out = _fold_model(c1_samp, c2_samp, leave_out, model=model,
+                                  shuff_labels=shuff_labels,
+                                  stability=stability, params=params,
+                                  collapse_time=collapse_time)
+                tcs[i], _, _, ms[i] = out
+            tcs_pops[k] = tcs
+            ms_pops[k] = ms
+    return tcs_pops, ms
 
 def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
              resample=100, with_replace=False, shuff_labels=False, 

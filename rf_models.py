@@ -134,29 +134,58 @@ def eval_gaussian_rf(coords, cent, sizes, scale, baseline, sub_dim=None):
     r = ((scale - baseline)*r + baseline)
     return r
 
-def eval_gaussian_vector_rf(coords, cents, sizes, scale, baseline,
-                            sub_dim=None):
+def eval_vector_rf(coords, rf_func, *rf_params, sub_dim=None):
     coords = np.array(coords)
     if len(coords.shape) == 1:
         coords = np.reshape(coords, (1, -1))
     if sub_dim is not None:
         coords = coords[:, sub_dim]
     coords = np.expand_dims(coords, axis=1)
+    r = rf_func(coords, *rf_params)
+    return r
+
+def gaussian_func(coords, cents, sizes, scale, baseline):
     r = np.exp(-np.sum(((coords - cents)**2)/(2*sizes), axis=2))
     r = (scale - baseline)*r + baseline
     return r
 
-def eval_gaussian_vector_deriv(x, cents, sizes, scale, baseline, sub_dim=None):
-    x = np.array(x)
-    if len(x.shape) == 1:
-        x = np.reshape(x, (-1, 1))
-    if sub_dim is not None:
-        x = x[:, sub_dim]
-    x = np.expand_dims(x, axis=1)
-    inner = -np.sum(((x - cents)**2)/(2*sizes), axis=2)
+def gaussian_deriv_func(coords, cents, sizes, scale, baseline):
+    inner = -np.sum(((coords - cents)**2)/(2*sizes), axis=2)
     inner = np.expand_dims(inner, axis=2)
-    out = -(scale - baseline)*np.exp(inner)*(x - cents)/sizes
+    out = -(scale - baseline)*np.exp(inner)*(coords - cents)/sizes
     return out
+
+def ramp_func(coords, extent, scale, baseline):
+    slope = (scale - baseline)/extent
+    r = slope*coords + baseline
+    return r
+
+def ramp_deriv_func(coords, extent, scale, baseline):
+    slope = (scale - baseline)/extent
+    slope = np.expand_dims(slope, 0)
+    return slope
+
+def eval_ramp_vector_rf(coords, extent, scale, baseline, sub_dim=None):
+    r = eval_vector_rf(coords, ramp_func, extent, scale, baseline,
+                       sub_dim=sub_dim)
+    return r
+    
+def eval_gaussian_vector_rf(coords, cents, sizes, scale, baseline,
+                            sub_dim=None):
+    r = eval_vector_rf(coords, gaussian_func, cents, sizes, scale, baseline,
+                       sub_dim=sub_dim)
+    return r
+
+def eval_gaussian_vector_deriv(coords, cents, sizes, scale, baseline,
+                               sub_dim=None):
+    r = eval_vector_rf(coords, gaussian_deriv_func, cents, sizes, scale, baseline,
+                       sub_dim=sub_dim)
+    return r
+
+def eval_ramp_vector_deriv(coords, extent, scale, baseline, sub_dim=None):
+    r = eval_vector_rf(coords, ramp_deriv_func, extent, scale, baseline,
+                       sub_dim=sub_dim)
+    return r
 
 def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None):
     cents = np.array(cents)
@@ -172,6 +201,14 @@ def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None):
     drfs = ft.partial(eval_gaussian_vector_deriv, cents=cents, sizes=sizes,
                       scale=scale, baseline=baseline)
     return rfs, drfs
+
+def make_ramp_vector_rf(num, extent, scale, baseline, sub_dim=None):
+    extents = np.ones((num, 1))*extent
+    rfs = ft.partial(eval_ramp_vector_rf, extent=extents, scale=scale,
+                     baseline=baseline)
+    drfs = ft.partial(eval_ramp_vector_deriv, extent=extents, scale=scale,
+                      baseline=baseline)
+    return rfs, drfs 
 
 def make_gaussian_rf(cent, sizes, scale, baseline, sub_dim=None):
     sizes = np.reshape(sizes, (1, -1))
@@ -189,6 +226,26 @@ def make_2dgaussian_rf(cent, xsize, ysize, scale, baseline):
         return out
     return gaussian2d_rf
 
+def fim(pts, deriv_func, noise_var=None, cov=None):
+    pts = np.array(pts)
+    if len(pts.shape) < 2:
+        pts = np.expand_dims(pts, 0)
+    d_resps = list(deriv_func(pt) for pt in pts)
+    assert not (noise_var is None and cov is None)
+    if cov is None and noise_var is not None:
+        cov = np.identity(d_resps[0].shape[1])*noise_var
+    inv_cov = np.linalg.inv(cov)
+    mat_dim = np.product(pts.shape)
+    fim_mat = np.zeros((mat_dim, mat_dim))
+    mat_combs = it.combinations_with_replacement(range(mat_dim), 2)
+    for mc in mat_combs:
+        i, j = mc
+        val = np.dot(d_resps[i][0, :, 0],
+                     np.dot(inv_cov, d_resps[j][0, :, 0].T))
+        fim_mat[i, j] = val
+        fim_mat[j, i] = val
+    return fim_mat
+        
 class NullNoise(object):
     
     def __init__(self):
