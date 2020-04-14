@@ -531,16 +531,17 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                                         neuro['TrialTimes'][0,0],
                                         neuro['TrialDurations'][0,0], 
                                         buff=spks_buff)
+    if path_log is not None and log is None:
+        if repl_logpath is not None:
+            p, name = os.path.split(path_log)
+            path_log = os.path.join(repl_logpath, name)
+        if os.path.exists(path_log):
+            log = open(path_log, 'rb').readlines()
     if path_log is not None and not os.path.exists(path_log) and log is None:
         print('imglog path does not exist')
         print(path_log)
         print('and no log data provided; not attempting to load')
         path_log = None
-    if path_log is not None and log is None:
-        if repl_logpath is not None:
-            p, name = os.path.split(path_log)
-            path_log = os.path.join(repl_logpath, name)
-        log = open(path_log, 'rb').readlines()
     if dates is not None:
         date_pattern = '[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}'
         m = re.search(date_pattern, path_bhv)
