@@ -18,6 +18,9 @@ assignment_num_colors = np.array([(127,205,187),
                                   (135, 142, 136)])/256
 
 
+def turn_off_max_figure():
+    plt.rcParams.update({'figure.max_open_warning': 0})
+
 def set_poster_style(colors):
     plt.rcParams.update(plt.rcParamsDefault)
     plt.rc('axes', prop_cycle=cycler('color', colors))
