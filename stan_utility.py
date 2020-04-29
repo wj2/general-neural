@@ -4,6 +4,7 @@ import os
 import pickle
 import pystan as ps
 import re
+import arviz as az
 
 def recompile_model(mp):
     p, ext = os.path.splitext(mp)
@@ -12,10 +13,14 @@ def recompile_model(mp):
     pickle.dump(sm, open(mp, 'wb'))
     return mp
 
-def store_models(model_collection):
+def store_models(model_collection, store_arviz=False):
     new_collection = {}
     for k, (fit, params, diags) in model_collection.items():
-        new_fit = ModelFitContainer(fit)
+        if store_arviz:
+            arviz_manifest = params['arviz_manifest']
+        else:
+            arviz_manifest = None
+        new_fit = ModelFitContainer(fit, arviz_manifest=arviz_manifest)
         new_collection[k] = (new_fit, params, diags)
     return new_collection
 
@@ -52,11 +57,13 @@ def make_stan_model_dict(mf, samples=False):
 
 class ModelFitContainer(object):
 
-    def __init__(self, fit):
+    def __init__(self, fit, arviz_manifest=None):
         self.flatnames = fit.flatnames
         self._posterior_means = fit.get_posterior_mean()
         self.samples = fit.extract()
         self._summary = fit.stansummary()
+        if arviz_manifest is not None:
+            self.arviz = az.from_pystan(posterior=fit, **arviz_manifest)
 
     def get_posterior_mean(self):
         return self._posterior_means
