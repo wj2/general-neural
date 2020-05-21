@@ -542,6 +542,9 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         print(path_log)
         print('and no log data provided; not attempting to load')
         path_log = None
+        cns = bhv['ConditionNumber'][0,0][:, 0]
+        n_pltrials = sum(c in plt_conds for c in cns)
+        print('there are {} pref looking trials'.format(n_pltrials))
     if dates is not None:
         date_pattern = '[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}'
         m = re.search(date_pattern, path_bhv)
@@ -614,10 +617,15 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
             entry2 = log.pop(0)
             entry2 = entry2.strip(b'\r\n').split(b'\t')
             tn2, s2, _, cond2, vs2, cat2, img2 = entry2
-            # print(entry1)
-            # print(entry2)
-            # print(x[i]['trialnum'])
-            # print(filename)
+            # if int(tn1) != int(x[i]['trialnum']):
+            #     print(entry1)
+            #     print(entry2)
+            #     print(x[i]['trialnum'])
+            #     print(x[i]['trial_type'])
+            #     print(x[0]['trial_type'])
+            #     print(x[0]['trialnum'])
+            #     print(filename)
+            #     print(tn1, x[i]['trialnum'])
             assert tn1 == tn2
             assert int(tn1) == int(x[i]['trialnum'])
             img1_n, ext1 = os.path.splitext(img1)
