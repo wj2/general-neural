@@ -377,25 +377,34 @@ def plot_dpca_results(xs, res, dims=(1,), color_dict=None, title_dict=None,
         plt.show(block=False)
     return ax
 
-def label_line(start, end, text, ax, buff=.1, lat_offset=0, **kwargs):
-    lv = end - start
-    lv = lv/np.sqrt(np.sum(lv**2))
-    center_pt = np.mean(np.array((start, end)), axis=0)
-    orth_ang = ax.transData.transform_angles(np.array((90,)),
-                                             center_pt.reshape((1,2)))[0]
-    
-    ov = np.array((1, -lv[0]/lv[1]))
+def label_plot_line(xs, ys, text, ax, mid_samp=None, **kwargs):
+    if mid_samp is not None:
+        ms0 = mid_samp[0]
+        ms1 = mid_samp[1]
+    else:
+        ms0 = 0
+        ms1 = -1
+    start = np.array([xs[ms0], ys[ms0]])
+    end = np.array([xs[ms1], ys[ms1]])
+    return label_line(start, end, text, ax, **kwargs)
+
+def label_line(start, end, text, ax, buff=0, lat_offset=0, **kwargs):
+    t_start = ax.transData.transform_point(start)
+    t_end = ax.transData.transform_point(end)
+    t_lv = t_end - t_start
+    t_lv = t_lv/np.sqrt(np.sum(t_lv**2))
+    t_center_pt = np.mean(np.array((t_start, t_end)),
+                          axis=0)
+    ov = np.array((1, -t_lv[0]/t_lv[1]))
     ov = ov/np.sqrt(np.sum(ov**2))
-    center_pt = center_pt + lat_offset*lv
-    ang = -u.vector_angle(lv, (1,0), degrees=True)
+    ang = -u.vector_angle(t_lv, (1,0), degrees=True)
     if ang < -90:
         ang = -(180 - ang)
         ov = -ov
-    txt_pt = center_pt + ov*buff
-    trans_ang = ax.transData.transform_angles(np.array((ang,)),
-                                              txt_pt.reshape((1,2)))[0]
+    t_txt_pt = t_center_pt + ov*buff
+    txt_pt = ax.transData.inverted().transform_point(t_txt_pt)
     ax.text(txt_pt[0], txt_pt[1], text, 
-            rotation=trans_ang, verticalalignment='center',
+            rotation=ang, verticalalignment='bottom',
             horizontalalignment='center', rotation_mode='anchor', **kwargs)
     return ax
 
