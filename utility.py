@@ -859,16 +859,16 @@ def index_func(a, b, axis=0):
     ind[mask] = 0
     return ind
 
-def bootstrap_test(a, b, func, n=1000):
-    a_m, b_m = np.nanmean(a), np.nanmean(b)
+def bootstrap_test(a, b, func=np.nanmean, n=1000):
+    a_m, b_m = func(a), func(b)
     a_l, b_l = len(a), len(b)
     a_s, b_s = np.var(a)/a_l, np.var(b)/b_l
     t = (a_m - b_m)/np.sqrt((a_s/a_l) + (b_s/b_l))
-    z = np.nanmean(np.concatenate((a,b)))
+    z = func(np.concatenate((a,b)))
     a_i = a - a_m + z
     b_i = b - b_m + z
-    a_stars, a_sems = bootstrap_list(a_i, np.nanmean, n=n, ret_sem=True)
-    b_stars, b_sems = bootstrap_list(b_i, np.nanmean, n=n, ret_sem=True)
+    a_stars, a_sems = bootstrap_list(a_i, func, n=n, ret_sem=True)
+    b_stars, b_sems = bootstrap_list(b_i, func, n=n, ret_sem=True)
     t_stars = (a_stars - b_stars)/np.sqrt((a_sems/a_l) + (b_sems/b_l))
     p = np.sum(t_stars >= t)/n
     return p
