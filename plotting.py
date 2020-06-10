@@ -158,6 +158,16 @@ def plot_trial_structure(transition_times=(), labels=(), transition_dict=None,
                     fontsize=fontsize)
     return ax
 
+def add_vlines(pos, ax, color=(.8, .8, .8), alpha=1, **kwargs):
+    yl = ax.get_ylim()
+    ax.vlines(pos, yl[0], yl[1], color=color, alpha=alpha, **kwargs)
+    ax.set_ylim(yl)
+
+def add_hlines(pos, ax, color=(.8, .8, .8), alpha=1, **kwargs):
+    xl = ax.get_xlim()
+    ax.hlines(pos, xl[0], xl[1], color=color, alpha=alpha, **kwargs)
+    ax.set_xlim(xl)
+    
 def pcolormesh_axes(axvals, val_len, diff_ind=0):
     if len(axvals) == val_len:
         diff = np.diff(axvals)[diff_ind]
@@ -243,11 +253,22 @@ def add_color(color, add_amt):
                 axis=0)
     return nc
 
+def plot_pt_werr(x, data, central_tendency=np.nanmean, ax=None, **kwargs):
+    if ax is None:
+        f = plt.figure()
+        ax = f.add_subplot(1,1,1)
+    xs = np.expand_dims(x, 0)
+    dats = np.expand_dims(data, 1)
+    l = plot_trace_werr(xs, dats, ax=ax, fill=False,
+                        **kwargs)
+    ax.plot(xs, central_tendency(dats, axis=0), 'o', color=l[0].get_color())
+    return ax
+    
 def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
                     fill=True, log_x=False, log_y=False, line_alpha=1,
-                    jagged=False, **kwargs):
+                    jagged=False, points=False, **kwargs):
     with plt.style.context(style):
         if ax is None:
             f = plt.figure()
@@ -271,10 +292,12 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
             xs = xs_orig
         trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha,
                       **kwargs)
+        if color is None:
+            color = trl[0].get_color()
+        if points:
+            ax.plot(xs, tr, 'o', color=color, alpha=line_alpha, **kwargs)
         alpha = min(line_alpha, alpha)
         if len(dat.shape) > 1 or jagged:
-            if color is None:
-                color = trl[0].get_color()
             if fill:
                 ax.fill_between(xs, tr+er[1, :], tr+er[0, :], color=color, 
                                 alpha=alpha)
