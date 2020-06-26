@@ -4,6 +4,7 @@ import scipy.stats as sts
 import general.utility as u
 from sklearn import svm, linear_model
 from sklearn import discriminant_analysis as da
+import sklearn.pipeline as sklpipe
 from sklearn.decomposition import PCA
 import sklearn.exceptions as ske
 import sklearn.model_selection as skms 
@@ -303,11 +304,15 @@ def filter_modulated(all_discs, md):
     return all_discs
 
 def filter_min_trials(all_discs, min_trials):
+    try:
+        len(min_trials)
+    except TypeError:
+        min_trials = np.ones(len(all_discs))*min_trials
     for k in list(all_discs[0].keys()):
         include = np.zeros(len(all_discs))
         for i in range(len(all_discs)):
             n_trls = all_discs[i][k].shape[0]
-            include[i] = n_trls >= min_trials
+            include[i] = n_trls >= min_trials[i]
         final_include = np.product(include)
         if not final_include:
             for j in range(len(all_discs)):
@@ -453,23 +458,75 @@ def fit_hmm_pops(pops, n_components, n_fits=1, min_size=2, print_pop=False):
         
 ### SVM ###
 
-def sample_trials_svm(dims, n, with_replace=False):
-    n_trls = int(n*dims.shape[1])
-    trls = np.zeros((len(dims), n_trls, dims[0,0].shape[1]))
+def sample_trials_svm(dims, n, with_replace=False, pop=False, sample_with=None):
+    trls = np.zeros((dims.shape[0], dims.shape[1], n, dims[0,0].shape[1]))
+    trl_inds = np.zeros((dims.shape[1], int(n)), dtype=int)
+    if sample_with is not None:
+        samps = np.zeros((dims.shape[1], n))
     for i, d in enumerate(dims):
         for j, c in enumerate(d):
-            trl_inds = np.random.choice(c.shape[0], int(n),
-                                        replace=with_replace)
-            trls[i, j*n:(j+1)*n, :] =  c[trl_inds, :]
-    return trls
+            if i == 0 or not pop:
+                trl_inds[j] = np.random.choice(c.shape[0], int(n),
+                                               replace=with_replace)
+                if sample_with is not None:
+                    samps[j] = sample_with[j][trl_inds[j]]
+            trls[i, j] =  c[trl_inds[j]]
+    if sample_with is not None:
+        out = trls, samps
+    else:
+        out = trls
+    return out
 
+def _generate_unequal_fold(alltr, alllabels, leave_out, i):
+    train_tr = np.concatenate((alltr[:, (i+1)*leave_out:], 
+                               alltr[:, :i*leave_out]),
+                              axis=1)
+    train_l = np.concatenate((alllabels[(i+1)*leave_out:], 
+                              alllabels[:i*leave_out]))
+    test_tr = alltr[:, i*leave_out:(i+1)*leave_out]
+    test_l = alllabels[i*leave_out:(i+1)*leave_out]
+    return train_tr, train_l, test_tr, test_l
+
+def _generate_equal_fold(cat1, cat2, leave_out, i):
+    leave_out = int(leave_out/cat1.shape[1])
+    l1 = np.zeros(cat1.shape[1:3])
+    l2 = np.ones(cat2.shape[1:3])
+    for j in range(cat1.shape[1]):
+        train_c1_j = np.concatenate((cat1[:, j, (i+1)*leave_out:],
+                                     cat1[:, j, :i*leave_out]),
+                                    axis=1)
+        train_l1_j = np.zeros(train_c1_j.shape[1])
+        train_c2_j = np.concatenate((cat2[:, j, (i+1)*leave_out:],
+                                     cat2[:, j, :i*leave_out]),
+                                    axis=1)
+        train_l2_j = np.ones(train_c2_j.shape[1])
+        test_j = np.concatenate((cat1[:, j, i*leave_out:(i+1)*leave_out],
+                                 cat2[:, j, i*leave_out:(i+1)*leave_out]),
+                                axis=1)
+        test_l_j = np.concatenate((np.zeros(leave_out), np.ones(leave_out)))
+        if j == 0:
+            train_tr = np.concatenate((train_c1_j, train_c2_j), axis=1)
+            train_l = np.concatenate((train_l1_j, train_l2_j))
+            test_tr = test_j
+            test_l = test_l_j
+        else:
+            train_tr = np.concatenate((train_tr, train_c1_j, train_c2_j),
+                                      axis=1)
+            train_l = np.concatenate((train_l, train_l1_j, train_l2_j))
+            test_tr = np.concatenate((test_tr, test_j), axis=1)
+            test_l = np.concatenate((test_l, test_l_j))
+    return train_tr, train_l, test_tr, test_l        
+    
 def _fold_model(cat1, cat2, leave_out=1, model=svm.SVC, norm=True, eps=.00001,
                 shuff_labels=False, stability=False, params=None, 
-                collapse_time=False, equal_fold=False):
-    alltr = np.concatenate((cat1, cat2), axis=1)
-    l1 = np.zeros(cat1.shape[1], dtype=int)
-    l2 = np.ones(cat2.shape[1], dtype=int)
-    alllabels = np.concatenate((l1, l2))
+                collapse_time=False, equal_fold=False, filter_warnings=False):
+    c1_tr = np.concatenate(tuple(cat1[:, i] for i in range(cat1.shape[1])),
+                           axis=1)
+    c2_tr = np.concatenate(tuple(cat2[:, i] for i in range(cat2.shape[1])),
+                           axis=1)
+    alltr = np.concatenate((c1_tr, c2_tr), axis=1)
+    alllabels = np.concatenate((np.zeros(c1_tr.shape[1]),
+                                np.ones(c2_tr.shape[1])))
     inds = np.arange(alltr.shape[1])
     np.random.shuffle(inds)
     alltr = alltr[:, inds, :]
@@ -477,48 +534,39 @@ def _fold_model(cat1, cat2, leave_out=1, model=svm.SVC, norm=True, eps=.00001,
         inds = np.arange(alltr.shape[1])
         np.random.shuffle(inds)
     alllabels = alllabels[inds]
+
     if norm:
         mu = np.expand_dims(alltr.mean(1), 1)
         sig = np.expand_dims(alltr.std(1), 1)
         sig[sig < eps] = 1.
-        alltr = (alltr - mu)/sig
-    if equal_fold and norm:
-        cat1 = (cat1 - mu)/sig
-        cat2 = (cat2 - mu)/sig
-    folds_n, leave_out = _compute_folds_n(cat1.shape[1], leave_out, equal_fold)
-    if stability:
-        results = np.zeros((folds_n, cat1.shape[2], cat1.shape[2]))
-    else:
-        results = np.zeros((folds_n, cat1.shape[2]))
-    sup_vecs = np.zeros((folds_n, cat1.shape[2], cat1.shape[0]))
-    inter = np.zeros((folds_n, cat1.shape[2]))
-    for i in range(folds_n):
-        if not equal_fold:
-            train_tr = np.concatenate((alltr[:, (i+1)*leave_out:], 
-                                       alltr[:, :i*leave_out]),
-                                      axis=1)
-            train_l = np.concatenate((alllabels[(i+1)*leave_out:], 
-                                      alllabels[:i*leave_out]))
-            test_tr = alltr[:, i*leave_out:(i+1)*leave_out]
-            test_l = alllabels[i*leave_out:(i+1)*leave_out]
+        if equal_fold:
+            mu = np.expand_dims(mu, 1)
+            sig = np.expand_dims(sig, 1)
+            cat1 = (cat1 - mu)/sig
+            cat2 = (cat2 - mu)/sig
         else:
-            train_tr = np.concatenate((cat1[:, (i+1)*leave_out:],
-                                       cat1[:, :i*leave_out],
-                                       cat2[:, (i+1)*leave_out:],
-                                       cat2[:, :i*leave_out]),
-                                      axis=1)
-            train_l = np.concatenate((l1[(i+1)*leave_out:], 
-                                      l1[:i*leave_out],
-                                      l2[(i+1)*leave_out:], 
-                                      l2[:i*leave_out]))
-            test_tr = np.concatenate((cat1[:, i*leave_out:(i+1)*leave_out],
-                                      cat2[:, i*leave_out:(i+1)*leave_out]),
-                                     axis=1)
-            test_l = np.concatenate((l1[i*leave_out:(i+1)*leave_out],
-                                     l2[i*leave_out:(i+1)*leave_out]))
-        out = model_decode_tc(train_tr, train_l, test_tr, test_l, model=model, 
-                              stability=stability, params=params, 
-                              collapse_time=collapse_time)
+            alltr = (alltr - mu)/sig
+            
+    folds_n, leave_out = _compute_folds_n(cat1.shape[1]*cat1.shape[2],
+                                          leave_out, equal_fold)
+    if stability:
+        results = np.zeros((folds_n, cat1.shape[3], cat1.shape[3]))
+    else:
+        results = np.zeros((folds_n, cat1.shape[3]))
+    sup_vecs = np.zeros((folds_n, cat1.shape[3], cat1.shape[0]))
+    inter = np.zeros((folds_n, cat1.shape[3]))
+    for i in range(folds_n):
+        if equal_fold:
+            out = _generate_equal_fold(cat1, cat2, leave_out, i)
+        else:
+            out = _generate_unequal_fold(alltr, alllabels, leave_out, i)
+        train_tr, train_l, test_tr, test_l = out
+        with warnings.catch_warnings():
+            if filter_warnings:
+                warnings.filterwarnings('ignore')            
+            out = model_decode_tc(train_tr, train_l, test_tr, test_l, model=model, 
+                                  stability=stability, params=params, 
+                                  collapse_time=collapse_time)
         results[i], sup_vecs[i], inter[i] = out
     mr = np.mean(results, axis=0)
     return mr, results, alltr, sup_vecs, inter
@@ -556,10 +604,95 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
             inter[i] = s.intercept_[0]
     return percent_corr, svs, inter
 
+
+def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
+                   with_replace=False, shuff_labels=False, stability=False,
+                   penalty=1, format_=True, model=svm.SVR, kernel='rbf',
+                   collapse_time=False, max_iter=10000, gamma='scale',
+                   pop=False, min_population=1, multi_cond=False, **kwargs):
+    spec_params = {'C':penalty, 'max_iter':max_iter, 'gamma':gamma,
+                   'kernel':kernel}
+    if pop:
+        pseudopop = False
+        ds_dict = ds
+        r_dict = r
+    else:
+        pseudopop = True
+        ds_dict = tuple({'all':ds_i} for ds_i in ds)
+        r_dict = tuple({'all':r_i} for r_i in r)
+    out = pop_regression(ds_dict, r_dict, leave_out=leave_out,
+                         multi_cond=multi_cond,
+                         require_trials=require_trials, resample=resample,
+                         with_replace=with_replace, shuff_labels=shuff_labels,
+                         stability=stability, params=spec_params,
+                         format_=format_, model=model, pseudopop=pseudopop,
+                         collapse_time=collapse_time, **kwargs)
+    return out
+
+def pop_regression(ds, r, leave_out=1, require_trials=15, 
+                   resample=100, with_replace=False, shuff_labels=False, 
+                   stability=False, params=None, collapse_time=False,
+                   model=svm.SVR,
+                   min_population=1, use_avail_trials=True, equal_fold=False,
+                   multi_cond=False, pseudopop=False, norm=True, **kwargs):
+    if not multi_cond:
+        ds = (ds,)
+        r = (r,)
+    n_pops = len(ds[0].keys())
+    tcs_pops = {}
+    ms_pops = {}
+    for k in ds[0].keys():
+        ds_pop = tuple(ds[i][k] for i in range(len(ds)))
+        r_pop = tuple(r[i][k] for i in range(len(r)))
+        if pseudopop:
+            pop_shape = list(ds_pop[0].values())[0].shape
+        else:
+            pop_shape = ds_pop[0].shape[1:]
+        n_times = pop_shape[1]
+        if stability:
+            tcs_shape = (resample, n_times, n_times)
+        else:
+            tcs_shape = (resample, n_times)
+        out = _svm_organize(ds_pop, require_trials=require_trials,
+                            use_avail_trials=use_avail_trials, pop=True)
+        ds_f, use_trials, _ = out
+        r_f = np.array(r_pop, dtype=object)
+        n_neurs = ds_f.shape[0]
+        if n_neurs >= min_population:
+            print('session {}'.format(k))
+            folds_n, leave_out = _compute_folds_n(ds_f.shape[1]*use_trials,
+                                                  leave_out, equal_fold)
+            ms_shape = (resample, folds_n, n_times, n_neurs)
+            tcs = np.zeros(tcs_shape)
+            ms = np.zeros(ms_shape)
+            for i in range(resample):
+                ds_samp, r_samp = sample_trials_svm(ds_f, use_trials,
+                                                    with_replace=with_replace,
+                                                    pop=True, sample_with=r_f)
+                # make pipeline
+                steps = []
+                if norm:
+                    steps.append(skl.preprocessing.StandardScaler())
+                clf = model(**params)
+                steps.append(clf)
+                
+                pipe = sklpipe.make_pipeline(*steps)
+                ds_flat = np.concatenate(tuple(ds_samp[:, i] for i in
+                                               range(ds_samp.shape[1])),
+                                         axis=1)
+                r_flat = np.concatenate(r_samp, axis=0)
+                for j in range(n_times):
+                    sk_cv = skms.cross_val_score
+                    scores = sk_cv(pipe, ds_flat[..., j].T, r_flat, cv=folds_n)
+                    tcs[i, j] = np.mean(scores)
+            tcs_pops[k] = tcs
+            ms_pops[k] = ms
+    return tcs_pops, ms    
+
 def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  with_replace=False, shuff_labels=False, stability=False,
                  penalty=1, format_=True, model=svm.SVC, kernel='linear',
-                 collapse_time=False, max_iter=1000, gamma='scale', pop=False,
+                 collapse_time=False, max_iter=10000, gamma='scale', pop=False,
                  min_population=1, multi_cond=False, **kwargs):
     spec_params = {'C':penalty, 'max_iter':max_iter, 'gamma':gamma,
                    'kernel':kernel, 'class_weight':'balanced'}
@@ -573,7 +706,7 @@ def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                            require_trials=require_trials, resample=resample,
                            with_replace=with_replace, shuff_labels=shuff_labels,
                            stability=stability, params=spec_params,
-                           model=model,
+                           model=model, multi_cond=multi_cond,
                            min_population=min_population,
                            collapse_time=collapse_time, **kwargs)
     else:
@@ -588,9 +721,12 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
                  resample=100, with_replace=False, shuff_labels=False, 
                  stability=False, params=None, collapse_time=False,
                  min_population=1, use_avail_trials=True, equal_fold=False,
-                 **kwargs):
-    n_pops = len(cat1.keys())
-    pop_shape = list(cat1.values())[0].shape
+                 multi_cond=False, **kwargs):
+    if not multi_cond:
+        cat1 = (cat1,)
+        cat2 = (cat2,)
+    n_pops = len(cat1[0].keys())
+    pop_shape = list(cat1[0].values())[0].shape
     n_times = pop_shape[2]
     if stability:
         tcs_shape = (resample, n_times, n_times)
@@ -598,70 +734,87 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
         tcs_shape = (resample, n_times)
     tcs_pops = {}
     ms_pops = {}
-    for k, c1_pop in cat1.items():
-        c2_pop = cat2[k]
-        n_neurs = c1_pop.shape[0]
-        n1_trials = c1_pop.shape[1]
-        n2_trials = c2_pop.shape[1]
-        if (n_neurs >= min_population and n1_trials >= require_trials
-            and n2_trials >= require_trials):
+    for k in cat1[0].keys():
+        c1_pop = tuple(cat1[i][k] for i in range(len(cat1)))
+        c2_pop = tuple(cat2[i][k] for i in range(len(cat2)))
+        out = _svm_organize(c1_pop, c2_pop, require_trials=require_trials,
+                            use_avail_trials=use_avail_trials, pop=True)
+        c1_f, c2_f, n_trls, _ = out
+
+        n_neurs = c1_f.shape[0]
+        if n_neurs >= min_population:
             if use_avail_trials:
-                use_trials = min(n1_trials, n2_trials)
+                use_trials = n_trls
             else:
                 use_trials = require_trials
-            folds_n, leave_out = _compute_folds_n(use_trials, leave_out,
-                                                  equal_fold)
+            folds_n, leave_out = _compute_folds_n(c1_f.shape[1]*use_trials,
+                                                  leave_out, equal_fold)
             ms_shape = (resample, folds_n, n_times, n_neurs)
             tcs = np.zeros(tcs_shape)
             ms = np.zeros(ms_shape)
             for i in range(resample):
-                c1_samp = u.resample_on_axis(c1_pop, use_trials, 1,
-                                             with_replace=with_replace)
-                c2_samp = u.resample_on_axis(c2_pop, use_trials, 1,
-                                             with_replace=with_replace)
-                with warnings.catch_warnings():
-                    warnings.filterwarnings('ignore')
-                    out = _fold_model(c1_samp, c2_samp, leave_out,
-                                      model=model,
-                                      shuff_labels=shuff_labels,
-                                      stability=stability, params=params,
-                                      collapse_time=collapse_time,
-                                      equal_fold=equal_fold,
-                                      **kwargs)
-                    tcs[i], _, _, ms[i], _ = out
+                c1_samp = sample_trials_svm(c1_f, use_trials,
+                                            with_replace=with_replace,
+                                            pop=True)
+                c2_samp = sample_trials_svm(c2_f, use_trials,
+                                            with_replace=with_replace,
+                                            pop=True)
+                out = _fold_model(c1_samp, c2_samp, leave_out,
+                                  model=model,
+                                  shuff_labels=shuff_labels,
+                                  stability=stability, params=params,
+                                  collapse_time=collapse_time,
+                                  equal_fold=equal_fold,
+                                  **kwargs)
+                tcs[i], _, _, ms[i], _ = out
             tcs_pops[k] = tcs
             ms_pops[k] = ms
     return tcs_pops, ms
 
-def _svm_organize(c1, c2, require_trials=20, use_avail_trials=True):
-    lens = np.ones(len(c1[0]))*np.inf
-    c1_arr = np.zeros((lens.shape[0], len(c1)), dtype=object)
-    c2_arr = np.zeros((lens.shape[0], len(c2)), dtype=object)
-    for i, k in enumerate(c1[0].keys()):
-        for j, c1_i in enumerate(c1):
-            c1_i_k = len(c1_i[k])
-            lens[i] = min(lens[i], c1_i_k)
-            c1_arr[i, j] = c1_i[k]
-        for j, c2_i in enumerate(c2):
-            c2_i_k = len(c2_i[k])
-            lens[i] = min(lens[i], c2_i_k)
-            c2_arr[i, j] = c2_i[k]
+def neural_format(c, pop=False):
+    lens = np.ones(len(c[0]))*np.inf
+    c_arr = np.zeros((lens.shape[0], len(c)), dtype=object)
+    if pop:
+        for i in range(len(c[0])): 
+            for j, c_i in enumerate(c):
+                c_i_k = len(c_i[i])
+                lens[i] = min(lens[i], c_i_k)
+                c_arr[i, j] = c_i[i] 
+    else:
+        for i, k in enumerate(c[0].keys()):
+            for j, c_i in enumerate(c):
+                c_i_k = len(c_i[k])
+                lens[i] = min(lens[i], c_i_k)
+                c_arr[i, j] = c_i[k]
+    return c_arr, lens
+                
+def _svm_organize(*args, require_trials=20, use_avail_trials=True, pop=False,
+                  reduce_required=True):
+    c_arrs, len_is = [], []
+    for a in args:
+        c, l = neural_format(a, pop=pop)
+        c_arrs.append(c)
+        len_is.append(l)
+    lens = np.min(np.stack(len_is, axis=1), axis=1)
+    if reduce_required:
+        require_trials = require_trials/c_arrs[0].shape[1]
     mask = lens >= require_trials
     lens = lens[mask]
-    c1_arr = c1_arr[mask]
-    c2_arr = c2_arr[mask]
+    c_arr_masked = []
+    for ci in c_arrs:
+        c_arr_masked.append(ci[mask])
     if use_avail_trials:
         require_trials = min(lens)
-    x_len = c1_arr[0, 0].shape[1]
-    return c1_arr, c2_arr, int(require_trials), x_len
+    x_len = c_arr_masked[0][0, 0].shape[1]
+    out = c_arr_masked + [int(require_trials), x_len]
+    return out
     
 
 def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
              resample=100, with_replace=False, shuff_labels=False, 
              stability=False, params=None, collapse_time=False,
              format_=True, equal_fold=False, multi_cond=False,
-             use_avail_trials=True,
-             **kwargs):
+             use_avail_trials=True, **kwargs):
     if format_:
         if not multi_cond:
             cat1 = (cat1,)
@@ -716,7 +869,8 @@ def svm_cross_decoding(c1_train, c1_test, c2_train, c2_test, require_trials=15,
                        model=svm.SVC, stability=False, shuff_labels=False,
                        params=None, collapse_time=False, format_=True,
                        with_replace=False, max_iter=1000, gamma='scale',
-                       penalty=1, kernel='linear',
+                       penalty=1, kernel='linear', multi_cond=False,
+                       use_avail_trials=True,
                        resample=100, **kwargs):
     params = {'C':penalty, 'max_iter':max_iter, 'gamma':gamma,
                    'kernel':kernel}
@@ -726,44 +880,59 @@ def svm_cross_decoding(c1_train, c1_test, c2_train, c2_test, require_trials=15,
         params.pop('dual')
         params.pop('loss')
     if format_:
-        cat1 = np.array(list(c1_train.values()))
-        cat2 = np.array(list(c2_train.values()))
-        bool1 = [x.shape[0] < require_trials for x in cat1]
-        bool2 = [x.shape[0] < require_trials for x in cat2]
-        combool = np.logical_not(np.logical_or(bool1, bool2))
-        c1_train_f = cat1[combool]
-        c2_train_f = cat2[combool]
-        cat1 = np.array(list(c1_test.values()))
-        cat2 = np.array(list(c2_test.values()))
-        bool1 = [x.shape[0] < require_trials for x in cat1]
-        bool2 = [x.shape[0] < require_trials for x in cat2]
-        combool = np.logical_not(np.logical_or(bool1, bool2))
-        c1_test_f = cat1[combool]
-        c2_test_f = cat2[combool]
+        if not multi_cond:
+            c1_train = (c1_train,)
+            c2_train = (c2_train,)
+            c1_test = (c1_test,)
+            c2_test = (c2_test,)
+        out = _svm_organize(c1_train, c2_train, require_trials=require_trials,
+                            use_avail_trials=use_avail_trials)
+        c1_train_f, c2_train_f, require_trials_train, x_len = out
+        out = _svm_organize(c1_test, c2_test, require_trials=require_trials,
+                            use_avail_trials=use_avail_trials)
+        c1_test_f, c2_test_f, require_trials_test, x_len = out
     else:
-        c1_train_f = cat1
-        c2_train_f = cat2
-        c1_test_f = c1_test
-        c2_test_f = c2_test
+        if not multi_cond:
+            cat1_f = np.array(c1_train, dtype=object)
+            c1_train_f = np.expand_dims(cat1_f, 1)
+            cat2_f = np.array(c2_train, dtype=object)
+            c2_train_f = np.expand_dims(cat2_f, 1)
+            cat1_f = np.array(c1_test, dtype=object)
+            c1_test_f = np.expand_dims(cat1_f, 1)
+            cat2_f = np.array(c2_test, dtype=object)
+            c2_test_f = np.expand_dims(cat2_f, 1)
+        else:
+            c1_train_f = c1_train
+            c2_train_f = c2_train
+            c1_test_f = c1_test
+            c2_test_f = c2_test
+        x_len = c2_train_f[0, 0].shape[1]
+        if use_avail_trials:
+            c1_min = min(len(c1_i) for c1_i in c1_train_f)
+            c2_min = min(len(c2_i) for c2_i in c2_train_f)
+            require_trials_train = min(c1_min, c2_min)
+            c1_min = min(len(c1_i) for c1_i in c1_test_f)
+            c2_min = min(len(c2_i) for c2_i in c2_test_f)
+            require_trials_test = min(c1_min, c2_min)
     if stability:
-        tcs_shape = (resample, c1_train_f[0].shape[1], c1_train_f[0].shape[1])
+        tcs_shape = (resample, x_len, x_len)
     else:
-        tcs_shape = (resample, c1_train_f[0].shape[1])
+        tcs_shape = (resample, x_len)
     folds_n = 1
-    ms = np.zeros((resample, folds_n, c1_train_f[0].shape[1],
+    ms = np.zeros((resample, folds_n, x_len,
                    c1_train_f.shape[0]))
-    inter = np.zeros((resample, folds_n, c1_train_f[0].shape[1]))
+    inter = np.zeros((resample, folds_n, x_len))
     tcs = np.zeros(tcs_shape)
 
     for i in range(resample):
-        c1_train_samp = sample_trials_svm(c1_train_f, require_trials,
-                                          with_replace)
-        c2_train_samp = sample_trials_svm(c2_train_f, require_trials,
-                                          with_replace)
-        c1_test_samp = sample_trials_svm(c1_test_f, require_trials,
-                                          with_replace)
-        c2_test_samp = sample_trials_svm(c2_test_f, require_trials,
-                                          with_replace)
+        c1_train_samp = sample_trials_svm(c1_train_f, require_trials_train,
+                                          with_replace)[:, 0]
+        c2_train_samp = sample_trials_svm(c2_train_f, require_trials_train,
+                                          with_replace)[:, 0]
+        c1_test_samp = sample_trials_svm(c1_test_f, require_trials_test,
+                                          with_replace)[:, 0]
+        c2_test_samp = sample_trials_svm(c2_test_f, require_trials_test,
+                                          with_replace)[:, 0]
         train_samp = np.concatenate((c1_train_samp, c2_train_samp),
                                     axis=1)
         test_samp = np.concatenate((c1_test_samp, c2_test_samp),
@@ -776,7 +945,6 @@ def svm_cross_decoding(c1_train, c1_test, c2_train, c2_test, require_trials=15,
                                               dtype=int), 
                                      np.ones(c2_test_samp.shape[1],
                                              dtype=int)))
-        
         out = model_decode_tc(train_samp, trainlabels, test_samp, testlabels,
                               model=model, stability=stability, params=params,
                               collapse_time=collapse_time)

@@ -21,18 +21,20 @@ assignment_num_colors = np.array([(127,205,187),
 def turn_off_max_figure():
     plt.rcParams.update({'figure.max_open_warning': 0})
 
-def set_poster_style(colors):
+def set_poster_style(colors=None):
     plt.rcParams.update(plt.rcParamsDefault)
-    plt.rc('axes', prop_cycle=cycler('color', colors))
+    if colors is not None:
+        plt.rc('axes', prop_cycle=cycler('color', colors))
     plt.rcParams.update({'font.size': 16})
     plt.rcParams.update({'axes.labelsize':22})
     plt.rcParams.update({'xtick.labelsize':15})
     plt.rcParams.update({'ytick.labelsize':15})
     plt.rcParams.update({'lines.linewidth':6})
 
-def set_paper_style(colors):
+def set_paper_style(colors=None):
     plt.rcParams.update(plt.rcParamsDefault)
-    plt.rc('axes', prop_cycle=cycler('color', colors))
+    if colors is not None:
+        plt.rc('axes', prop_cycle=cycler('color', colors))
     plt.rcParams.update({'font.size': 8})
     plt.rcParams.update({'axes.labelsize':8})
     plt.rcParams.update({'xtick.labelsize':6})
