@@ -40,5 +40,5 @@ def set_paper_style(colors=None):
     plt.rcParams.update({'xtick.labelsize':6})
     plt.rcParams.update({'ytick.labelsize':6})
     plt.rcParams.update({'lines.linewidth':2.5})
-    plt.rcParams.update({'lines.markersize':5})
+    plt.rcParams.update({'lines.markersize':2})
     

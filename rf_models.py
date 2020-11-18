@@ -187,6 +187,32 @@ def eval_ramp_vector_deriv(coords, extent, scale, baseline, sub_dim=None):
                        sub_dim=sub_dim)
     return r
 
+def get_output_func_distribution_shapes(n_units_pd, input_distributions):
+    means = np.zeros((len(input_distributions), n_units_pd))
+    wids = np.zeros_like(means)
+    percent_size = 1/n_units_pd
+    for j in range(len(input_distributions)):
+        for i in range(n_units_pd):
+            perc = (i + .5)*percent_size
+            m = input_distributions[j].ppf(perc)
+            means[j, i] = m
+        dm = np.diff(means[j])
+        dm_p1 = np.zeros(n_units_pd)
+        half = int(np.floor(n_units_pd/2))
+        dm_p1[:half] = dm[:half]
+        dm_p1[half:] = dm[-half:]
+        wids[j] = dm_p1
+    means_all = np.array(list(it.product(*means)))
+    wids_all = np.array(list(it.product(*wids)))
+    return means_all, wids_all
+
+def get_distribution_gaussian_resp_func(n_units_pd, input_distributions, scale=1,
+                                        baseline=0):
+    ms, ws = get_output_func_distribution_shapes(n_units_pd, input_distributions)
+    resp_func, d_resp_func = make_gaussian_vector_rf(ms, ws, scale,
+                                                     baseline)
+    return resp_func, d_resp_func, ms, ws
+
 def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None):
     cents = np.array(cents)
     sizes = np.array(sizes)

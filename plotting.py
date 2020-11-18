@@ -121,6 +121,11 @@ def sem(dat, axis=0, sub=1):
     err = np.vstack((err_1d, -err_1d))
     return err
 
+def std(dat, axis=0):
+    err_1d = np.nanstd(dat, axis=axis)
+    err = np.vstack((err_1d, -err_1d))
+    return err
+
 def biased_sem(dat, axis=0):
     err = sem(dat, axis=axis, sub=0)
     return err
@@ -268,7 +273,7 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
                     fill=True, log_x=False, log_y=False, line_alpha=1,
-                    jagged=False, points=False, **kwargs):
+                    jagged=False, points=False, elinewidth=1, **kwargs):
     with plt.style.context(style):
         if ax is None:
             f = plt.figure()
@@ -277,6 +282,8 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
             ax.set_xscale('log')
         if log_y:
             ax.set_yscale('log')
+        xs_orig = np.array(xs_orig)
+        dat = np.array(dat)
         if jagged:
             tr = np.array(list(central_tendency(d) for d in dat))
             er = np.array(list(error_func(d)[:, 0] for d in dat)).T
@@ -303,14 +310,14 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                                 alpha=alpha)
             else:
                 ax.errorbar(xs, tr, (-er[1, :], er[0, :]), color=color,
-                            **kwargs)
+                            elinewidth=elinewidth, **kwargs)
         if len(xs_orig.shape) > 1:
             if fill:
                 ax.fill_betweenx(tr, xs+xs_er[1, :], xs+xs_er[0, :], 
                                  color=color, alpha=alpha)
             else:
                 ax.errorbar(xs, tr, yerr=None, xerr=(-er[1, :], er[0, :]),
-                            color=color, **kwargs)
+                            color=color, elinewidth=elinewidth, **kwargs)
         ax.set_title(title)
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
@@ -473,11 +480,17 @@ def _cent_selectivity(inds, ps, mags, p_thr, eps, central_func=np.nanmedian):
     use_d = mags[np.logical_and(ps < p_thr, mags > eps)]
     return central_func(use_d)
                             
-def _set_violin_color(vp, color):
+def set_violin_color(vp, color):
     for b in vp['bodies']:
         b.set_facecolor(color)
         b.set_edgecolor(color)
 
+def clean_plot_bottom(ax, keeplabels=False):
+    ax.spines['bottom'].set_visible(False)
+    ax.xaxis.set_tick_params(size=0)
+    if not keeplabels:
+        plt.setp(ax.get_xticklabels(), visible=False)
+        
 def clean_plot(ax, i, max_i=None, ticks=True, spines=True, horiz=True):
     if spines:
         ax.spines['top'].set_visible(False)
@@ -494,8 +507,114 @@ def clean_plot(ax, i, max_i=None, ticks=True, spines=True, horiz=True):
             if ticks:
                 plt.setp(ax.get_xticklabels(), visible=False)
                 ax.xaxis.set_tick_params(size=0)
-                
-        
+
+def make_xaxis_scale_bar(ax, magnitude=None, double=True, anchor=0, bottom=True,
+                         true_scale=False, label='', text_buff=.22):
+    xl = ax.get_xlim()
+    yl = ax.get_ylim()
+    if magnitude is None:
+        ext = np.abs(xl[1] - xl[0])
+        if double:
+            magnitude = ext/4
+        else:
+            magnitude = ext/2
+    if double:
+        new_ticks = [-magnitude + anchor, anchor, anchor + magnitude]
+    else:
+        new_ticks = [anchor, anchor + magnitude]
+    ax.set_xticks(new_ticks)
+    if bottom:
+        ax.hlines(yl[0], new_ticks[0], new_ticks[-1], color='k')
+        ax.spines['bottom'].set_visible(False)
+        y_pt = yl[0]
+    else:
+        ax.hlines(yl[1], new_ticks[0], new_ticks[-1], color='k')
+        ax.spine['top'].set_visible(False)
+        y_pt = yl[1]
+    if len(label) > 0:
+        x_pt = new_ticks[0] + (new_ticks[-1] - new_ticks[0])/2
+        disp_pt = ax.transData.transform((x_pt, y_pt))
+        txt_pt = ax.transAxes.inverted().transform(disp_pt)
+        ax.text(txt_pt[0], txt_pt[1] - text_buff, label, transform=ax.transAxes,
+                horizontalalignment='center', verticalalignment='top')
+    ax.set_ylim(yl)
+
+def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrcoef,
+                      round_result=2):
+    f = lambda x: func(x[:, 0], x[:, 1])[1,0]
+    inp = np.stack((as_list, bs_list), axis=1)
+    cc = u.bootstrap_list(inp, f, n=n_boots)
+    cent = f(inp)
+    interv = conf95_interval(cc)
+    upper = cent + interv[0, 0]
+    lower = cent + interv[1, 0]
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+    print(s)
+    return s
+    
+def print_mean_conf95(bs_list, subj, text, n_boots=1000, func=np.nanmean,
+                      preboot=False, round_result=2):
+    if  preboot:
+        cent = func(bs_list)
+        bs = bs_list
+    else:
+        cent = func(bs_list)
+        bs = u.bootstrap_list(bs_list, func, n_boots)
+    interv = conf95_interval(bs)
+    upper = cent + interv[0, 0]
+    lower = cent + interv[1, 0]        
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+    print(s)
+    return s
+
+def print_diff_conf95(b_list, a_list, subj, text, n_boots=1000,
+                      func=np.nanmean, preboot=False, round_result=2):
+    if preboot:
+        b = b_list
+        a = a_list
+        diff = b - a
+    else:
+        diff = u.bootstrap_diff(b_list, a_list, func, n_boots)
+    interv = conf95_interval(diff)
+    cent = func(diff)
+    upper = cent + interv[0, 0]
+    lower = cent + interv[1, 0]        
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+    print(s)
+    return s
+
+def make_yaxis_scale_bar(ax, magnitude=None, double=True, anchor=0, left=True,
+                         label='', text_buff=.15):
+    xl = ax.get_xlim()
+    yl = ax.get_ylim()
+    if magnitude is None:
+        ext = np.abs(yl[1] - yl[0])
+        if double:
+            magnitude = ext/4
+        else:
+            magnitude = ext/2
+    if double:
+        new_ticks = [-magnitude + anchor, anchor, anchor + magnitude]
+    else:
+        new_ticks = [anchor, anchor + magnitude]
+    ax.set_yticks(new_ticks)
+    if left:
+        ax.vlines(xl[0], new_ticks[0], new_ticks[-1], color='k')
+        ax.spines['left'].set_visible(False)
+        x_pt = xl[0]
+    else:
+        ax.hlines(xl[1], new_ticks[0], new_ticks[-1], color='k')
+        ax.spine['right'].set_visible(False)
+        x_pt = xl[1]
+    if len(label) > 0:
+        y_pt = new_ticks[0] + (new_ticks[-1] - new_ticks[0])/2
+        disp_pt = ax.transData.transform((x_pt, y_pt))
+        txt_pt = ax.transAxes.inverted().transform(disp_pt)
+        ax.text(txt_pt[0] - text_buff, txt_pt[1], label, transform=ax.transAxes,
+                horizontalalignment='center', verticalalignment='center',
+                rotation=90)
+    ax.set_xlim(xl)
+    
 def plot_conf_interval(x, y_distr, ax, color=None, error_func=conf95_interval,
                        central_tend=np.nanmedian):
     if len(y_distr.shape) < 2:
@@ -659,7 +778,7 @@ def plot_glm_pop_selectivity_mag(coeffs, ps, subgroups=None, p_thr=.05,
             plot_conf_interval(j, sg_cent_dist, ax, color=colors[i])
         p = ax.violinplot(sg_mags, positions=sg, showmedians=False,
                           showextrema=False)
-        _set_violin_color(p, colors[i])
+        set_violin_color(p, colors[i])
         coeff_groups[(i, sg)] = np.concatenate(sg_mags)
         if (not combined_fig) and group_term_labels is not None:
             ax.set_xticks(sg)

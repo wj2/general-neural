@@ -2,12 +2,14 @@
 import numpy as np
 import scipy.stats as sts
 import general.utility as u
+import sklearn.preprocessing as skp
 from sklearn import svm, linear_model
 from sklearn import discriminant_analysis as da
 import sklearn.pipeline as sklpipe
 from sklearn.decomposition import PCA
+import sklearn.decomposition as skd
 import sklearn.exceptions as ske
-import sklearn.model_selection as skms 
+import sklearn.model_selection as skms
 from dPCA.dPCA import dPCA
 from hmmlearn import hmm
 import warnings
@@ -17,7 +19,7 @@ import os
 import pickle
 
 def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum',
-                           ret_index=False):
+                           ret_index=False, **kwargs):
     data = args[data_ind]
     runs = np.unique(data[drunfield])
     outs = []
@@ -25,7 +27,7 @@ def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum',
     for run in runs:
         run_data = data[data[drunfield] == run]
         args[data_ind] = run_data
-        out = func(*args)
+        out = func(*args, **kwargs)
         outs.append(out)
         store_inds.append(run)
     if ret_index:
@@ -534,19 +536,6 @@ def _fold_model(cat1, cat2, leave_out=1, model=svm.SVC, norm=True, eps=.00001,
         inds = np.arange(alltr.shape[1])
         np.random.shuffle(inds)
     alllabels = alllabels[inds]
-
-    if norm:
-        mu = np.expand_dims(alltr.mean(1), 1)
-        sig = np.expand_dims(alltr.std(1), 1)
-        sig[sig < eps] = 1.
-        if equal_fold:
-            mu = np.expand_dims(mu, 1)
-            sig = np.expand_dims(sig, 1)
-            cat1 = (cat1 - mu)/sig
-            cat2 = (cat2 - mu)/sig
-        else:
-            alltr = (alltr - mu)/sig
-            
     folds_n, leave_out = _compute_folds_n(cat1.shape[1]*cat1.shape[2],
                                           leave_out, equal_fold)
     if stability:
@@ -561,9 +550,16 @@ def _fold_model(cat1, cat2, leave_out=1, model=svm.SVC, norm=True, eps=.00001,
         else:
             out = _generate_unequal_fold(alltr, alllabels, leave_out, i)
         train_tr, train_l, test_tr, test_l = out
+        if norm:
+            mu = np.expand_dims(train_tr.mean(1), 1)
+            sig = np.expand_dims(train_tr.std(1), 1)
+            sig[sig < eps] = 1
+            train_tr = (train_tr - mu)/sig
+            test_tr = (test_tr - mu)/sig
+
         with warnings.catch_warnings():
             if filter_warnings:
-                warnings.filterwarnings('ignore')            
+                warnings.filterwarnings('ignore')
             out = model_decode_tc(train_tr, train_l, test_tr, test_l, model=model, 
                                   stability=stability, params=params, 
                                   collapse_time=collapse_time)
@@ -608,7 +604,7 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
 def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
                    with_replace=False, shuff_labels=False, stability=False,
                    penalty=1, format_=True, model=svm.SVR, kernel='rbf',
-                   collapse_time=False, max_iter=10000, gamma='scale',
+                   collapse_time=False, max_iter=1000, gamma='scale',
                    pop=False, min_population=1, multi_cond=False, **kwargs):
     spec_params = {'C':penalty, 'max_iter':max_iter, 'gamma':gamma,
                    'kernel':kernel}
@@ -654,7 +650,8 @@ def pop_regression(ds, r, leave_out=1, require_trials=15,
         else:
             tcs_shape = (resample, n_times)
         out = _svm_organize(ds_pop, require_trials=require_trials,
-                            use_avail_trials=use_avail_trials, pop=True)
+                            use_avail_trials=use_avail_trials,
+                            pop=not pseudopop)
         ds_f, use_trials, _ = out
         r_f = np.array(r_pop, dtype=object)
         n_neurs = ds_f.shape[0]
@@ -668,11 +665,11 @@ def pop_regression(ds, r, leave_out=1, require_trials=15,
             for i in range(resample):
                 ds_samp, r_samp = sample_trials_svm(ds_f, use_trials,
                                                     with_replace=with_replace,
-                                                    pop=True, sample_with=r_f)
-                # make pipeline
+                                                    pop=not pseudopop,
+                                                    sample_with=r_f)
                 steps = []
                 if norm:
-                    steps.append(skl.preprocessing.StandardScaler())
+                    steps.append(skp.StandardScaler())
                 clf = model(**params)
                 steps.append(clf)
                 
@@ -696,11 +693,6 @@ def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  min_population=1, multi_cond=False, **kwargs):
     spec_params = {'C':penalty, 'max_iter':max_iter, 'gamma':gamma,
                    'kernel':kernel, 'class_weight':'balanced'}
-    if kernel != 'linear':
-        spec_params.update(('kernel', kernel),)
-        spec_params.pop('penalty')
-        spec_params.pop('dual')
-        spec_params.pop('loss')
     if pop:
         out = decoding_pop(cat1, cat2, leave_out=leave_out, 
                            require_trials=require_trials, resample=resample,
@@ -721,7 +713,7 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
                  resample=100, with_replace=False, shuff_labels=False, 
                  stability=False, params=None, collapse_time=False,
                  min_population=1, use_avail_trials=True, equal_fold=False,
-                 multi_cond=False, **kwargs):
+                 multi_cond=False, norm=True, **kwargs):
     if not multi_cond:
         cat1 = (cat1,)
         cat2 = (cat2,)
@@ -740,7 +732,6 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
         out = _svm_organize(c1_pop, c2_pop, require_trials=require_trials,
                             use_avail_trials=use_avail_trials, pop=True)
         c1_f, c2_f, n_trls, _ = out
-
         n_neurs = c1_f.shape[0]
         if n_neurs >= min_population:
             if use_avail_trials:
@@ -759,17 +750,49 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
                 c2_samp = sample_trials_svm(c2_f, use_trials,
                                             with_replace=with_replace,
                                             pop=True)
-                out = _fold_model(c1_samp, c2_samp, leave_out,
-                                  model=model,
-                                  shuff_labels=shuff_labels,
-                                  stability=stability, params=params,
-                                  collapse_time=collapse_time,
-                                  equal_fold=equal_fold,
-                                  **kwargs)
-                tcs[i], _, _, ms[i], _ = out
+                if not (stability or collapse_time):
+                    tcs[i] = _fold_skl(c1_samp, c2_samp, folds_n, model,
+                                       params=params, norm=norm,
+                                       shuffle=shuff_labels)
+                else:
+                    out = _fold_model(c1_samp, c2_samp, leave_out,
+                                      model=model, shuff_labels=shuff_labels,
+                                      stability=stability, params=params,
+                                      collapse_time=collapse_time,
+                                      equal_fold=equal_fold, **kwargs)
+                    tcs[i], _, _, ms[i], _ = out
             tcs_pops[k] = tcs
             ms_pops[k] = ms
     return tcs_pops, ms
+
+def _fold_skl(c1, c2, folds_n, model, params, norm=True, shuffle=False,
+              pre_pca=.99, n_jobs=-1):
+    x_len = c1.shape[-1]
+    tcs = np.zeros((folds_n, x_len))
+    steps = []
+    if norm:
+        steps.append(skp.StandardScaler())
+    if pre_pca is not None:
+        steps.append(skd.PCA(n_components=pre_pca))
+    clf = model(**params)
+    steps.append(clf)            
+    pipe = sklpipe.make_pipeline(*steps)
+    c1_flat = np.concatenate(tuple(c1[:, i] for i in range(c1.shape[1])),
+                             axis=1)
+    c2_flat = np.concatenate(tuple(c2[:, i] for i in range(c2.shape[1])),
+                             axis=1)
+    c_flat = np.concatenate((c1_flat, c2_flat), axis=1)
+    labels = np.concatenate((np.zeros(c1_flat.shape[1]),
+                             np.ones(c2_flat.shape[1])))
+    if shuffle:
+        np.random.shuffle(labels)
+    for j in range(x_len):
+        sk_cv = skms.cross_val_score
+        scores = sk_cv(pipe, c_flat[..., j].T, labels,
+                       cv=folds_n, n_jobs=n_jobs)
+        tcs[:, j] = scores
+    tcs = np.mean(tcs, axis=0)
+    return tcs
 
 def neural_format(c, pop=False):
     lens = np.ones(len(c[0]))*np.inf
@@ -814,7 +837,7 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
              resample=100, with_replace=False, shuff_labels=False, 
              stability=False, params=None, collapse_time=False,
              format_=True, equal_fold=False, multi_cond=False,
-             use_avail_trials=True, **kwargs):
+             use_avail_trials=True, norm=True, **kwargs):
     if format_:
         if not multi_cond:
             cat1 = (cat1,)
@@ -836,23 +859,27 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
             c1_min = min(len(c1_i) for c1_i in cat1_f)
             c2_min = min(len(c2_i) for c2_i in cat2_f)
             require_trials = min(c1_min, c2_min)
+    folds_n, leave_out = _compute_folds_n(require_trials*cat1_f.shape[1],
+                                          leave_out, equal_fold)
     if stability:
         tcs_shape = (resample, x_len, x_len)
     else:
         tcs_shape = (resample, x_len)
-    folds_n, leave_out = _compute_folds_n(require_trials*cat1_f.shape[1],
-                                          leave_out, equal_fold)
     ms = np.zeros((resample, folds_n, x_len, cat1_f.shape[0]))
     inter = np.zeros((resample, folds_n, x_len))
     tcs = np.zeros(tcs_shape)
     for i in range(resample):
         cat1_samp = sample_trials_svm(cat1_f, require_trials, with_replace)
         cat2_samp = sample_trials_svm(cat2_f, require_trials, with_replace)
-        out = _fold_model(cat1_samp, cat2_samp, leave_out, model=model,
+        if not (stability or collapse_time):
+            tcs[i] = _fold_skl(cat1_samp, cat2_samp, folds_n, model,
+                            params=params, norm=norm, shuffle=shuff_labels)
+        else:
+            out = _fold_model(cat1_samp, cat2_samp, leave_out, model=model,
                           shuff_labels=shuff_labels, stability=stability, 
                           params=params, collapse_time=collapse_time,
                           equal_fold=equal_fold, **kwargs)
-        tcs[i], _, _, ms[i], inter[i] = out
+            tcs[i], _, _, ms[i], inter[i] = out
     return tcs, cat1_f, cat2_f, ms, inter
 
 def _compute_folds_n(use_trials, leave_out, equal_fold=False):
@@ -868,7 +895,7 @@ def _compute_folds_n(use_trials, leave_out, equal_fold=False):
 def svm_cross_decoding(c1_train, c1_test, c2_train, c2_test, require_trials=15,
                        model=svm.SVC, stability=False, shuff_labels=False,
                        params=None, collapse_time=False, format_=True,
-                       with_replace=False, max_iter=1000, gamma='scale',
+                       with_replace=False, max_iter=10000, gamma='scale',
                        penalty=1, kernel='linear', multi_cond=False,
                        use_avail_trials=True,
                        resample=100, **kwargs):
@@ -1100,7 +1127,7 @@ def glm_fitting_diff_trials(dat, ind_structure, req_trials=15,
     return full_coeffs, full_ps, glms
 
 def array_format(data, require_trials, with_replace=True, normalize=None,
-                 norm_func=None):
+                 norm_func=None, fill_nan=False):
     """
     Format PSTH data into array for use in some analyses.
 
@@ -1125,15 +1152,18 @@ def array_format(data, require_trials, with_replace=True, normalize=None,
         number of timepoints in the original data. The rest of the dimensions
         come from the structure of the input. 
     """
-    dat, bools = _array_format_helper(data, require_trials, 
+    dat, bools = _array_format_helper(data, require_trials, fill_nan=fill_nan, 
                                       with_replace=with_replace)
-    out = dat[:, bools]
+    if not fill_nan:
+        out = dat[:, bools]
+    else:
+        out = dat
     if normalize is not None:
         out = norm_func(out, axis=normalize)
     return out
 
 def _array_format_helper(data, require_trials, shape=(), inds=(), 
-                       with_replace=True):
+                         with_replace=True, fill_nan=False):
     try:
         ks = list(data.keys())
         ts = data[ks[0]].shape[1]
@@ -1144,7 +1174,14 @@ def _array_format_helper(data, require_trials, shape=(), inds=(),
                 ref = (slice(0, require_trials), j, slice(0, ts)) + inds
                 data_samp = u.resample_on_axis(data[k], require_trials, axis=0,
                                                with_replace=with_replace)
+                
                 datarr[ref] = data_samp
+            elif fill_nan:
+                n_trls = data[k].shape[0]
+                ref = (slice(0, n_trls), j, slice(0, ts)) + inds
+                n_ref = (slice(n_trls, require_trials), j, slice(0, ts)) + inds
+                datarr[ref] = data[k]
+                datarr[n_ref] = np.nan
     except AttributeError:
         shape = shape + (len(data),)
         for i, ent in enumerate(data):
@@ -1152,7 +1189,8 @@ def _array_format_helper(data, require_trials, shape=(), inds=(),
             dat_slice, keybool = _array_format_helper(ent, require_trials, 
                                                       shape=shape, 
                                                       inds=ent_inds,
-                                                      with_replace=with_replace)
+                                                      with_replace=with_replace,
+                                                      fill_nan=fill_nan)
             if i == 0:
                 mkb = keybool
                 datarr = dat_slice
@@ -1300,7 +1338,7 @@ def estimate_pca(data, require_trials=15, normalize=None, norm_func=None,
 def pca_wrapper(data):
     sh = data.shape
     flat_data = np.reshape(data, (-1, sh[1]))
-    pca = PCA()
+    pca = skd.PCA()
     pca.fit(flat_data)
     return pca
 

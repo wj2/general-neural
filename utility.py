@@ -1,18 +1,42 @@
 
 import numpy as np
 import os
+import sys
 import re
 import shutil
 import scipy.io as sio
 import pystan as ps
 import pickle
-import itertools as it 
+import itertools as it
+import configparser
 from pref_looking.eyes import analyze_eyemove
 from pref_looking.bias import get_look_img
 
 monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May', 
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
+
+class ConfigParserColor(configparser.ConfigParser):
+
+    def getcolor(self, *args, zero_to_one=True, **kwargs):
+        string = self.get(*args, **kwargs)
+        if string is not None:
+            col = np.array(list(int(x.strip()) for x in string.split(',')))
+            assert len(col) == 3
+            if zero_to_one:
+                col = col/256
+        else:
+            col = string
+        return col
+
+class HiddenPrints:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
 
 def get_stan_summary_col(summary, col):
     col_names = summary['summary_colnames']
@@ -462,7 +486,16 @@ def merge_trials(ns):
             else:
                 merge_ns[k] = ns[i][k]
     return merge_ns
-            
+
+def get_orthogonal_basis(q):
+    q = np.array(q)
+    q = q/np.sqrt(np.sum(q**2))
+    v_star = np.ones_like(q)
+    v_star[0] = np.sqrt((1 - q[0])/2)
+    v_star[1:] = -q[1:]/(2*v_star[0])
+    p = np.identity(len(q)) - 2*np.outer(v_star, v_star)
+    return p    
+
 def load_data(path, varname='superx'):
     data = sio.loadmat(path, mat_dtype=True)
     return data[varname]
@@ -501,7 +534,8 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                        centimgon=25, centimgoff=26, eyedata_len=500,
                        eye_params={}, dates=None, xy1_loc_dict=None,
                        xy2_loc_dict=None, repl_logpath=None,
-                       use_data_name=False):
+                       use_data_name=False, lum_conds=None,
+                       correct_sdms_position=True):
     if prevlog_dict is None:
         log_dict = {}
     else:
@@ -591,7 +625,7 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         x[i]['block_number'] = bhv['BlockNumber'][0,0][i, 0]
         x[i]['ISI_start'] = get_bhvcode_time(end_trial, x[i]['code_numbers'],
                                              x[i]['code_times'], first=True)
-        x[i]['datafile'] = bhv['DataFileName'][0][0][0]
+        # x[i]['datafile'] = bhv['DataFileName'][0][0][0]
         x[i]['datanum'] = datanum
         x[i]['samp_img_on'] = get_bhvcode_time(centimgon,
                                                x[i]['code_numbers'],
@@ -617,15 +651,13 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
             entry2 = log.pop(0)
             entry2 = entry2.strip(b'\r\n').split(b'\t')
             tn2, s2, _, cond2, vs2, cat2, img2 = entry2
-            # if int(tn1) != int(x[i]['trialnum']):
-            #     print(entry1)
-            #     print(entry2)
-            #     print(x[i]['trialnum'])
-            #     print(x[i]['trial_type'])
-            #     print(x[0]['trial_type'])
-            #     print(x[0]['trialnum'])
-            #     print(filename)
-            #     print(tn1, x[i]['trialnum'])
+            if int(tn1) != int(x[i]['trialnum']):
+                print(entry1)
+                print(entry2)
+                print(x[i]['trialnum'])
+                print(x[0]['trialnum'])
+                # print(filename)
+                print(tn1, x[i]['trialnum'])
             assert tn1 == tn2
             assert int(tn1) == int(x[i]['trialnum'])
             img1_n, ext1 = os.path.splitext(img1)
@@ -677,11 +709,22 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         ep = bhv['AnalogData'][0,0][0, i]['EyeSignal'][0,0]
         x[i]['eyepos'] = ep
         if ('UserVars' in bhv.dtype.names 
-            and 'img1_xy' in bhv['UserVars'][0,0].dtype.names
-            and bhv['UserVars'][0,0]['img1_xy'].shape[1] > i 
-            and len(bhv['UserVars'][0,0]['img1_xy'][0, i]) > 1):
-            x[i]['img1_xy'] = bhv['UserVars'][0,0]['img1_xy'][0, i]
-            x[i]['img2_xy'] = bhv['UserVars'][0,0]['img2_xy'][0, i]
+            and 'img1_xy' in bhv['UserVars'][0,0].dtype.names):
+            tmp1 = bhv['UserVars'][0,0]['img1_xy']
+            tmp2 = bhv['UserVars'][0,0]['img2_xy']
+            if tmp1.shape == (1, 1) and tmp1[0,0].shape[1] > i:
+                if tmp1[0, 0][0, i].shape[1] > 0:
+                    x[i]['img1_xy'] = tmp1[0,0][0, i][0]
+                    x[i]['img2_xy'] = tmp2[0,0][0, i][0]
+                else:
+                    x[i]['img1_xy'] = default_img1_xy
+                    x[i]['img2_xy'] = default_img2_xy
+            elif tmp1.shape[1] > i and tmp1[0, i].shape[1] > 0:
+                x[i]['img1_xy'] = tmp1[0, i]
+                x[i]['img2_xy'] = tmp2[0, i]
+            else:
+                x[i]['img1_xy'] = default_img1_xy
+                x[i]['img2_xy'] = default_img2_xy
         elif (xy1_loc_dict is not None
               and not np.any(np.isnan(xy1_loc_dict[datanum]))):
             x[i]['img1_xy'] = xy1_loc_dict[datanum]
@@ -689,8 +732,6 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         else:
             x[i]['img1_xy'] = default_img1_xy
             x[i]['img2_xy'] = default_img2_xy
-        x[i]['angular_separation'] = compute_angular_separation(x[i]['img1_xy'],
-                                                                x[i]['img2_xy'])
         if ('UserVars' in bhv.dtype.names 
             and 'img_wid' in bhv['UserVars'][0,0].dtype.names
             and bhv['UserVars'][0,0]['img_wid'].shape[1] > i):
@@ -699,39 +740,59 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         else:
             x[i]['img_wid'] = default_wid
             x[i]['img_hei'] = default_hei
-        if ep.shape[0] > eyedata_len:
-            sbs, ses, l, look = analyze_eyemove(ep, x[i]['img1_xy'], 
-                                                x[i]['img2_xy'],
-                                                wid=x[i]['img_wid'],
-                                                hei=x[i]['img_hei'],
-                                                postthr=x[i]['fixation_off'],
-                                                readdpost=False, **eye_params)
-            x[i]['saccade_begs'] = sbs
-            x[i]['saccade_ends'] = ses
-            x[i]['saccade_lens'] = l
-            x[i]['saccade_targ'] = look
-            if len(look) > 0:
-                x[i]['left_first'] = look[0] == b'l'
-                x[i]['right_first'] = look[0] == b'r'
-                x[i]['first_sacc_time'] = sbs[0] + x[i]['fixation_off']
-                x[i]['first_look'] = look[0]
-            if np.isnan(x[i]['fixation_off']):
-                x[i]['on_left_img'] = np.nan
-                x[i]['on_right_img'] = np.nan
-                x[i]['not_on_img'] = np.nan
-            else:
-                tlen = int(x[i]['eyepos'].shape[0] - x[i]['fixation_off'])
-                all_eyes = get_look_img((x[i],), 2, 1, 0, x[i]['img1_xy'],
-                                        x[i]['img2_xy'], x[i]['img_wid'],
-                                        x[i]['img_hei'], fix_time=0, tlen=tlen,
-                                        eye_field='eyepos',
-                                        eyemove_flag='fixation_off')
-                x[i]['on_left_img'] = all_eyes[0, :, 2]
-                x[i]['on_right_img'] = all_eyes[0, :, 1]
-                x[i]['not_on_img'] = all_eyes[0, :, 0]
+        _add_eye_info(x[i], eye_params, eyedata_len)
+
+    if correct_sdms_position:
+        t_mask = np.isin(x['trial_type'], plt_conds)
+        ang_mask = x['angular_separation'] == 180
+        full_mask = t_mask*ang_mask
+        filt = x[full_mask]
+        xy1 = filt[0]['img1_xy']
+        xy2 = filt[0]['img2_xy']
+        sdms_mask = np.isin(x['trial_type'], sdms_conds)
+        for i in np.where(sdms_mask)[0]:
+            x[i]['img1_xy'] = xy1
+            x[i]['img2_xy'] = xy2
+            _add_eye_info(x[i], eye_params, eyedata_len)
     if noerr:
         x = x[x['TrialError'] == 0]
     return x, log_dict
+
+def _add_eye_info(x_i, eye_params, eyedata_len=500):
+    ep = x_i['eyepos']
+    ang = compute_angular_separation(x_i['img1_xy'],
+                                     x_i['img2_xy'])
+    x_i['angular_separation'] = np.round(ang)
+    if ep.shape[0] > eyedata_len:
+        sbs, ses, l, look = analyze_eyemove(ep, x_i['img1_xy'], 
+                                            x_i['img2_xy'],
+                                            wid=x_i['img_wid'],
+                                            hei=x_i['img_hei'],
+                                            postthr=x_i['fixation_off'],
+                                            readdpost=False, **eye_params)
+        x_i['saccade_begs'] = sbs
+        x_i['saccade_ends'] = ses
+        x_i['saccade_lens'] = l
+        x_i['saccade_targ'] = look
+        if len(look) > 0:
+            x_i['left_first'] = look[0] == b'l'
+            x_i['right_first'] = look[0] == b'r'
+            x_i['first_sacc_time'] = sbs[0] + x_i['fixation_off']
+            x_i['first_look'] = look[0]
+        if np.isnan(x_i['fixation_off']):
+            x_i['on_left_img'] = np.nan
+            x_i['on_right_img'] = np.nan
+            x_i['not_on_img'] = np.nan
+        else:
+            tlen = int(x_i['eyepos'].shape[0] - x_i['fixation_off'])
+            all_eyes = get_look_img((x_i,), 2, 1, 0, x_i['img1_xy'],
+                                    x_i['img2_xy'], x_i['img_wid'],
+                                    x_i['img_hei'], fix_time=0, tlen=tlen,
+                                    eye_field='eyepos',
+                                    eyemove_flag='fixation_off')
+            x_i['on_left_img'] = all_eyes[0, :, 2]
+            x_i['on_right_img'] = all_eyes[0, :, 1]
+            x_i['not_on_img'] = all_eyes[0, :, 0]
 
 def copy_struct_array(new_arr, old_arr):
     names = old_arr.dtype.names
@@ -746,7 +807,7 @@ def get_bhvcode_time(codenum, trial_codenums, trial_codetimes, first=True):
             i = i[0]
         else:
             i = i[-1]
-        ret = trial_codetimes[i][0]
+        ret = int(np.round(trial_codetimes[i][0]))
     else:
         ret = np.nan
     return ret
@@ -755,6 +816,14 @@ def get_only_vplt(data, condrange=(7, 20), condfield='trial_type'):
     mask = np.logical_and(data[condfield] >= condrange[0], 
                          data[condfield] <= condrange[1])
     return data[mask]
+
+def make_ratio_function(func1, func2):
+    def _ratio_func(ts):
+        one = func1(ts)
+        two = func2(ts)
+        norm = one / (one + two)
+        return norm
+    return _ratio_func
 
 def compute_angular_separation(xy1, xy2):
     theta1 = np.rad2deg(np.arctan2(xy1[1], xy1[0]))
@@ -872,6 +941,16 @@ def bootstrap_test(a, b, func=np.nanmean, n=1000):
     t_stars = (a_stars - b_stars)/np.sqrt((a_sems/a_l) + (b_sems/b_l))
     p = np.sum(t_stars >= t)/n
     return p
+
+def bootstrap_diff(a, b, func, n=1000):
+    stats = np.zeros(n)
+    for i in range(n):
+        a_inds = np.random.choice(np.arange(len(a)), len(a))
+        a_choice = a[a_inds]
+        b_inds = np.random.choice(np.arange(len(b)), len(b))
+        b_choice = b[b_inds]
+        stats[i] = func(a_choice) - func(b_choice)
+    return stats
 
 def bootstrap_list(l, func, n=1000, out_shape=None, ret_sem=False):
     if out_shape is None:
