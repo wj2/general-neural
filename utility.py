@@ -5,6 +5,7 @@ import sys
 import re
 import shutil
 import scipy.io as sio
+import scipy.linalg as spla
 import pystan as ps
 import pickle
 import itertools as it
@@ -28,7 +29,7 @@ class ConfigParserColor(configparser.ConfigParser):
         else:
             col = string
         return col
-
+    
 class HiddenPrints:
     def __enter__(self):
         self._original_stdout = sys.stdout
@@ -486,6 +487,11 @@ def merge_trials(ns):
             else:
                 merge_ns[k] = ns[i][k]
     return merge_ns
+
+def generate_orthonormal_basis(d):
+    mat = np.random.randn(d, d)
+    basis = spla.orth(mat)
+    return basis
 
 def get_orthogonal_basis(q):
     q = np.array(q)
