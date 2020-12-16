@@ -172,6 +172,12 @@ def add_hlines(pos, ax, color=(.8, .8, .8), alpha=1, **kwargs):
     xl = ax.get_xlim()
     ax.hlines(pos, xl[0], xl[1], color=color, alpha=alpha, **kwargs)
     ax.set_xlim(xl)
+
+def gen_circle_pts(n, r=1):
+    angs = np.linspace(0, 2*np.pi, n)
+    pts = np.stack((np.cos(angs), np.sin(angs)), axis=1)
+    return r*pts
+
     
 def pcolormesh_axes(axvals, val_len, diff_ind=0):
     if len(axvals) == val_len:

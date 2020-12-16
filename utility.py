@@ -103,6 +103,18 @@ def pickle_stan_model(path, decoder='utf-8'):
 def h2(p):
     return -p*np.log2(p) - (1 - p)*np.log2(1 - p)
 
+def cosine_similarity(v1, v2):
+    v1 = np.array(v1)
+    v2 = np.array(v2)
+    if len(v1.shape) == 1:
+        v1 = np.expand_dims(v1, 0)
+    if len(v2.shape) == 1:
+        v2 = np.expand_dims(v2, 0)
+    v1_lens = np.sqrt(np.sum(v1**2, axis=1))
+    v2_lens = np.sqrt(np.sum(v2**2, axis=1))
+    s = np.sum(v1*v2, axis=1)/(v1_lens*v2_lens)
+    return s 
+
 def voronoi_finite_polygons_2d(vor, radius=None):
     """
     TAKEN FROM: https://gist.github.com/pv/8036995
