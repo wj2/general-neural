@@ -279,7 +279,10 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
                     fill=True, log_x=False, log_y=False, line_alpha=1,
-                    jagged=False, points=False, elinewidth=1, **kwargs):
+                    jagged=False, points=False, elinewidth=1, conf95=False,
+                    **kwargs):
+    if conf95:
+        error_func = conf95_interval
     with plt.style.context(style):
         if ax is None:
             f = plt.figure()
