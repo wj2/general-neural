@@ -249,6 +249,14 @@ def vector_angle(v1, v2, degrees=True):
         theta = theta*(180/np.pi)
     return theta
 
+def make_unit_vector(v):
+    v = np.array(v)
+    if len(v.shape) == 1:
+        v = np.expand_dims(v, 0)
+    v_len = np.expand_dims(np.sqrt(np.sum(v**2, axis=1)), 1)
+    v_norm = v/v_len
+    return np.squeeze(v_norm)
+
 def demean_unit_std(data, collapse_dims=(), axis=0, sig_eps=.00001):
     mask_shape = np.array(data.shape)
     mask_shape[axis] = 1
