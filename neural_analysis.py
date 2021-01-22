@@ -99,6 +99,16 @@ def collect_ISIs(spts, binsize, bounds, binstep=None, accumulate=False):
         isis[i] = np.diff(rel_spks)
     return isis
 
+def compute_xs(binsize, pretime, posttime, binstep, causal_timing=False):
+    if binstep is not None and binstep < binsize:
+        xs = np.arange(pretime + binsize/2., posttime + binsize/2. + binstep,
+                       binstep)
+    else:
+        xs = np.arange(pretime + binsize/2., posttime + binsize/2. + 1, binsize)
+    if causal_timing:
+        xs = xs + binsize/2
+    return xs
+
 def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime, 
                           binsize, binstep=None, cumulative=False, 
                           drunfield='datanum', spikefield='spike_times',
@@ -751,7 +761,7 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
                                             with_replace=with_replace,
                                             pop=True)
                 if not (stability or collapse_time):
-                    tcs[i] = _fold_skl(c1_samp, c2_samp, folds_n, model,
+                    tcs[i] = fold_skl(c1_samp, c2_samp, folds_n, model,
                                        params=params, norm=norm,
                                        shuffle=shuff_labels)
                 else:
@@ -765,8 +775,9 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
             ms_pops[k] = ms
     return tcs_pops, ms
 
-def _fold_skl(c1, c2, folds_n, model, params, norm=True, shuffle=False,
-              pre_pca=.99, n_jobs=-1):
+def fold_skl(c1, c2, folds_n, model, params, norm=True, shuffle=False,
+              pre_pca=.99, n_jobs=-1, mean=True):
+    # c1 is shape (neurs, inner_conds, trials, time_points)
     x_len = c1.shape[-1]
     tcs = np.zeros((folds_n, x_len))
     steps = []
@@ -791,7 +802,8 @@ def _fold_skl(c1, c2, folds_n, model, params, norm=True, shuffle=False,
         scores = sk_cv(pipe, c_flat[..., j].T, labels,
                        cv=folds_n, n_jobs=n_jobs)
         tcs[:, j] = scores
-    tcs = np.mean(tcs, axis=0)
+    if mean:
+        tcs = np.mean(tcs, axis=0)
     return tcs
 
 def neural_format(c, pop=False):
@@ -872,7 +884,7 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
         cat1_samp = sample_trials_svm(cat1_f, require_trials, with_replace)
         cat2_samp = sample_trials_svm(cat2_f, require_trials, with_replace)
         if not (stability or collapse_time):
-            tcs[i] = _fold_skl(cat1_samp, cat2_samp, folds_n, model,
+            tcs[i] = fold_skl(cat1_samp, cat2_samp, folds_n, model,
                             params=params, norm=norm, shuffle=shuff_labels)
         else:
             out = _fold_model(cat1_samp, cat2_samp, leave_out, model=model,
@@ -1291,6 +1303,22 @@ def basis_trajectories(data, basis_vecs):
     return out
 
 ### PCA and dPCA ###        
+
+def estimate_participation_ratio(data, n_resamples=20):
+    # data has shape neurons, trials, times
+    outs = np.zeros((n_resamples, data.shape[-1]))
+    for j in range(n_resamples):
+        data_rs = u.resample_on_axis(data, data.shape[1], axis=1)
+        for i in range(data.shape[-1]):
+            p = PCA()
+            try:
+                p.fit(data_rs[..., i].T)
+                eigs = p.explained_variance_
+                pr = np.sum(eigs)**2/np.sum(eigs**2)
+            except np.linalg.LinAlgError:
+                pr = np.nan
+            outs[j, i] = pr
+    return outs
 
 def dpca_wrapper(data, labels, regularizer='auto', signif=False, protect='t',
                  n_shuffles=10, n_splits=10, n_consecutive=10):

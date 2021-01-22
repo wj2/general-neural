@@ -56,8 +56,7 @@ def get_population_cents(rfsize, res, spacesize, lattice='square'):
         else:
             all_pts = np.concatenate((all_pts, pts), axis=0)
     assert all_pts.shape[0] == n_pts
-    return all_pts, lat
-        
+    return all_pts, lat        
 
 def plot_square_rfs(cents, rfsize, spacesize, figsize=(10,10), jitter=.2, 
                     numjit=4, cm='Set3', cs=10, spacecol=(.1, .1, .1),
