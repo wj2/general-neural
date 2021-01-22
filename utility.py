@@ -515,6 +515,16 @@ def merge_trials(ns):
                 merge_ns[k] = ns[i][k]
     return merge_ns
 
+def generate_orthonormal_vectors(v, n):
+    v = np.array(v)
+    if len(v.shape) == 1:
+        v = np.expand_dims(v, 0)
+    vecs = spla.null_space(v)
+    weightings = np.random.randn(vecs.shape[1], n)
+    out = np.dot(vecs, weightings).T
+    out = make_unit_vector(out)
+    return out
+
 def generate_orthonormal_basis(d):
     mat = np.random.randn(d, d)
     basis = spla.orth(mat)
