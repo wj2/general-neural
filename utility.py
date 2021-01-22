@@ -231,6 +231,13 @@ def split_angles(angs, div):
     c2 = rolled[c2_mask]
     return c1, c2, ambig_dirs
 
+def signed_vector_angle_2d(v1, v2, degrees=False):
+    theta = np.arctan2(v1[0]*v2[1] - v1[1]*v2[0],
+                       v1[0]*v2[0] + v1[1]*v2[1])
+    if degrees:
+        theta = theta*(180/np.pi)
+    return theta
+
 def vector_angle(v1, v2, degrees=True):
     v1 = np.array(v1)
     v2 = np.array(v2)
