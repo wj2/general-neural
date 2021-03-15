@@ -1584,8 +1584,7 @@ def fit_glms(data, conds, use_stan=False, demean=False, z_score=False,
         coeffs_pop[i] = cs
     return model_pop, coeffs_pop
 
-stan_file_trunk = ('/Users/wjj/Dropbox/research/analysis/general/'
-                   'stan_models/')
+stan_file_trunk = ('general/stan_models/')
 stan_file_glm_mean = os.path.join(stan_file_trunk, 'glm_fitting.pkl')
 stan_file_glm_nomean = os.path.join(stan_file_trunk, 'glm_fitting_nomean.pkl')
 stan_file_glm_modu_nomean = os.path.join(stan_file_trunk,
