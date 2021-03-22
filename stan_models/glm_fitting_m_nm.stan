@@ -25,7 +25,7 @@ model {
   modulator ~ normal(0, modul_var);
 
   context_mod = modulator*context + 1;
-  y ~ normal(tm[0]*context + tm[1]*(1 - context)
+  y ~ normal(tm[1]*context + tm[2]*(1 - context)
 	     + context_mod .* (x * beta), sigma); 
 }
 
@@ -35,9 +35,9 @@ generated quantities {
 
   for (i in 1:N) {
     real mod = modulator*context[i] + 1;
-    log_lik[i] = normal_lpdf(y[i] | tm[0]*context[i] + tm[1]*(1 - context[i])
+    log_lik[i] = normal_lpdf(y[i] | tm[1]*context[i] + tm[2]*(1 - context[i])
 			     + mod * x[i] * beta, sigma);
-    err_hat[i] = normal_rng(tm[0]*context[i] + tm[1]*(1 - context[i])
+    err_hat[i] = normal_rng(tm[1]*context[i] + tm[2]*(1 - context[i])
 			    + mod * x[i] * beta, sigma);
   }
 }
