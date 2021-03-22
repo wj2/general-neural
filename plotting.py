@@ -180,11 +180,12 @@ def gen_circle_pts(n, r=1):
     return r*pts
 
     
-def pcolormesh_axes(axvals, val_len, diff_ind=0):
+def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
     if len(axvals) == val_len:
         diff = np.diff(axvals)[diff_ind]
         axvals_shift = axvals - diff/2
-        axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
+        if append:
+            axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
     return axvals
 
 def plot_decoding_heatmap(xs, decmat, colormap=None, show=False, title='',

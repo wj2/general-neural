@@ -12,6 +12,7 @@ data {
 
 parameters {
   vector[K] beta; // coefficients on Q_ast
+  vector[2] tm;
   real<lower=0> sigma; // error scale
   real<lower=-1> modulator; // modulation constant
 }
@@ -19,11 +20,13 @@ parameters {
 model {
   vector[N] context_mod;
   beta ~ normal(0, beta_var);
+  tm ~ normal(0, beta_var);
   sigma ~ normal(0, sigma_var);
   modulator ~ normal(0, modul_var);
 
   context_mod = modulator*context + 1;
-  y ~ normal(context_mod .* (x * beta), sigma); // likelihood
+  y ~ normal(tm[0]*context + tm[1]*(1 - context)
+	     + context_mod .* (x * beta), sigma); 
 }
 
 generated quantities {
@@ -32,7 +35,9 @@ generated quantities {
 
   for (i in 1:N) {
     real mod = modulator*context[i] + 1;
-    log_lik[i] = normal_lpdf(y[i] | mod * x[i] * beta, sigma);
-    err_hat[i] = normal_rng(mod * x[i] * beta, sigma);
+    log_lik[i] = normal_lpdf(y[i] | tm[0]*context[i] + tm[1]*(1 - context[i])
+			     + mod * x[i] * beta, sigma);
+    err_hat[i] = normal_rng(tm[0]*context[i] + tm[1]*(1 - context[i])
+			    + mod * x[i] * beta, sigma);
   }
 }

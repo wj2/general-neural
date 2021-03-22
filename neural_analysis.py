@@ -775,8 +775,10 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
             ms_pops[k] = ms
     return tcs_pops, ms
 
-def fold_skl(c1, c2, folds_n, model, params, norm=True, shuffle=False,
-              pre_pca=.99, n_jobs=-1, mean=True):
+def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
+             shuffle=False, pre_pca=.99, n_jobs=-1, mean=True):
+    if params is None:
+        params = {}
     # c1 is shape (neurs, inner_conds, trials, time_points)
     x_len = c1.shape[-1]
     tcs = np.zeros((folds_n, x_len))
