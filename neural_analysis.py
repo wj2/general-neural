@@ -1625,6 +1625,10 @@ stan_file_glm_mean = os.path.join(stan_file_trunk, 'glm_fitting.pkl')
 stan_file_glm_nomean = os.path.join(stan_file_trunk, 'glm_fitting_nomean.pkl')
 stan_file_glm_modu_nomean = os.path.join(stan_file_trunk,
                                          'glm_fitting_m_nm.pkl')
+stan_file_glm_nomean_cv = os.path.join(stan_file_trunk,
+                                       'glm_fitting_nm_mvar.pkl')
+stan_file_glm_modu_nomean_cv = os.path.join(stan_file_trunk,
+                                            'glm_fitting_m_nm_mvar.pkl')
 glm_arviz = {'observed_data':'y',
              'log_likelihood':{'y':'log_lik'},
              'posterior_predictive':'err_hat',
