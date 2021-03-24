@@ -64,7 +64,8 @@ def format_raw_glm(data, constraint_funcs, shape, labels, marker_func,
     dat_full, conds_full, labels_full = out 
     return dat_full, conds_full, labels_full, xs
 
-def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False):
+def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False,
+                   spks_per_sec=True):
     binedges = make_binedges(binsize, bounds, binstep)
     bspks, _ = np.histogram(spts, bins=binedges)
     if accumulate:
@@ -73,9 +74,13 @@ def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False):
             aspks[i] = np.sum(bspks[:i+1])
         bspks = aspks
     if binstep is not None and binstep < binsize:
-        filt = np.ones(int(binsize/binstep))
+        filt = np.ones(int(np.round(binsize/binstep)))
         bspks = np.convolve(bspks, filt, mode='valid')
-    bspks = bspks*(1000./binsize)
+    if spks_per_sec:
+        factor = 1000.
+    else:
+        factor = 1.
+    bspks = bspks*(factor/binsize)
     return bspks   
  
 def make_binedges(binsize, bounds, binstep=None):
@@ -83,7 +88,7 @@ def make_binedges(binsize, bounds, binstep=None):
         usebin = binstep
     else:
         usebin = binsize
-    binedges = np.arange(bounds[0], bounds[1] + binsize + 1, usebin)
+    binedges = np.arange(bounds[0], bounds[1] + binsize + usebin, usebin)
     return binedges
 
 def collect_ISIs(spts, binsize, bounds, binstep=None, accumulate=False):
@@ -634,6 +639,35 @@ def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
                          format_=format_, model=model, pseudopop=pseudopop,
                          collapse_time=collapse_time, **kwargs)
     return out
+
+def pop_regression_skl(pop, reg_vals, folds_n, model=svm.SVR, norm=True,
+                       shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
+                       **model_params):
+    x_len = pop.shape[-1]
+    tcs = np.zeros((folds_n, x_len))
+    steps = []
+    if norm:
+       steps.append(skp.StandardScaler())
+    if pre_pca is not None:
+           steps.append(skd.PCA(n_components=pre_pca))
+    reg = model(**model_params)
+    steps.append(reg)
+    pipe = sklpipe.make_pipeline(*steps)
+    pop_flat = np.concatenate(tuple(pop[:, i] for i in range(pop.shape[1])),
+                              axis=1)
+    if shuffle:
+        reg_vals = reg_vals.sample(frac=1)
+    for j in range(x_len):
+        sc = skp.StandardScaler()
+        sc.fit(pop_flat[..., j].T)
+        sk_cv = skms.cross_val_score
+        scores = sk_cv(pipe, pop_flat[..., j].T, reg_vals,
+                       cv=folds_n, n_jobs=n_jobs)
+        tcs[:, j] = scores
+    if mean:
+        tcs = np.mean(tcs, axis=0)
+    return tcs
+
 
 def pop_regression(ds, r, leave_out=1, require_trials=15, 
                    resample=100, with_replace=False, shuff_labels=False, 
