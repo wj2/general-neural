@@ -593,6 +593,10 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
     if path_log is None and 'imglog' in data.dtype.names:
         path_log = data['imglog'][0][0]
         path_log = path_log.replace('uc/freedman/', '')
+        # if use_data_name:
+        _, name = os.path.split(path_log)
+        folder, _ = os.path.split(path_bhv)
+        path_log = os.path.join(folder, name)
     elif path_log is None and use_data_name:
         filename = bhv['DataFileName'][0][0][0]
         fn, ext = os.path.splitext(filename)
