@@ -190,8 +190,7 @@ class Dataset(object):
         if tzf is not None:
             spks = spks - self[tzf]
         return spks
-        
-    
+            
     def get_response_in_window(self, begin, end, time_zero=None,
                                time_zero_field=None):
         spks = self._center_spks(spks, time_zero, time_zero_field)
@@ -219,39 +218,100 @@ class Dataset(object):
                 out_arr[i, j] = resp_arr
         return out_arr, xs
     
+    def combine_ntrls(self, *args):
+        stacked = np.stack(args, axis=0)
+        return np.min(stacked, axis=0)
+    
+    def make_pseudopop(self, outs, n_trls=None, min_trials_pseudo=10,
+                       resample_pseudos=10, skl_axs=False):
+        if n_trls is None:
+            n_trls = list(len(o) for o in outs)
+        n_trls = np.array(n_trls)
+        n_trls_mask = n_trls >= min_trials_pseudo
+        outs_mask = np.array(outs, dtype=object)[n_trls_mask]
+        if skl_axs:
+            trl_ax = 2
+            neur_ax = 0
+        else:
+            trl_ax = 0
+            neur_ax = 1
+        n_trls_actual = np.array(list(o.shape[trl_ax] for o in outs))
+        min_trls = np.min(n_trls_actual[n_trls_mask])
+        for i in range(resample_pseudos):
+            for j, pop in enumerate(outs_mask):
+                trl_inds = np.random.choice(pop.shape[trl_ax], min_trls,
+                                            replace=False)
+                if skl_axs:
+                    ppop_j = pop[:, :, trl_inds]
+                else:
+                    ppop_j = pop[trl_inds]
+                if j == 0:
+                    ppop = ppop_j
+                else:
+                    ppop = np.concatenate((ppop, ppop_j), axis=neur_ax)
+            if i == 0:
+                out_pseudo = np.zeros((resample_pseudos,) + ppop.shape)
+            out_pseudo[i] = ppop
+        return out_pseudo
+    
     def get_populations(self, binsize, begin, end, binstep=None, skl_axes=False,
-                        accumulate=False, time_zero=None, time_zero_field=None):
+                        accumulate=False, time_zero=None, time_zero_field=None,
+                        combine_pseudo=False, min_trials_pseudo=10,
+                        resample_pseudos=10, repl_nan=False):
         spks = self['spikeTimes']
         spks = self._center_spks(spks, time_zero, time_zero_field)
         outs = []
+        n_trls = []
         for spk in spks:
             spk_stack = np.stack(spk, axis=0)
             out = self._get_spikerates(spk_stack, binsize, (begin, end),
                                        binstep, accumulate,
                                        convert_seconds=not self.seconds)
             resp_arr, xs = out
+            if repl_nan:
+                no_spk_mask = np.all(resp_arr == 0, axis=-1)
+                resp_arr[no_spk_mask] = np.nan
+            n_trls.append(resp_arr.shape[0])
             if skl_axes:
                 resp_arr = np.expand_dims(np.swapaxes(resp_arr, 0, 1), 1)
             outs.append(resp_arr)
+        if combine_pseudo:
+            outs = self.make_pseudopop(outs, n_trls, min_trials_pseudo,
+                                       resample_pseudos)
         return outs, xs
 
+    def get_ntrls(self):
+        return list(len(o) for o in self['data'])
+    
     def decode_masks(self, m1, m2, winsize, begin, end, stepsize, n_folds=20,
-                     model=svm.LinearSVC, params=None, pre_pca=None,
-                     mean=False):
+                     model=svm.SVC, params=None, pre_pca=None,
+                     mean=False, shuffle=False, time_zero_field=None,
+                     pseudo=False, min_trials_pseudo=10, resample_pseudo=10,
+                     repl_nan=False, impute_missing=False):
         if params is None:
             params = {'class_weight':'balanced'}
 
         cat1 = self.mask(m1)
         cat2 = self.mask(m2)
         pop1, xs = cat1.get_populations(winsize, begin, end, stepsize,
-                                        skl_axes=True)
+                                        skl_axes=True, repl_nan=repl_nan,
+                                        time_zero_field=time_zero_field)
         pop2, xs = cat2.get_populations(winsize, begin, end, stepsize,
-                                        skl_axes=True)
+                                        skl_axes=True, repl_nan=repl_nan,
+                                        time_zero_field=time_zero_field)
+        if pseudo:
+            c1_n = cat1.get_ntrls()
+            c2_n = cat2.get_ntrls()
+            comb_n = self.combine_ntrls(c1_n, c2_n)
+            pop1 = self.make_pseudopop(pop1, comb_n, min_trials_pseudo,
+                                       resample_pseudo, skl_axs=True)
+            pop2 = self.make_pseudopop(pop2, comb_n, min_trials_pseudo,
+                                       resample_pseudo, skl_axs=True)
         outs = np.zeros((len(pop2), n_folds, len(xs)))
-
         for i, p1 in enumerate(pop1):
-            out = na.fold_skl(p1, pop2[i], n_folds, model, params, 
-                              mean=mean, pre_pca=pre_pca)
+            out = na.fold_skl(p1, pop2[i], n_folds, model=model, params=params, 
+                              mean=mean, pre_pca=pre_pca, shuffle=shuffle,
+                              impute_missing=(repl_nan or impute_missing))
             outs[i] = out
         return outs, xs
 

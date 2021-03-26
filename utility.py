@@ -896,6 +896,10 @@ def nan_array(size, dtype=None):
     arr[:] = np.nan
     return arr
 
+def make_array_ind_iterator(arr_shape):
+    ind_combs = list(list(range(d)) for d in arr_shape)
+    return it.product(*ind_combs)
+
 def euclidean_distance(pt1, pt2):
     pt1 = np.array(pt1)
     if len(pt1.shape) == 1:
