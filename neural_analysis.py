@@ -10,6 +10,7 @@ from sklearn.decomposition import PCA
 import sklearn.decomposition as skd
 import sklearn.exceptions as ske
 import sklearn.model_selection as skms
+import sklearn.impute as skimp
 from dPCA.dPCA import dPCA
 from hmmlearn import hmm
 import warnings
@@ -810,7 +811,8 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
     return tcs_pops, ms
 
 def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
-             shuffle=False, pre_pca=.99, n_jobs=-1, mean=True):
+             shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
+             impute_missing=False):
     if params is None:
         params = {}
     # c1 is shape (neurs, inner_conds, trials, time_points)
@@ -819,10 +821,12 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
     steps = []
     if norm:
         steps.append(skp.StandardScaler())
+    if impute_missing:
+        steps.append(skimp.SimpleImputer())
     if pre_pca is not None:
         steps.append(skd.PCA(n_components=pre_pca))
     clf = model(**params)
-    steps.append(clf)            
+    steps.append(clf)
     pipe = sklpipe.make_pipeline(*steps)
     c1_flat = np.concatenate(tuple(c1[:, i] for i in range(c1.shape[1])),
                              axis=1)
