@@ -3,7 +3,6 @@ import numpy as np
 import itertools as it
 import matplotlib.pyplot as plt
 import general.utility as u
-import seaborn as sns
 
 def plot_single_units(xs, sus, labels, colors=None, style=(), show=False,
                       errorbar=True, alpha=.5, trial_color=(.8, .8, .8),
