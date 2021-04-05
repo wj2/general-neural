@@ -10,6 +10,7 @@ from sklearn.decomposition import PCA
 import sklearn.decomposition as skd
 import sklearn.exceptions as ske
 import sklearn.model_selection as skms
+import sklearn.impute as skimp
 from dPCA.dPCA import dPCA
 from hmmlearn import hmm
 import warnings
@@ -64,7 +65,8 @@ def format_raw_glm(data, constraint_funcs, shape, labels, marker_func,
     dat_full, conds_full, labels_full = out 
     return dat_full, conds_full, labels_full, xs
 
-def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False):
+def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False,
+                   spks_per_sec=True):
     binedges = make_binedges(binsize, bounds, binstep)
     bspks, _ = np.histogram(spts, bins=binedges)
     if accumulate:
@@ -73,9 +75,13 @@ def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False):
             aspks[i] = np.sum(bspks[:i+1])
         bspks = aspks
     if binstep is not None and binstep < binsize:
-        filt = np.ones(int(binsize/binstep))
+        filt = np.ones(int(np.round(binsize/binstep)))
         bspks = np.convolve(bspks, filt, mode='valid')
-    bspks = bspks*(1000./binsize)
+    if spks_per_sec:
+        factor = 1000.
+    else:
+        factor = 1.
+    bspks = bspks*(factor/binsize)
     return bspks   
  
 def make_binedges(binsize, bounds, binstep=None):
@@ -83,7 +89,7 @@ def make_binedges(binsize, bounds, binstep=None):
         usebin = binstep
     else:
         usebin = binsize
-    binedges = np.arange(bounds[0], bounds[1] + binsize + 1, usebin)
+    binedges = np.arange(bounds[0], bounds[1] + binsize + usebin, usebin)
     return binedges
 
 def collect_ISIs(spts, binsize, bounds, binstep=None, accumulate=False):
@@ -635,6 +641,35 @@ def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
                          collapse_time=collapse_time, **kwargs)
     return out
 
+def pop_regression_skl(pop, reg_vals, folds_n, model=svm.SVR, norm=True,
+                       shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
+                       **model_params):
+    x_len = pop.shape[-1]
+    tcs = np.zeros((folds_n, x_len))
+    steps = []
+    if norm:
+       steps.append(skp.StandardScaler())
+    if pre_pca is not None:
+           steps.append(skd.PCA(n_components=pre_pca))
+    reg = model(**model_params)
+    steps.append(reg)
+    pipe = sklpipe.make_pipeline(*steps)
+    pop_flat = np.concatenate(tuple(pop[:, i] for i in range(pop.shape[1])),
+                              axis=1)
+    if shuffle:
+        reg_vals = reg_vals.sample(frac=1)
+    for j in range(x_len):
+        sc = skp.StandardScaler()
+        sc.fit(pop_flat[..., j].T)
+        sk_cv = skms.cross_val_score
+        scores = sk_cv(pipe, pop_flat[..., j].T, reg_vals,
+                       cv=folds_n, n_jobs=n_jobs)
+        tcs[:, j] = scores
+    if mean:
+        tcs = np.mean(tcs, axis=0)
+    return tcs
+
+
 def pop_regression(ds, r, leave_out=1, require_trials=15, 
                    resample=100, with_replace=False, shuff_labels=False, 
                    stability=False, params=None, collapse_time=False,
@@ -775,18 +810,23 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
             ms_pops[k] = ms
     return tcs_pops, ms
 
-def fold_skl(c1, c2, folds_n, model, params, norm=True, shuffle=False,
-              pre_pca=.99, n_jobs=-1, mean=True):
+def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
+             shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
+             impute_missing=False):
+    if params is None:
+        params = {}
     # c1 is shape (neurs, inner_conds, trials, time_points)
     x_len = c1.shape[-1]
     tcs = np.zeros((folds_n, x_len))
     steps = []
     if norm:
         steps.append(skp.StandardScaler())
+    if impute_missing:
+        steps.append(skimp.SimpleImputer())
     if pre_pca is not None:
         steps.append(skd.PCA(n_components=pre_pca))
     clf = model(**params)
-    steps.append(clf)            
+    steps.append(clf)
     pipe = sklpipe.make_pipeline(*steps)
     c1_flat = np.concatenate(tuple(c1[:, i] for i in range(c1.shape[1])),
                              axis=1)
@@ -1589,6 +1629,10 @@ stan_file_glm_mean = os.path.join(stan_file_trunk, 'glm_fitting.pkl')
 stan_file_glm_nomean = os.path.join(stan_file_trunk, 'glm_fitting_nomean.pkl')
 stan_file_glm_modu_nomean = os.path.join(stan_file_trunk,
                                          'glm_fitting_m_nm.pkl')
+stan_file_glm_nomean_cv = os.path.join(stan_file_trunk,
+                                       'glm_fitting_nm_mvar.pkl')
+stan_file_glm_modu_nomean_cv = os.path.join(stan_file_trunk,
+                                            'glm_fitting_m_nm_mvar.pkl')
 glm_arviz = {'observed_data':'y',
              'log_likelihood':{'y':'log_lik'},
              'posterior_predictive':'err_hat',
