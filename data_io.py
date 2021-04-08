@@ -149,21 +149,29 @@ class ResultSequence(object):
 
 class Dataset(object):
     
-    def __init__(self, date=None, experiment=None, animal=None, data=None,
-                 seconds=False, **kwargs):
-        comb_dict = dict(date=date, experiment=experiment,
-                         animal=animal, data=data, **kwargs)
-        self.data = pd.DataFrame(data=comb_dict)
-        self.session_fields = self.data['data'][0].columns
+    def __init__(self, dframe, seconds=False):
+        self.data = dframe
+        try:
+            self.session_fields = self.data['data'].iloc[0].columns
+        except KeyError as e:
+            if len(self.data['data']) == 0:
+                raise IOError('no data available')
+            else:
+                raise e
         self.n_sessions = len(self.data)
         self.data = self.data.sort_values('date', ignore_index=True)
         self.data = self.data.sort_values('animal', ignore_index=True)
         self.seconds = seconds
 
     @classmethod
+    def from_dict(cls, seconds=False, **inputs):
+        df = pd.DataFrame(data=inputs)
+        return cls(df, seconds=seconds)
+        
+    @classmethod
     def from_readfunc(cls, read_func, *args, seconds=False, **kwargs):
         super_df = read_func(*args, **kwargs)
-        return cls(seconds=seconds, **super_df)
+        return cls.from_dict(seconds=seconds, **super_df)
 
     def __getitem__(self, key):
         try:
@@ -171,6 +179,9 @@ class Dataset(object):
         except KeyError:
             out = ResultSequence(dd[key] for dd in self.data['data'])
         return out
+
+    def session_mask(self, mask):
+        return Dataset(self.data[mask], seconds=self.seconds)
 
     def mask(self, mask):
         df = {}
@@ -182,7 +193,7 @@ class Dataset(object):
             d = self.data['data'][i][m]
             dlist.append(d)
         df['data'] = dlist
-        return Dataset(**df, seconds=self.seconds)
+        return Dataset.from_dict(**df, seconds=self.seconds)
 
     def _center_spks(self, spks, tz, tzf):
         if tz is not None:
