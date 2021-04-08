@@ -869,6 +869,14 @@ def make_ratio_function(func1, func2):
         return norm
     return _ratio_func
 
+def normalize_periodic_range(diff, cent=0):
+    diff = np.array(diff) - cent
+    g_mask = diff > np.pi
+    l_mask = diff < -np.pi
+    diff[g_mask] = -np.pi + (diff[g_mask] - np.pi)
+    diff[l_mask] = np.pi + (diff[l_mask] + np.pi)
+    return diff
+
 def compute_angular_separation(xy1, xy2):
     theta1 = np.rad2deg(np.arctan2(xy1[1], xy1[0]))
     theta2 = np.rad2deg(np.arctan2(xy2[1], xy2[0]))
@@ -904,6 +912,16 @@ def euclidean_distance(pt1, pt2):
     if len(pt2.shape) == 1:
         pt2 = pt2.reshape((1, pt2.shape[0]))
     return np.sqrt(np.sum((pt1 - pt2)**2, axis=1))
+
+def dict_diff(d1, d2):
+    ks = set(d1.keys()).union(d2.keys())
+    diff_dict = {}
+    for k in ks:
+        v1 = d1.get(k, None)
+        v2 = d2.get(k, None)
+        if v1 != v2:
+            diff_dict[k] = (v1, v2)
+    return diff_dict
 
 def distribute_imglogs(il_path, out_path):
     il_list = os.listdir(il_path)
