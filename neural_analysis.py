@@ -643,28 +643,35 @@ def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
 
 def pop_regression_skl(pop, reg_vals, folds_n, model=svm.SVR, norm=True,
                        shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
-                       **model_params):
+                       impute_missing=False, **model_params):
     x_len = pop.shape[-1]
     tcs = np.zeros((folds_n, x_len))
     steps = []
     if norm:
        steps.append(skp.StandardScaler())
+    if impute_missing:
+        steps.append(skimp.SimpleImputer())
     if pre_pca is not None:
-           steps.append(skd.PCA(n_components=pre_pca))
+        steps.append(skd.PCA(n_components=pre_pca))
     reg = model(**model_params)
     steps.append(reg)
     pipe = sklpipe.make_pipeline(*steps)
     pop_flat = np.concatenate(tuple(pop[:, i] for i in range(pop.shape[1])),
                               axis=1)
     if shuffle:
-        reg_vals = reg_vals.sample(frac=1)
+        inds = np.random.choice(reg_vals.shape[0], reg_vals.shape[0],
+                                replace=False)
+        reg_vals = reg_vals[inds]
     for j in range(x_len):
-        sc = skp.StandardScaler()
-        sc.fit(pop_flat[..., j].T)
         sk_cv = skms.cross_val_score
-        scores = sk_cv(pipe, pop_flat[..., j].T, reg_vals,
-                       cv=folds_n, n_jobs=n_jobs)
-        tcs[:, j] = scores
+        if len(reg_vals.shape) > 1:
+            for k in range(reg_vals.shape[1]):
+                tcs[:, j] += 1 - sk_cv(pipe, pop_flat[..., j].T, reg_vals[:, k],
+                                   cv=folds_n, n_jobs=n_jobs)
+        else:
+            scores = sk_cv(pipe, pop_flat[..., j].T, reg_vals,
+                           cv=folds_n, n_jobs=n_jobs)
+            tcs[:, j] = 1 - scores
     if mean:
         tcs = np.mean(tcs, axis=0)
     return tcs
