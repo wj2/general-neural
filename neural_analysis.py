@@ -1640,10 +1640,23 @@ stan_file_glm_nomean_cv = os.path.join(stan_file_trunk,
                                        'glm_fitting_nm_mvar.pkl')
 stan_file_glm_modu_nomean_cv = os.path.join(stan_file_trunk,
                                             'glm_fitting_m_nm_mvar.pkl')
+
+stan_file_glm_nomean_pop = os.path.join(stan_file_trunk,
+                                        'glm_fitting_nm_pop.pkl')
+stan_file_glm_modu_nomean_pop = os.path.join(stan_file_trunk,
+                                         'glm_fitting_m_nm_pop.pkl')
+stan_file_glm_nomean_cv_pop = os.path.join(stan_file_trunk,
+                                       'glm_fitting_nm_mvar_pop.pkl')
+stan_file_glm_modu_nomean_cv_pop = os.path.join(stan_file_trunk,
+                                            'glm_fitting_m_nm_mvar_pop.pkl')
 glm_arviz = {'observed_data':'y',
              'log_likelihood':{'y':'log_lik'},
-             'posterior_predictive':'err_hat',
-             'dims':{'beta':['cond']}}
+             'posterior_predictive':'err_hat'}
+glm_pop_arviz = {'observed_data':'y',
+                 'log_likelihood':{'y':'log_lik'},
+                 'posterior_predictive':'err_hat',
+                 'dims':{'beta':['neur_inds'],
+                         'sigma':['neur_inds']}}
 
 def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
                              stan_iters=10000, stan_file=stan_file_glm_mean,
