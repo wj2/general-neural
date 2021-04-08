@@ -179,7 +179,6 @@ def gen_circle_pts(n, r=1):
     pts = np.stack((np.cos(angs), np.sin(angs)), axis=1)
     return r*pts
 
-    
 def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
     if len(axvals) == val_len:
         diff = np.diff(axvals)[diff_ind]
@@ -187,6 +186,14 @@ def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
         if append:
             axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
     return axvals
+
+def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, **kwargs):
+    xs_ax = pcolormesh_axes(xs, len(xs), diff_ind=diff_ind,
+                            append=append)
+    ys_ax = pcolormesh_axes(ys, len(ys), diff_ind=diff_ind,
+                            append=append)
+    ax.pcolormesh(xs_ax, ys_ax, data, **kwargs)
+    return ax    
 
 def plot_decoding_heatmap(xs, decmat, colormap=None, show=False, title='',
                           ax=None, style=(), colorbar=True, cb_wid=.05,
@@ -577,6 +584,7 @@ def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrco
     
 def print_mean_conf95(bs_list, subj, text, n_boots=1000, func=np.nanmean,
                       preboot=False, round_result=2):
+    bs_list = np.array(bs_list)
     if  preboot:
         cent = func(bs_list)
         bs = bs_list
