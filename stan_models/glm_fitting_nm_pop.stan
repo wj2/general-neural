@@ -17,7 +17,7 @@ data {
 
 parameters {
   matrix[N, K] beta_raw; // coefficients on Q_ast
-  vector<lower=0>[N] sigma_raw; // error scales
+  vector[N] sigma_raw; // error scales
 
   vector[K] beta_mean;
   vector[K] beta_var;

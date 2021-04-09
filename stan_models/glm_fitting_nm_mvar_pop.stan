@@ -4,7 +4,7 @@ data {
   int<lower=0> N; // number of neurons
   matrix[T, K] x; // predictor matrix
   vector[T] y; // outcome vector
-  vector[T] context; // context vector
+  int<lower=0, upper=1> context[T]; // context vector
   int<lower=1, upper=N> neur_inds[T]; // neuron index
 
   real<lower=0> beta_mean_var;
@@ -18,7 +18,7 @@ data {
 
 parameters {
   matrix[N, K] beta_raw; // coefficients on Q_ast
-  matrix<lower=0>[N, 2] sigma_raw; // error scales
+  matrix[N, 2] sigma_raw; // error scales
 
   vector[K] beta_mean;
   vector[K] beta_var;
