@@ -1,7 +1,6 @@
 
 import numpy as np
 import scipy.stats as sts
-import general.utility as u
 import sklearn.preprocessing as skp
 from sklearn import svm, linear_model
 from sklearn import discriminant_analysis as da
@@ -11,6 +10,7 @@ import sklearn.decomposition as skd
 import sklearn.exceptions as ske
 import sklearn.model_selection as skms
 import sklearn.impute as skimp
+import arviz as az
 from dPCA.dPCA import dPCA
 from hmmlearn import hmm
 import warnings
@@ -18,6 +18,9 @@ import itertools as it
 import string
 import os
 import pickle
+
+import general.decoders as gd
+import general.utility as u
 
 def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum',
                            ret_index=False, **kwargs):
@@ -110,7 +113,8 @@ def compute_xs(binsize, pretime, posttime, binstep, causal_timing=False):
         xs = np.arange(pretime + binsize/2., posttime + binsize/2. + binstep,
                        binstep)
     else:
-        xs = np.arange(pretime + binsize/2., posttime + binsize/2. + 1, binsize)
+        xs = np.arange(pretime + binsize/2., posttime + binsize/2. + binsize,
+                       binsize)
     if causal_timing:
         xs = xs + binsize/2
     return xs
@@ -641,6 +645,82 @@ def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
                          collapse_time=collapse_time, **kwargs)
     return out
 
+def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderTime,
+                            norm=True, pre_pca=.99, impute_missing=False,
+                            **model_params):
+    x_len = pop.shape[-1]
+    steps = []
+    if norm:
+       steps.append(skp.StandardScaler())
+    if impute_missing:
+        steps.append(skimp.SimpleImputer())
+    if pre_pca is not None:
+        steps.append(skd.PCA(n_components=pre_pca))
+    pipe = sklpipe.make_pipeline(*steps)
+    pop_flat = np.concatenate(tuple(pop[:, i] for i in range(pop.shape[1])),
+                              axis=1)
+    shuff_inds = np.random.choice(reg_vals.shape[0], reg_vals.shape[0],
+                                replace=False)
+    reg_shuff = np.array(reg_vals)[shuff_inds]
+    pop_list = []
+    reg_list = []
+    reg_shuff_list = []
+    time_list = []
+    for j in range(x_len):
+        pop_list.append(pop_flat[..., j])
+        reg_list.append(reg_vals)
+        reg_shuff_list.append(reg_shuff)
+        time_list.append(np.ones(len(reg_vals), dtype=int)*(j + 1))
+    pop_full = np.concatenate(pop_list, axis=1)
+    reg_full = np.concatenate(reg_list, axis=0)
+    reg_shuff_full = np.concatenate(reg_shuff_list, axis=0)
+    time_full = np.concatenate(time_list, axis=0)
+    
+    pop_proc = pipe.fit_transform(pop_full.T)
+    m1 = model(**model_params)
+    m1.fit(pop_proc, reg_full, time_full)
+    m2 = model(**model_params)
+    m2.fit(pop_proc, reg_shuff_full, time_full)
+    comp = az.compare(dict(m=m1.get_arviz(), m_shuff=m2.get_arviz()))
+    for j in range(x_len):
+        pop_t_proc = pipe.transform(pop_flat[..., j].T)
+        scores = m1.score(pop_t_proc, reg_vals, time_list[j])
+        if j == 0:
+            tcs = np.zeros((scores.shape[0], x_len))
+        tcs[:, j] = 1 - scores
+    return tcs, comp
+
+def pop_regression_stan(pop, reg_vals, model=gd.PeriodicDecoder, norm=True,
+                        pre_pca=.99, impute_missing=False, **model_params):
+    x_len = pop.shape[-1]
+    comps = []
+    steps = []
+    if norm:
+       steps.append(skp.StandardScaler())
+    if impute_missing:
+        steps.append(skimp.SimpleImputer())
+    if pre_pca is not None:
+        steps.append(skd.PCA(n_components=pre_pca))
+    pipe = sklpipe.make_pipeline(*steps)
+    pop_flat = np.concatenate(tuple(pop[:, i] for i in range(pop.shape[1])),
+                              axis=1)
+    shuff_inds = np.random.choice(reg_vals.shape[0], reg_vals.shape[0],
+                                replace=False)
+    reg_shuff = np.array(reg_vals)[shuff_inds]
+    for j in range(x_len):
+        pop_proc = pipe.fit_transform(pop_flat[..., j].T)
+        m1 = model(**model_params)
+        m1.fit(pop_proc, reg_vals)
+        m2 = model(**model_params)
+        m2.fit(pop_proc, reg_shuff)
+        comp = az.compare(dict(m=m1.get_arviz(), m_shuff=m2.get_arviz()))
+        scores = m1.score(pop_proc, reg_vals)
+        if j == 0:
+            tcs = np.zeros((scores.shape[0], x_len))
+        tcs[:, j] = 1 - scores
+        comps.append(comp)
+    return tcs, comps    
+
 def pop_regression_skl(pop, reg_vals, folds_n, model=svm.SVR, norm=True,
                        shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
                        impute_missing=False, **model_params):
@@ -819,7 +899,7 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
 
 def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
              shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
-             impute_missing=False):
+             impute_missing=False, verbose=False):
     if params is None:
         params = {}
     # c1 is shape (neurs, inner_conds, trials, time_points)
@@ -842,6 +922,11 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
     c_flat = np.concatenate((c1_flat, c2_flat), axis=1)
     labels = np.concatenate((np.zeros(c1_flat.shape[1]),
                              np.ones(c2_flat.shape[1])))
+    if verbose:
+        print('--')
+        print(c1_flat.shape)
+        print(c2_flat.shape)
+        print(c_flat.shape)
     if shuffle:
         np.random.shuffle(labels)
     for j in range(x_len):

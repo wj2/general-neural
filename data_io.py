@@ -204,6 +204,7 @@ class Dataset(object):
             
     def get_response_in_window(self, begin, end, time_zero=None,
                                time_zero_field=None):
+        spks = self['spikeTimes']
         spks = self._center_spks(spks, time_zero, time_zero_field)
         out = []
         for spk in spks:
