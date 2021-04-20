@@ -647,7 +647,7 @@ def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
 
 def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderTime,
                             norm=True, pre_pca=.99, impute_missing=False,
-                            **model_params):
+                            pre_rescale=False, **model_params):
     x_len = pop.shape[-1]
     steps = []
     if norm:
@@ -667,7 +667,12 @@ def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderTime,
     reg_shuff_list = []
     time_list = []
     for j in range(x_len):
-        pop_list.append(pop_flat[..., j])
+        if pre_rescale:
+            skss = skp.StandardScaler()
+            pfj = skss.fit_transform(pop_flat[..., j].T).T
+            pop_list.append(pfj)
+        else:
+            pop_list.append(pop_flat[..., j])
         reg_list.append(reg_vals)
         reg_shuff_list.append(reg_shuff)
         time_list.append(np.ones(len(reg_vals), dtype=int)*(j + 1))
