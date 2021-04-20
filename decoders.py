@@ -61,7 +61,7 @@ class PeriodicDecoder:
                          sigma_mean=1/self.epsilon)
         return stan_data
     
-    [Odef fit(self, x, y, *args):
+    def fit(self, x, y, *args):
         self.kernel_fit(x)
         x_kern = self.kernel_transform(x)
         stan_data = self._make_stan_dict(x_kern, y, *args)

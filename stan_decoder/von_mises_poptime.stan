@@ -25,7 +25,7 @@ parameters {
   real<lower=0> b_var;
 
   real<lower=0> sigma_mean;
-  real<lower=0.0001> sigma_var;
+  real<lower=0> sigma_var;
     
   matrix[T, K] beta_raw; // coefficients on Q_ast
   vector[T] b_raw;
@@ -40,7 +40,7 @@ transformed parameters {
   sigma = sigma_mean + sigma_var*sigma_raw;
   b = b_mean + b_var*b_raw;
   for (i in 1:T) {
-    beta[i] = (beta_mean + beta_raw[i]*beta_var)';
+    beta[i] = beta_mean' + beta_raw[i] .* beta_var';
   }
 }
 
