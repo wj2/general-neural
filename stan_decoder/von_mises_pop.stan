@@ -11,7 +11,7 @@ data {
 
 parameters {
   vector[K] beta; // coefficients on Q_ast
-  real b;
+  real<lower=0, upper=2*pi()> b;
   real<lower=.0001> sigma; // error scale
 }
 

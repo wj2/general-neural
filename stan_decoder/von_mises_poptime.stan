@@ -61,7 +61,7 @@ model {
 
   sigma_mean ~ normal(sigma_mean_mean, sigma_mean_var);
   sigma_var ~ normal(sigma_var_mean, sigma_var_var);
-    
+  
   for (i in 1:N) {
     t = time[i];
     if (sigma[t] > 100) {
