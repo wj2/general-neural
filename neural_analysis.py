@@ -1739,6 +1739,10 @@ stan_file_glm_nomean_cv_pop = os.path.join(stan_file_trunk,
                                        'glm_fitting_nm_mvar_pop.pkl')
 stan_file_glm_modu_nomean_cv_pop = os.path.join(stan_file_trunk,
                                             'glm_fitting_m_nm_mvar_pop.pkl')
+stan_logit_path = os.path.join(stan_file_trunk,
+                               'logit.pkl')
+stan_unif_resp_path = os.path.join(stan_file_trunk,
+                                   'unif_resp.pkl')
 glm_arviz = {'observed_data':'y',
              'log_likelihood':{'y':'log_lik'},
              'posterior_predictive':'err_hat'}
@@ -1747,6 +1751,26 @@ glm_pop_arviz = {'observed_data':'y',
                  'posterior_predictive':'err_hat',
                  'dims':{'beta':['neur_inds'],
                          'sigma':['neur_inds']}}
+
+def fit_logit(measured, outcome, manifest=glm_arviz, model_path=stan_logit_path,
+              null_model_path=stan_unif_resp_path, stan_iters=500,
+              stan_chains=4, prior_width=5, norm=True):
+    if norm:
+        measured_m = np.mean(measured)
+        measured_v = np.std(measured - measured_m)
+        measured = (measured - measured_m)/measured_v
+    stan_data = {'N':len(measured), 'y':outcome, 'x':measured,
+                 'prior_width':prior_width}
+    sm_logit = pickle.load(open(model_path, 'rb'))
+    m_logit = sm_logit.sampling(data=stan_data, iter=stan_iters,
+                                chains=stan_chains)
+    m_logit_az = az.from_pystan(posterior=m_logit, **manifest)
+    sm_null = pickle.load(open(null_model_path, 'rb'))
+    m_null = sm_null.sampling(data=stan_data, iter=stan_iters,
+                              chains=stan_chains)
+    m_null_az = az.from_pystan(posterior=m_null, **manifest)
+    comp = az.compare(dict(logit=m_logit_az, null=m_null_az))
+    return m_logit, m_null, comp
 
 def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
                              stan_iters=10000, stan_file=stan_file_glm_mean,
