@@ -5,6 +5,9 @@ import sklearn.kernel_approximation as skka
 import pystan as ps
 import arviz as az
 import functools as ft
+import sklearn.pipeline as sklpipe
+import sklearn.preprocessing as skp
+import sklearn.decomposition as skd
 
 import general.utility as u
 import general.stan_utility as su
@@ -15,11 +18,16 @@ pd_arviz = {'observed_data':'y',
             'log_likelihood':{'y':'log_lik'},
             'posterior_predictive':'err_hat'}
 
+class TFPeriodicDecoder:
+
+    def __init__(self):
+        pass
+
 class PeriodicDecoder:
 
-    def __init__(self, C=1, epsilon=.2, kernel='rbf', decoder='stan',
+    def __init__(self, C=1, epsilon=1, kernel='rbf', decoder='stan',
                  stan_path=periodic_decoder_path, recompile_decoder=False,
-                 adapt_delta=.9, max_treedepth=10, iters=800, chains=4,
+                 adapt_delta=.9, max_treedepth=15, iters=800, chains=4,
                  trans_func=None, az_manifest=None, include_x=False,
                  **kernel_params):
         if az_manifest is None:
@@ -44,16 +52,24 @@ class PeriodicDecoder:
                                     'max_treedepth':max_treedepth}
 
     def kernel_transform(self, x):
-        x_kern = self.kernel.transform(x)
+        x_kern = self.preprocessing.transform(x)
         if self.include_x:
             x_kern = np.concatenate((x, x_kern), axis=1)
         return x_kern
 
-    def kernel_fit(self, x):
+    """ why does normalizing make the model so ill-posed? """ 
+    def kernel_fit(self, x, norm=True, repca=None):
         if self.kernel_params['gamma'] == 'scale':
             self.kernel_params['gamma'] = 1/(x.shape[1]*x.var())
-        self.kernel = self.kernel(**self.kernel_params)
-        self.kernel = self.kernel.fit(x)
+        # self.kernel = self.kernel(**self.kernel_params)
+        # self.kernel = self.kernel.fit(x)
+        preproc = [self.kernel(**self.kernel_params)]
+        if norm:
+            preproc.append(skp.StandardScaler())
+        if repca is not None:
+            preproc.append(skd.PCA(repca))
+        pipe = sklpipe.make_pipeline(*preproc)
+        self.preprocessing = pipe.fit(x)
 
     def _make_stan_dict(self, x, y):
         stan_data = dict(x=x, N=x.shape[0], K=x.shape[1], y=y,

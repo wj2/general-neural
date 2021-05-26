@@ -10,6 +10,7 @@ import pystan as ps
 import pickle
 import itertools as it
 import configparser
+import sklearn.decomposition as skd
 from pref_looking.eyes import analyze_eyemove
 from pref_looking.bias import get_look_img
 
@@ -248,6 +249,13 @@ def vector_angle(v1, v2, degrees=True):
     if degrees:
         theta = theta*(180/np.pi)
     return theta
+
+def participation_ratio(samps):
+    p = skd.PCA()
+    p.fit(samps)
+    pv = p.explained_variance_ratio_
+    pr = np.sum(pv)**2/np.sum(pv**2)
+    return pr
 
 def make_unit_vector(v):
     v = np.array(v)

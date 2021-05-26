@@ -646,7 +646,7 @@ def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
     return out
 
 def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderTime,
-                            norm=True, pre_pca=.99, impute_missing=False,
+                            norm=True, pre_pca=None, impute_missing=False,
                             pre_rescale=False, **model_params):
     x_len = pop.shape[-1]
     steps = []
@@ -690,10 +690,13 @@ def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderTime,
     for j in range(x_len):
         pop_t_proc = pipe.transform(pop_flat[..., j].T)
         scores = m1.score(pop_t_proc, reg_vals, time_list[j])
+        scores_shuff = m2.score(pop_t_proc, reg_vals, time_list[j])
         if j == 0:
             tcs = np.zeros((scores.shape[0], x_len))
+            tcs_shuff = np.zeros((scores.shape[0], x_len))
         tcs[:, j] = 1 - scores
-    return tcs, comp
+        tcs_shuff[:, j] = 1 - scores_shuff
+    return tcs, tcs_shuff, (m1, m2), comp
 
 def pop_regression_stan(pop, reg_vals, model=gd.PeriodicDecoder, norm=True,
                         pre_pca=.99, impute_missing=False, **model_params):
@@ -712,19 +715,28 @@ def pop_regression_stan(pop, reg_vals, model=gd.PeriodicDecoder, norm=True,
     shuff_inds = np.random.choice(reg_vals.shape[0], reg_vals.shape[0],
                                 replace=False)
     reg_shuff = np.array(reg_vals)[shuff_inds]
+    m1s = []
+    m2s = [] 
     for j in range(x_len):
         pop_proc = pipe.fit_transform(pop_flat[..., j].T)
         m1 = model(**model_params)
+        print('ordered')
         m1.fit(pop_proc, reg_vals)
         m2 = model(**model_params)
+        print('shuffled')
         m2.fit(pop_proc, reg_shuff)
         comp = az.compare(dict(m=m1.get_arviz(), m_shuff=m2.get_arviz()))
         scores = m1.score(pop_proc, reg_vals)
+        scores_shuff = m2.score(pop_proc, reg_vals)
         if j == 0:
             tcs = np.zeros((scores.shape[0], x_len))
+            tcs_shuff = np.zeros((scores.shape[0], x_len))
         tcs[:, j] = 1 - scores
+        tcs_shuff[:, j] = 1 - scores_shuff
+        m1s.append(m1)
+        m2s.append(m2)
         comps.append(comp)
-    return tcs, comps    
+    return tcs, tcs_shuff, (m1s, m2s), comps
 
 def pop_regression_skl(pop, reg_vals, folds_n, model=svm.SVR, norm=True,
                        shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
@@ -751,12 +763,12 @@ def pop_regression_skl(pop, reg_vals, folds_n, model=svm.SVR, norm=True,
         sk_cv = skms.cross_val_score
         if len(reg_vals.shape) > 1:
             for k in range(reg_vals.shape[1]):
-                tcs[:, j] += 1 - sk_cv(pipe, pop_flat[..., j].T, reg_vals[:, k],
+                tcs[:, j] +=  sk_cv(pipe, pop_flat[..., j].T, reg_vals[:, k],
                                    cv=folds_n, n_jobs=n_jobs)
         else:
             scores = sk_cv(pipe, pop_flat[..., j].T, reg_vals,
                            cv=folds_n, n_jobs=n_jobs)
-            tcs[:, j] = 1 - scores
+            tcs[:, j] = scores
     if mean:
         tcs = np.mean(tcs, axis=0)
     return tcs
@@ -902,11 +914,73 @@ def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
             ms_pops[k] = ms
     return tcs_pops, ms
 
+def decode_skl(c1_train, c1_test, c2_train, c2_test, model=svm.SVC, params=None,
+               norm=True, shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
+               impute_missing=False, verbose=False, class_weight='balanced',
+               return_dists=False, **model_kwargs):
+    if params is None:
+        params = model_kwargs
+    else:
+        model_kwargs.update(params)
+        params = model_kwargs
+    params['class_weight'] = class_weight
+    # c1 is shape (neurs, inner_conds, trials, time_points)
+    x_len = c1_train.shape[-1]
+    tcs = np.zeros((1, x_len))
+    steps = []
+    if norm:
+        steps.append(skp.StandardScaler())
+    if impute_missing:
+        steps.append(skimp.SimpleImputer())
+    if pre_pca is not None:
+        steps.append(skd.PCA(n_components=pre_pca))
+    clf = model(**params)
+    steps.append(clf)
+    pipe = sklpipe.make_pipeline(*steps)
+    c1_train_flat = np.concatenate(tuple(c1_train[:, i]
+                                         for i in range(c1_train.shape[1])),
+                                   axis=1)
+    c2_train_flat = np.concatenate(tuple(c2_train[:, i]
+                                         for i in range(c2_train.shape[1])),
+                                   axis=1)
+    c_train_flat = np.concatenate((c1_train_flat, c2_train_flat), axis=1)
+    labels_train = np.concatenate((np.zeros(c1_train_flat.shape[1]),
+                                   np.ones(c2_train_flat.shape[1])))
+    c1_test_flat = np.concatenate(tuple(c1_test[:, i]
+                                         for i in range(c1_test.shape[1])),
+                                   axis=1)
+    c2_test_flat = np.concatenate(tuple(c2_test[:, i]
+                                         for i in range(c2_test.shape[1])),
+                                   axis=1)
+    c_test_flat = np.concatenate((c1_test_flat, c2_test_flat), axis=1)
+    labels_test = np.concatenate((np.zeros(c1_test_flat.shape[1]),
+                                  np.ones(c2_test_flat.shape[1])))
+    bvals1 = np.zeros(c1_test.shape[1:3] + (x_len,))
+    bvals2 = np.zeros(c2_test.shape[1:3] + (x_len,))
+    for j in range(x_len):
+        pipe.fit(c_train_flat[..., j].T, labels_train)
+        tcs[:, j] = pipe.score(c_test_flat[..., j].T, labels_test)
+        for k in range(c1_test.shape[1]):
+            bvals1[k, :, j] = pipe.decision_function(c1_test[:, k, :, j].T)
+        for k in range(c2_test.shape[1]):
+            bvals2[k, :, j] = pipe.decision_function(c2_test[:, k, :, j].T)
+        wnorm = np.sqrt(np.sum(pipe[-1].coef_**2))
+        bvals1[k, :, j] = wnorm*bvals1[k, :, j]
+        bvals2[k, :, j] = wnorm*bvals2[k, :, j]
+    if return_dists:
+        out = (tcs, bvals1, bvals2)
+    else:
+        out = tcs
+    return out 
+
 def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
              shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
-             impute_missing=False, verbose=False):
+             impute_missing=False, verbose=False, **model_kwargs):
     if params is None:
-        params = {}
+        params = model_kwargs
+    else:
+        model_kwargs.update(params)
+        params = model_kwargs
     # c1 is shape (neurs, inner_conds, trials, time_points)
     x_len = c1.shape[-1]
     tcs = np.zeros((folds_n, x_len))
@@ -926,7 +1000,7 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
                              axis=1)
     c_flat = np.concatenate((c1_flat, c2_flat), axis=1)
     labels = np.concatenate((np.zeros(c1_flat.shape[1]),
-                             np.ones(c2_flat.shape[1])))
+                            np.ones(c2_flat.shape[1])))
     if verbose:
         print('--')
         print(c1_flat.shape)
@@ -986,13 +1060,15 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
              resample=100, with_replace=False, shuff_labels=False, 
              stability=False, params=None, collapse_time=False,
              format_=True, equal_fold=False, multi_cond=False,
-             use_avail_trials=True, norm=True, **kwargs):
+             use_avail_trials=True, norm=True, reduce_required=True,
+             **kwargs):
     if format_:
         if not multi_cond:
             cat1 = (cat1,)
             cat2 = (cat2,)
         out = _svm_organize(cat1, cat2, require_trials=require_trials,
-                            use_avail_trials=use_avail_trials)
+                            use_avail_trials=use_avail_trials,
+                            reduce_required=reduce_required)
         cat1_f, cat2_f, require_trials, x_len = out
     else:
         if not multi_cond:
@@ -1022,7 +1098,7 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
         cat2_samp = sample_trials_svm(cat2_f, require_trials, with_replace)
         if not (stability or collapse_time):
             tcs[i] = fold_skl(cat1_samp, cat2_samp, folds_n, model,
-                            params=params, norm=norm, shuffle=shuff_labels)
+                              params=params, norm=norm, shuffle=shuff_labels)
         else:
             out = _fold_model(cat1_samp, cat2_samp, leave_out, model=model,
                           shuff_labels=shuff_labels, stability=stability, 
@@ -1051,10 +1127,8 @@ def svm_cross_decoding(c1_train, c1_test, c2_train, c2_test, require_trials=15,
     params = {'C':penalty, 'max_iter':max_iter, 'gamma':gamma,
                    'kernel':kernel}
     if kernel != 'linear':
-        params.update(('kernel', kernel),)
-        params.pop('penalty')
-        params.pop('dual')
-        params.pop('loss')
+        params.pop('dual', None)
+        params.pop('loss', None)
     if format_:
         if not multi_cond:
             c1_train = (c1_train,)

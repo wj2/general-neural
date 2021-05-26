@@ -191,8 +191,8 @@ def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, **kwargs):
                             append=append)
     ys_ax = pcolormesh_axes(ys, len(ys), diff_ind=diff_ind,
                             append=append)
-    ax.pcolormesh(xs_ax, ys_ax, data, **kwargs)
-    return ax    
+    img = ax.pcolormesh(xs_ax, ys_ax, data, **kwargs)
+    return img
 
 def plot_decoding_heatmap(xs, decmat, colormap=None, show=False, title='',
                           ax=None, style=(), colorbar=True, cb_wid=.05,
@@ -568,8 +568,7 @@ def make_xaxis_scale_bar(ax, magnitude=None, double=True, anchor=0, bottom=True,
                 horizontalalignment='center', verticalalignment='top')
     ax.set_ylim(yl)
 
-def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrcoef,
-                      round_result=2):
+def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef):
     f = lambda x: func(x[:, 0], x[:, 1])[1,0]
     inp = np.stack((as_list, bs_list), axis=1)
     cc = u.bootstrap_list(inp, f, n=n_boots)
@@ -577,6 +576,12 @@ def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrco
     interv = conf95_interval(cc)
     upper = cent + interv[0, 0]
     lower = cent + interv[1, 0]
+    return cent, lower, upper
+    
+def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrcoef,
+                      round_result=2):
+    cent, lower, upper = get_corr_conf95(as_list, bs_list, n_boots=n_boots,
+                                         func=func)
     s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
     print(s)
     return s
