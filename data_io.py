@@ -104,26 +104,28 @@ class ResultSequence(object):
         return str(self.val)
         
     def __lt__(self, x):
-        return self._op(x, np.less)
+        return self._op_dispatcher(x, np.less)
 
     def __le__(self, x):
-        return self._op(x, np.less_equal)
+        return self._op_dispatcher(x, np.less_equal)
 
     def __gt__(self, x):
-        return self._op(x, np.greater)
+        return self._op_dispatcher(x, np.greater)
 
     def __ge__(self, x):
-        return self._op(x, np.greater_equal)
+        return self._op_dispatcher(x, np.greater_equal)
 
     def __eq__(self, x):
-        return self._op(x, np.equal)
+        return self._op_dispatcher(x, np.equal)
 
     def __ne__(self, x):
-        return self._op(x, np.not_equal)
+        return self._op_dispatcher(x, np.not_equal)
 
     def _op_dispatcher(self, x, op):
         try:
             len(x)
+            if type(x) == str:
+                raise TypeError()
             out = self._op_rs(x, op)
         except TypeError:
             out = self._op(x, op)
@@ -146,6 +148,10 @@ class ResultSequence(object):
 
     def __add__(self, x):
         return self._op_dispatcher(x, np.add)
+
+def combine_ntrls(*args):
+    stacked = np.stack(args, axis=0)
+    return np.min(stacked, axis=0)
 
 class Dataset(object):
     
@@ -215,7 +221,8 @@ class Dataset(object):
     def _get_spikerates(self, spk, binsize, bounds, binstep, accumulate=False,
                         convert_seconds=True):
         xs = na.compute_xs(binsize, bounds[0], bounds[1], binstep)
-        spk = np.squeeze(spk)
+        if len(spk.shape) > 2:
+            spk = np.squeeze(spk)
         for i, spk_i in enumerate(spk):
             for j, spk_ij in enumerate(spk_i):
                 spk_sq = np.squeeze(spk_ij)
@@ -229,10 +236,6 @@ class Dataset(object):
                     out_arr = np.zeros(spk.shape + (tlen,))
                 out_arr[i, j] = resp_arr
         return out_arr, xs
-    
-    def combine_ntrls(self, *args):
-        stacked = np.stack(args, axis=0)
-        return np.min(stacked, axis=0)
     
     def make_pseudopop(self, outs, n_trls=None, min_trials_pseudo=10,
                        resample_pseudos=10, skl_axs=False):
@@ -265,6 +268,9 @@ class Dataset(object):
                 out_pseudo = np.zeros((resample_pseudos,) + ppop.shape)
             out_pseudo[i] = ppop
         return out_pseudo
+
+    def get_nneurs(self):
+        return self['n_neurs']
     
     def get_populations(self, binsize, begin, end, binstep=None, skl_axes=False,
                         accumulate=False, time_zero=None, time_zero_field=None,
@@ -274,11 +280,16 @@ class Dataset(object):
         spks = self._center_spks(spks, time_zero, time_zero_field)
         outs = []
         n_trls = []
-        for spk in spks:
-            spk_stack = np.stack(spk, axis=0)
-            out = self._get_spikerates(spk_stack, binsize, (begin, end),
-                                       binstep, accumulate,
-                                       convert_seconds=not self.seconds)
+        for i, spk in enumerate(spks):
+            if len(spk) == 0:
+                xs = na.compute_xs(binsize, begin, end, binstep)
+                resp_arr = np.zeros((0, self.get_nneurs()[i], len(xs)))
+                out = (resp_arr, xs)
+            else:
+                spk_stack = np.stack(spk, axis=0)
+                out = self._get_spikerates(spk_stack, binsize, (begin, end),
+                                           binstep, accumulate,
+                                           convert_seconds=not self.seconds)
             resp_arr, xs = out
             if repl_nan:
                 no_spk_mask = np.all(resp_arr == 0, axis=-1)
@@ -314,7 +325,7 @@ class Dataset(object):
         if pseudo:
             c1_n = cat1.get_ntrls()
             c2_n = cat2.get_ntrls()
-            comb_n = self.combine_ntrls(c1_n, c2_n)
+            comb_n = combine_ntrls(c1_n, c2_n)
             pop1 = self.make_pseudopop(pop1, comb_n, min_trials_pseudo,
                                        resample_pseudo, skl_axs=True)
             pop2 = self.make_pseudopop(pop2, comb_n, min_trials_pseudo,
