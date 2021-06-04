@@ -3,6 +3,7 @@ import numpy as np
 import itertools as it
 import matplotlib.pyplot as plt
 import general.utility as u
+import general.neural_analysis as na
 
 def plot_single_units(xs, sus, labels, colors=None, style=(), show=False,
                       errorbar=True, alpha=.5, trial_color=(.8, .8, .8),
@@ -567,10 +568,31 @@ def make_xaxis_scale_bar(ax, magnitude=None, double=True, anchor=0, bottom=True,
         ax.text(txt_pt[0], txt_pt[1] - text_buff, label, transform=ax.transAxes,
                 horizontalalignment='center', verticalalignment='top')
     ax.set_ylim(yl)
-
-def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef):
-    f = lambda x: func(x[:, 0], x[:, 1])[1,0]
-    inp = np.stack((as_list, bs_list), axis=1)
+    
+def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef,
+                    rm_nan=False, confounders=None, use_cv=False):
+    if confounders is None:
+        use_confounders = False
+        confounders = np.zeros((len(as_list), 1), dtype=bool)
+    else:
+        use_confounders = True
+    if rm_nan:
+        mask = np.logical_or(np.isnan(as_list),
+                             np.isnan(bs_list))
+        mask = np.logical_or(mask, np.any(np.isnan(confounders), axis=1))
+        mask = np.logical_not(mask)
+        as_list = as_list[mask]
+        bs_list = bs_list[mask]
+        confounders = confounders[mask]
+    if use_confounders:
+        f = lambda x: na.partial_correlation(x[:, 0], x[:, 1], x[:, 2:])
+        inp = np.stack((as_list, bs_list), axis=1)
+        if len(confounders.shape) == 1:
+            confounders = np.expand_dims(confounders, 1)
+        inp = np.concatenate((inp, confounders), axis=1)
+    else:
+        f = lambda x: func(x[:, 0], x[:, 1])[1,0]
+        inp = np.stack((as_list, bs_list), axis=1)
     cc = u.bootstrap_list(inp, f, n=n_boots)
     cent = f(inp)
     interv = conf95_interval(cc)
@@ -579,9 +601,9 @@ def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef):
     return cent, lower, upper
     
 def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrcoef,
-                      round_result=2):
+                      round_result=2, confounders=None):
     cent, lower, upper = get_corr_conf95(as_list, bs_list, n_boots=n_boots,
-                                         func=func)
+                                         func=func, confounders=confounders)
     s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
     print(s)
     return s

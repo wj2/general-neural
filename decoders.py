@@ -12,18 +12,117 @@ import sklearn.decomposition as skd
 import general.utility as u
 import general.stan_utility as su
 
+import tensorflow as tf
+import tensorflow_probability as tfp
+tfk = tf.keras
+tfkl = tf.keras.layers
+tfpl = tfp.layers
+tfd = tfp.distributions
+
 periodic_decoder_path = 'general/stan_decoder/von_mises_pop.pkl'
 periodic_decoder_time_path = 'general/stan_decoder/von_mises_poptime.pkl'
 pd_arviz = {'observed_data':'y',
             'log_likelihood':{'y':'log_lik'},
             'posterior_predictive':'err_hat'}
 
-class TFPeriodicDecoder:
+class PeriodicDecoder:
 
-    def __init__(self):
+    def __init__(self, C=1, epsilon=1, kernel='rbf', 
+                 include_x=False, **kernel_params):
+        self.c = C
+        self.epsilon = epsilon
+        self._fit = None
+        self.include_x = include_x
+        if kernel == 'rbf':
+            self.kernel_params = kernel_params
+            if self.kernel_params.get('gamma', None) is None:
+                self.kernel_params['gamma'] = 'scale'
+            self.kernel = skka.RBFSampler
+
+    def kernel_transform(self, x):
+        x_kern = self.preprocessing.transform(x)
+        if self.include_x:
+            x_kern = np.concatenate((x, x_kern), axis=1)
+        return x_kern
+
+    """ why does normalizing make the model so ill-posed? """ 
+    def kernel_fit(self, x, norm=True, repca=None):
+        if self.kernel_params['gamma'] == 'scale':
+            self.kernel_params['gamma'] = 1/(x.shape[1]*x.var())
+        # self.kernel = self.kernel(**self.kernel_params)
+        # self.kernel = self.kernel.fit(x)
+        preproc = [self.kernel(**self.kernel_params)]
+        if norm:
+            preproc.append(skp.StandardScaler())
+        if repca is not None:
+            preproc.append(skd.PCA(repca))
+        pipe = sklpipe.make_pipeline(*preproc)
+        self.preprocessing = pipe.fit(x)
+
+    def fit(self, x, y, *args):
+        pass
+    
+    def get_fit(self):
+        if self._fit is not None:
+            f = self._fit
+        else:
+            raise IOError('model has not been fit')
+        return f
+    
+    def predict(self, x, ct_func=None):
         pass
 
-class PeriodicDecoder:
+    def score(self, x, y, *args, ct_func=np.mean, norm=True):
+        y_hat = self.predict(x, *args)
+        y_diff = u.normalize_periodic_range(y_hat - np.expand_dims(y, 0))
+        score = np.sum(y_diff**2, axis=1)
+        if norm:
+            rand = np.sum(u.normalize_periodic_range(y)**2)
+            score = 1 - score/rand
+        return score
+
+negloglik = lambda y, rv_y: -rv_y.log_prob(y)
+class PeriodicDecoderTF(PeriodicDecoder):
+
+    def __init__(self, *args, epochs=1000, verbose=False, learning_rate=.01,
+                 **kwargs):
+        self.epochs = epochs
+        self.verbose = verbose
+        self.learning_rate = learning_rate
+        super().__init__(*args, **kwargs)
+
+    def make_decoding_model(self, x_inp):
+        layers = []
+        layers.append(tfkl.InputLayer(input_shape=x_inp.shape[1]))
+        
+        reg = tfk.regularizers.l2(1/(100*self.c))
+        layers.append(tfkl.Dense(2, kernel_regularizer=reg))
+        distr_func = lambda t: tfd.VonMises(t[..., :1], t[..., 1:])
+        layers.append(tfp.layers.DistributionLambda(distr_func))
+        model = tfk.Sequential(layers)
+        return model
+        
+    def fit(self, x, y, *args):
+        self.kernel_fit(x)
+        x_kern = self.kernel_transform(x)
+        model = self.make_decoding_model(x_kern)
+        opt = tf.optimizers.Adam(learning_rate=self.learning_rate)
+        model.compile(optimizer=opt,
+                      loss=negloglik)
+        model.fit(x_kern, y, epochs=self.epochs, verbose=self.verbose);
+        self._fit = model
+        return self
+
+    def predict(self, x, mean=True):
+        x_kern = self.kernel_transform(x)
+        distr = self._fit(x_kern)
+        if mean:
+            out = distr.mean()
+        else:
+            out = distr.sample()
+        return out
+
+class PeriodicDecoderStan:
 
     def __init__(self, C=1, epsilon=1, kernel='rbf', decoder='stan',
                  stan_path=periodic_decoder_path, recompile_decoder=False,
@@ -122,7 +221,7 @@ class PeriodicDecoder:
             score = 1 - score/rand
         return score
         
-class PeriodicDecoderTime(PeriodicDecoder):
+class PeriodicDecoderStanTime(PeriodicDecoderStan):
 
     def __init__(self, *args, stan_path=periodic_decoder_time_path, **kwargs):
         super().__init__(*args, stan_path=stan_path, **kwargs)

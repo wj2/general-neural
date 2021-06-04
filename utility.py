@@ -30,6 +30,17 @@ class ConfigParserColor(configparser.ConfigParser):
         else:
             col = string
         return col
+
+    def getlist(self, *args, typefunc=None, **kwargs):
+        if typefunc is None:
+            typefunc = lambda x: x
+        string = self.get(*args, **kwargs)
+        if string is not None:
+            vals = string.split(',')
+            out = list(typefunc(v.strip()) for v in vals)
+        else:
+            out = string
+        return out
     
 class HiddenPrints:
     def __enter__(self):
@@ -1016,7 +1027,7 @@ def bootstrap_test(a, b, func=np.nanmean, n=1000):
     p = np.sum(t_stars >= t)/n
     return p
 
-def bootstrap_diff(a, b, func, n=1000):
+def bootstrap_diff(a, b, func=np.nanmean, n=1000):
     stats = np.zeros(n)
     for i in range(n):
         a_inds = np.random.choice(np.arange(len(a)), len(a))

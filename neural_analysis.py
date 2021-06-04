@@ -77,13 +77,15 @@ def bin_spiketimes(spts, binsize, bounds, binstep=None, accumulate=False,
         for i in range(len(bspks)):
             aspks[i] = np.sum(bspks[:i+1])
         bspks = aspks
-    if binstep is not None and binstep < binsize:
+    if binstep is not None and binstep < binsize and not accumulate:
         filt = np.ones(int(np.round(binsize/binstep)))
         bspks = np.convolve(bspks, filt, mode='valid')
     if spks_per_sec:
         factor = 1000.
     else:
         factor = 1.
+    if accumulate:
+        factor = binsize
     bspks = bspks*(factor/binsize)
     return bspks   
  
@@ -223,6 +225,49 @@ def organize_spiking_data(data, discrim_funcs, marker_funcs, pretime, posttime,
         out = out + (all_bhvs,)
     return out
 
+class PartialCorrelation:
+    
+    def __init__(self, linear_model=linear_model.LinearRegression):
+        self.lm = linear_model
+
+    def fit(self, a, b, confounders=None):
+        if confounders is not None:
+            a_reg = self.lm()
+            a_reg.fit(confounders, x)
+            a_resid = a - a_reg.predict(confounders)
+            b_reg = self.lm()
+            b_reg.fit(confounders, b)
+            b_resid = b - b_reg.predict(confounders)
+            self.a_lm = a_reg
+            self.b_lm = b_reg
+        else:
+            a_resid = a
+            b_resid = b
+        final = self.lm()
+        final.fit(a_resid, b_resid)
+        self.final = final
+        return self
+
+    def predict(self, a, confounders=None):
+        if confounders is not None:
+            a_conf = self.a_lm.predict(confounders)
+            b_conf = self.b_lm.predict(confounders)
+        b_resid_guess = self.final.predict(a)
+        b_guess = b_resid_guess + b_conf
+        return b_guess
+
+def partial_correlation(a, b, confounders, ret_model=False):
+    if len(confounders.shape) == 1:
+        confounders = np.expand_dims(confounders, 1)
+    a_reg = linear_model.LinearRegression()
+    a_reg.fit(confounders, a)
+    a_resid = a - a_reg.predict(confounders)
+    b_reg = linear_model.LinearRegression()
+    b_reg.fit(confounders, b)
+    b_resid = b - b_reg.predict(confounders)
+    r = np.corrcoef(a_resid, b_resid)[1, 0]
+    return r
+            
 def remove_low_spiking_neurons(all_discs, spiking_level, percent_trials=.9):
     ks = all_discs[0].keys()
     pop_keys = []
@@ -645,7 +690,7 @@ def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
                          collapse_time=collapse_time, **kwargs)
     return out
 
-def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderTime,
+def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderStanTime,
                             norm=True, pre_pca=None, impute_missing=False,
                             pre_rescale=False, **model_params):
     x_len = pop.shape[-1]
@@ -699,7 +744,8 @@ def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderTime,
     return tcs, tcs_shuff, (m1, m2), comp
 
 def pop_regression_stan(pop, reg_vals, model=gd.PeriodicDecoder, norm=True,
-                        pre_pca=.99, impute_missing=False, **model_params):
+                        pre_pca=.99, impute_missing=False, do_arviz=False,
+                        **model_params):
     x_len = pop.shape[-1]
     comps = []
     steps = []
@@ -720,12 +766,13 @@ def pop_regression_stan(pop, reg_vals, model=gd.PeriodicDecoder, norm=True,
     for j in range(x_len):
         pop_proc = pipe.fit_transform(pop_flat[..., j].T)
         m1 = model(**model_params)
-        print('ordered')
         m1.fit(pop_proc, reg_vals)
         m2 = model(**model_params)
-        print('shuffled')
         m2.fit(pop_proc, reg_shuff)
-        comp = az.compare(dict(m=m1.get_arviz(), m_shuff=m2.get_arviz()))
+        if do_arviz:
+            comp = az.compare(dict(m=m1.get_arviz(), m_shuff=m2.get_arviz()))
+        else:
+            comp = np.nan
         scores = m1.score(pop_proc, reg_vals)
         scores_shuff = m2.score(pop_proc, reg_vals)
         if j == 0:
@@ -772,7 +819,6 @@ def pop_regression_skl(pop, reg_vals, folds_n, model=svm.SVR, norm=True,
     if mean:
         tcs = np.mean(tcs, axis=0)
     return tcs
-
 
 def pop_regression(ds, r, leave_out=1, require_trials=15, 
                    resample=100, with_replace=False, shuff_labels=False, 
@@ -1061,7 +1107,7 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
              stability=False, params=None, collapse_time=False,
              format_=True, equal_fold=False, multi_cond=False,
              use_avail_trials=True, norm=True, reduce_required=True,
-             **kwargs):
+             latency=False, **kwargs):
     if format_:
         if not multi_cond:
             cat1 = (cat1,)
@@ -1843,7 +1889,8 @@ def fit_logit(measured, outcome, manifest=glm_arviz, model_path=stan_logit_path,
     m_null = sm_null.sampling(data=stan_data, iter=stan_iters,
                               chains=stan_chains)
     m_null_az = az.from_pystan(posterior=m_null, **manifest)
-    comp = az.compare(dict(logit=m_logit_az, null=m_null_az))
+    comp = az.compare(dict(logit=m_logit_az, null=m_null_az),
+                      scale='log')
     return m_logit, m_null, comp
 
 def generalized_linear_model(data, conds, use_stan=False, stan_chains=4, 
