@@ -131,18 +131,8 @@ def biased_sem(dat, axis=0):
     err = sem(dat, axis=axis, sub=0)
     return err
     
-
-def conf_interval(dat, axis=0, perc=95):
-    lower = (100 - perc) / 2.
-    upper = lower + perc
-    lower_err = np.nanpercentile(dat, lower, axis=axis)
-    upper_err = np.nanpercentile(dat, upper, axis=axis)
-    err = np.vstack((upper_err - np.nanmean(dat, axis), 
-                     lower_err - np.nanmean(dat, axis)))
-    return err
-
 def conf95_interval(dat, axis=0):
-    return conf_interval(dat, axis=0, perc=95)
+    return u.conf_interval(dat, axis=0, perc=95)
 
 def plot_trial_structure(transition_times=(), labels=(), transition_dict=None,
                          ax=None, style=(), linestyle='dashed', 
@@ -570,7 +560,7 @@ def make_xaxis_scale_bar(ax, magnitude=None, double=True, anchor=0, bottom=True,
     ax.set_ylim(yl)
     
 def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef,
-                    rm_nan=False, confounders=None, use_cv=False):
+                    rm_nan=False, confounders=None):
     if confounders is None:
         use_confounders = False
         confounders = np.zeros((len(as_list), 1), dtype=bool)
@@ -590,6 +580,7 @@ def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef,
         if len(confounders.shape) == 1:
             confounders = np.expand_dims(confounders, 1)
         inp = np.concatenate((inp, confounders), axis=1)
+        print
     else:
         f = lambda x: func(x[:, 0], x[:, 1])[1,0]
         inp = np.stack((as_list, bs_list), axis=1)

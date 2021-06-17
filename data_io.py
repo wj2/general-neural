@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import re
 from sklearn import svm
+import functools as ft
 
 import general.utility as u
 import general.neural_analysis as na
@@ -168,6 +169,7 @@ class Dataset(object):
         self.data = self.data.sort_values('date', ignore_index=True)
         self.data = self.data.sort_values('animal', ignore_index=True)
         self.seconds = seconds
+        self.population_cache = {}
 
     @classmethod
     def from_dict(cls, seconds=False, **inputs):
@@ -271,13 +273,25 @@ class Dataset(object):
 
     def get_nneurs(self):
         return self['n_neurs']
+
+    # @ft.lru_cache(maxsize=10)
+    def get_populations(self, *args, cache=False, **kwargs):
+        key = args + tuple(kwargs.values())
+        if cache and key in self.population_cache.keys():
+            out = self.population_cache[key]
+        else:
+            out = self._get_populations(*args, **kwargs)
+        if cache:
+            self.population_cache[key] = out
+        return out
     
-    def get_populations(self, binsize, begin, end, binstep=None, skl_axes=False,
-                        accumulate=False, time_zero=None, time_zero_field=None,
-                        combine_pseudo=False, min_trials_pseudo=10,
-                        resample_pseudos=10, repl_nan=False):
+    def _get_populations(self, binsize, begin, end, binstep=None, skl_axes=False,
+                         accumulate=False, time_zero=None, time_zero_field=None,
+                         combine_pseudo=False, min_trials_pseudo=10,
+                         resample_pseudos=10, repl_nan=False, regions=None):
         spks = self['spikeTimes']
         spks = self._center_spks(spks, time_zero, time_zero_field)
+        regions_all = self['neur_regions']
         outs = []
         n_trls = []
         for i, spk in enumerate(spks):
@@ -291,6 +305,10 @@ class Dataset(object):
                                            binstep, accumulate,
                                            convert_seconds=not self.seconds)
             resp_arr, xs = out
+            if regions is not None:
+                regs = regions_all[i].iloc[0]
+                mask = np.isin(regs, regions)
+                resp_arr = resp_arr[:, mask]
             if repl_nan:
                 no_spk_mask = np.all(resp_arr == 0, axis=-1)
                 resp_arr[no_spk_mask] = np.nan

@@ -1019,9 +1019,12 @@ def decode_skl(c1_train, c1_test, c2_train, c2_test, model=svm.SVC, params=None,
         out = tcs
     return out 
 
+rand_splitter = skms.ShuffleSplit
+
 def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
              shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
-             impute_missing=False, verbose=False, **model_kwargs):
+             impute_missing=False, verbose=False, rand_splitter=rand_splitter,
+             time_accumulate=True, **model_kwargs):
     if params is None:
         params = model_kwargs
     else:
@@ -1047,17 +1050,27 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
     c_flat = np.concatenate((c1_flat, c2_flat), axis=1)
     labels = np.concatenate((np.zeros(c1_flat.shape[1]),
                             np.ones(c2_flat.shape[1])))
+    if shuffle:
+        np.random.shuffle(labels)
+    if rand_splitter is None:
+        splitter = folds_n
+    else:
+        splitter = rand_splitter(folds_n, test_size=.1)
     if verbose:
         print('--')
         print(c1_flat.shape)
         print(c2_flat.shape)
         print(c_flat.shape)
-    if shuffle:
-        np.random.shuffle(labels)
+        print(splitter)
     for j in range(x_len):
         sk_cv = skms.cross_val_score
-        scores = sk_cv(pipe, c_flat[..., j].T, labels,
-                       cv=folds_n, n_jobs=n_jobs)
+        if time_accumulate:
+            in_list = list(c_flat[..., k] for k in range(j + 1))
+            in_data = np.concatenate(in_list, axis=0).T
+        else:
+            in_data = c_flat[..., j].T
+        scores = sk_cv(pipe, in_data, labels,
+                       cv=splitter, n_jobs=n_jobs)
         tcs[:, j] = scores
     if mean:
         tcs = np.mean(tcs, axis=0)

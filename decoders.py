@@ -84,7 +84,7 @@ class PeriodicDecoder:
 negloglik = lambda y, rv_y: -rv_y.log_prob(y)
 class PeriodicDecoderTF(PeriodicDecoder):
 
-    def __init__(self, *args, epochs=1000, verbose=False, learning_rate=.01,
+    def __init__(self, *args, epochs=1000, verbose=True, learning_rate=.01,
                  **kwargs):
         self.epochs = epochs
         self.verbose = verbose
@@ -95,9 +95,9 @@ class PeriodicDecoderTF(PeriodicDecoder):
         layers = []
         layers.append(tfkl.InputLayer(input_shape=x_inp.shape[1]))
         
-        reg = tfk.regularizers.l2(1/(100*self.c))
-        layers.append(tfkl.Dense(2, kernel_regularizer=reg))
-        distr_func = lambda t: tfd.VonMises(t[..., :1], t[..., 1:])
+        reg = None # tfk.regularizers.l2(1/(100*self.c))
+        layers.append(tfkl.Dense(1, kernel_regularizer=reg))
+        distr_func = lambda t: tfd.VonMises(t[..., :1], 5)
         layers.append(tfp.layers.DistributionLambda(distr_func))
         model = tfk.Sequential(layers)
         return model

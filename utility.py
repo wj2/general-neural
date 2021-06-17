@@ -723,6 +723,8 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
                 print(tn1, x[i]['trialnum'])
             assert tn1 == tn2
             assert int(tn1) == int(x[i]['trialnum'])
+            print(entry1)
+            print(entry2)
             img1_n, ext1 = os.path.splitext(img1)
             img2_n, ext2 = os.path.splitext(img2)
             log_dict[img1_n] = log_dict.get(img1_n, 0) + 1
@@ -1013,6 +1015,25 @@ def index_func(a, b, axis=0):
     ind[mask] = 0
     return ind
 
+
+def conf_interval(dat, axis=0, perc=95, withmean=False):
+    lower = (100 - perc) / 2.
+    upper = lower + perc
+    lower_err = np.nanpercentile(dat, lower, axis=axis)
+    upper_err = np.nanpercentile(dat, upper, axis=axis)
+    err = np.vstack((upper_err, 
+                     lower_err))
+    if not withmean:
+        err = err - np.nanmean(dat, axis, keepdims=True)
+    return err
+
+def interval_inclusion(pt, distr, percentile=95):
+    err = conf_interval(distr, perc=percentile, withmean=True)
+    below = pt < err[0]
+    above = pt > err[1]
+    out = np.logical_and(below, above)
+    return out
+
 def bootstrap_test(a, b, func=np.nanmean, n=1000):
     a_m, b_m = func(a), func(b)
     a_l, b_l = len(a), len(b)
@@ -1027,15 +1048,28 @@ def bootstrap_test(a, b, func=np.nanmean, n=1000):
     p = np.sum(t_stars >= t)/n
     return p
 
-def bootstrap_diff(a, b, func=np.nanmean, n=1000):
-    stats = np.zeros(n)
+def bootstrap_diff(a, b, func=np.nanmean, n=1000, geometric=False):
+    if len(a.shape) > 1:
+        stats_shape = (n,) + a.shape[1:]
+    else:
+        stats_shape = n
+    stats = np.zeros(stats_shape)
     for i in range(n):
         a_inds = np.random.choice(np.arange(len(a)), len(a))
         a_choice = a[a_inds]
         b_inds = np.random.choice(np.arange(len(b)), len(b))
         b_choice = b[b_inds]
         stats[i] = func(a_choice) - func(b_choice)
+        if geometric:
+            std = (np.std(a_choice) + np.std(b_choice))/2
+            stats[i] = stats[i]/std
     return stats
+
+def bootstrap_tc(tc, func, axis=0, n=1000):
+    new_shape = tc.shape[:axis] + tc.shape[axis+1:]
+    out = np.zeros((n,) + new_shape)
+    func_ax = lambda x: func(x, axis=axis)
+    return bootstrap_list(tc, func_ax, n=n, out_shape=new_shape)
 
 def bootstrap_list(l, func, n=1000, out_shape=None, ret_sem=False):
     if out_shape is None:
