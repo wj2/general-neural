@@ -12,7 +12,6 @@ import sklearn.model_selection as skms
 import sklearn.impute as skimp
 import arviz as az
 from dPCA.dPCA import dPCA
-from hmmlearn import hmm
 import warnings
 import itertools as it
 import string
@@ -484,44 +483,44 @@ chapter sof thesis and their status
 
 """
 
-### HMM ###
-def _hmm_pop_format(pop):
-    """ 
-    a typical pop is neurons x trials x timepoints 
-    for hmmlearn, need trials*timepoints x neurons and a list of
-    all timepoint lengths
-    """
-    spop = np.swapaxes(pop, 0, 1)
-    pop_flat = np.concatenate(spop, axis=1).T
-    len_arr = np.ones(pop.shape[1], dtype=int)*pop.shape[2]
-    return pop_flat, len_arr
+# ### HMM ###
+# def _hmm_pop_format(pop):
+#     """ 
+#     a typical pop is neurons x trials x timepoints 
+#     for hmmlearn, need trials*timepoints x neurons and a list of
+#     all timepoint lengths
+#     """
+#     spop = np.swapaxes(pop, 0, 1)
+#     pop_flat = np.concatenate(spop, axis=1).T
+#     len_arr = np.ones(pop.shape[1], dtype=int)*pop.shape[2]
+#     return pop_flat, len_arr
 
-def _hmm_trial_format(states, lens):
-    n_trls = int(states.shape[0]/lens[0])
-    trls = np.reshape(states, (n_trls, lens[0]))
-    return trls
+# def _hmm_trial_format(states, lens):
+#     n_trls = int(states.shape[0]/lens[0])
+#     trls = np.reshape(states, (n_trls, lens[0]))
+#     return trls
 
-def fit_hmm_pops(pops, n_components, n_fits=1, min_size=2, print_pop=False):
-    models = {}
-    for k, pop in pops.items():
-        if pop.shape[0] > min_size:
-            pop_flat, len_arr = _hmm_pop_format(pop)
-            if print_pop:
-                print('pop {}'.format(k))
-            pop_fits = []
-            scores = []
-            all_states = []
-            for i in range(n_fits):
-                m = hmm.GaussianHMM(n_components=n_components)
-                fit_obj = m.fit(pop_flat, len_arr)
-                pop_fits.append(fit_obj)
-                score = fit_obj.score(pop_flat)
-                scores.append(score)
-                states = fit_obj.predict(pop_flat)
-                trl_states = _hmm_trial_format(states, len_arr)
-                all_states.append(trl_states)
-            models[k] = (pop_fits, scores, all_states)
-    return models
+# def fit_hmm_pops(pops, n_components, n_fits=1, min_size=2, print_pop=False):
+#     models = {}
+#     for k, pop in pops.items():
+#         if pop.shape[0] > min_size:
+#             pop_flat, len_arr = _hmm_pop_format(pop)
+#             if print_pop:
+#                 print('pop {}'.format(k))
+#             pop_fits = []
+#             scores = []
+#             all_states = []
+#             for i in range(n_fits):
+#                 m = hmm.GaussianHMM(n_components=n_components)
+#                 fit_obj = m.fit(pop_flat, len_arr)
+#                 pop_fits.append(fit_obj)
+#                 score = fit_obj.score(pop_flat)
+#                 scores.append(score)
+#                 states = fit_obj.predict(pop_flat)
+#                 trl_states = _hmm_trial_format(states, len_arr)
+#                 all_states.append(trl_states)
+#             models[k] = (pop_fits, scores, all_states)
+#     return models
         
 ### SVM ###
 
