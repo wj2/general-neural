@@ -274,6 +274,9 @@ class Dataset(object):
     def get_nneurs(self):
         return self['n_neurs']
 
+    def clear_cache(self):
+        self.population_cache = {}
+    
     # @ft.lru_cache(maxsize=10)
     def get_populations(self, *args, cache=False, **kwargs):
         key = args + tuple(kwargs.values())
@@ -305,7 +308,7 @@ class Dataset(object):
                                            binstep, accumulate,
                                            convert_seconds=not self.seconds)
             resp_arr, xs = out
-            if regions is not None:
+            if regions is not None and len(resp_arr) > 0:
                 regs = regions_all[i].iloc[0]
                 mask = np.isin(regs, regions)
                 resp_arr = resp_arr[:, mask]

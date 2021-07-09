@@ -30,7 +30,6 @@ def merge_params(args, conf):
 def merge_params_dict(args, d):
     for k, v in vars(args).items():
         rv = d.get(k)
-        print(k, v, rv)
         if rv is not None:
             setattr(args, k, rv)
     return args
@@ -282,7 +281,11 @@ def participation_ratio(samps):
     p = skd.PCA()
     p.fit(samps)
     pv = p.explained_variance_ratio_
-    pr = np.sum(pv)**2/np.sum(pv**2)
+    pr = pr_only(pv)
+    return pr
+
+def pr_only(pvs):
+    pr = np.sum(pvs)**2/np.sum(pvs**2)
     return pr
 
 def make_unit_vector(v):
@@ -626,15 +629,24 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
     else:
         data = data['bhv']
         bhv = data
+    print('---')
     if path_log is None and 'imglog' in data.dtype.names:
         path_log = data['imglog'][0][0]
         path_log = path_log.replace('uc/freedman/', '')
     elif path_log is None and use_data_name:
         filename = bhv['DataFileName'][0][0][0]
         fn, ext = os.path.splitext(filename)
-        logname = fn + '_imglog.txt'
         folder, end = os.path.split(path_bhv)
-        path_log = os.path.join(folder, logname)
+        print(fn)
+        alt_fn1 = fn.replace('dimming-', 'dim_and_pref_looking-')
+        alt_fn2 = alt_fn1.replace('dimming_task-', 'dim_and_pref_looking-')
+        path_log = os.path.join(folder, fn + '_imglog.txt')
+        alt_path1 = os.path.join(folder, alt_fn1 + '_imglog.txt')
+        alt_path2 = os.path.join(folder, alt_fn2 + '_imglog.txt')
+        if os.path.exists(alt_path1):
+            path_log = alt_path1
+        elif os.path.exists(alt_path2):
+            path_log = alt_path2
     log = None
     if 'imglog_data' in data.dtype.names:
         raw_log = data['imglog_data'][0][0]
@@ -659,6 +671,11 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         cns = bhv['ConditionNumber'][0,0][:, 0]
         n_pltrials = sum(c in plt_conds for c in cns)
         print('there are {} pref looking trials'.format(n_pltrials))
+    else:
+        print('---')
+        print('imglog found')
+        print(path_log)
+        print('---')
     if dates is not None:
         date_pattern = '[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}'
         m = re.search(date_pattern, path_bhv)
@@ -732,16 +749,12 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
             entry2 = entry2.strip(b'\r\n').split(b'\t')
             tn2, s2, _, cond2, vs2, cat2, img2 = entry2
             if int(tn1) != int(x[i]['trialnum']):
-                print(entry1)
-                print(entry2)
                 print(x[i]['trialnum'])
                 print(x[0]['trialnum'])
                 # print(filename)
                 print(tn1, x[i]['trialnum'])
             assert tn1 == tn2
             assert int(tn1) == int(x[i]['trialnum'])
-            print(entry1)
-            print(entry2)
             img1_n, ext1 = os.path.splitext(img1)
             img2_n, ext2 = os.path.splitext(img2)
             log_dict[img1_n] = log_dict.get(img1_n, 0) + 1

@@ -318,14 +318,15 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                                 alpha=alpha)
             else:
                 ax.errorbar(xs, tr, (-er[1, :], er[0, :]), color=color,
-                            elinewidth=elinewidth, **kwargs)
+                            elinewidth=elinewidth, alpha=alpha, **kwargs)
         if len(xs_orig.shape) > 1:
             if fill:
                 ax.fill_betweenx(tr, xs+xs_er[1, :], xs+xs_er[0, :], 
                                  color=color, alpha=alpha)
             else:
                 ax.errorbar(xs, tr, yerr=None, xerr=(-xs_er[1, :], xs_er[0, :]),
-                            color=color, elinewidth=elinewidth, **kwargs)
+                            color=color, elinewidth=elinewidth, alpha=alpha,
+                            **kwargs)
         ax.set_title(title)
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
@@ -510,6 +511,27 @@ def clean_plot_bottom(ax, keeplabels=False):
     ax.xaxis.set_tick_params(size=0)
     if not keeplabels:
         plt.setp(ax.get_xticklabels(), visible=False)
+
+def make_3d_bars(ax, center=(0, 0, 0), bar_len=.1, bar_wid=.7):
+    ax.plot([center[0], center[0] + bar_len],
+            [center[1], center[1]],
+            [center[2], center[2]], color='k', linewidth=bar_wid)
+    ax.plot([center[0], center[0]],
+            [center[1], center[1] + bar_len],
+            [center[2], center[2]], color='k', linewidth=bar_wid)
+    ax.plot([center[0], center[0]],
+            [center[1], center[1]],
+            [center[2], center[2] + bar_len], color='k', linewidth=bar_wid)
+    ax.set_axis_off()
+        
+def clean_3d_plot(ax):
+    pc = (1., 1., 1., 0.)
+    ax.xaxis.set_pane_color(pc)
+    ax.yaxis.set_pane_color(pc)
+    ax.zaxis.set_pane_color(pc)
+    ax.xaxis._axinfo['grid']['color'] = pc
+    ax.yaxis._axinfo['grid']['color'] = pc
+    ax.zaxis._axinfo['grid']['color'] = pc
         
 def clean_plot(ax, i, max_i=None, ticks=True, spines=True, horiz=True):
     if spines:
@@ -589,18 +611,30 @@ def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef,
     interv = conf95_interval(cc)
     upper = cent + interv[0, 0]
     lower = cent + interv[1, 0]
-    return cent, lower, upper
-    
+    return cent, lower, upper, cc
+
+def _get_pval(bs, comp_pt, comparator=np.greater):
+    p = 1 - np.sum(comparator(bs, comp_pt))/len(bs)
+    if p == 0:
+        pt = 'p < {}'.format(1/len(bs))
+    else:
+        pt = 'p = {}'.format(p)
+    return pt
+
 def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrcoef,
-                      round_result=2, confounders=None):
-    cent, lower, upper = get_corr_conf95(as_list, bs_list, n_boots=n_boots,
-                                         func=func, confounders=confounders)
-    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+                      round_result=2, confounders=None, comp_pt=0,
+                      comparator=np.greater):
+    cent, lower, upper, cc = get_corr_conf95(as_list, bs_list, n_boots=n_boots,
+                                             func=func, confounders=confounders)
+    pt = _get_pval(cc, comp_pt, comparator)
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}'.format(subj, text, cent,
+                                                       lower, upper, pt)
     print(s)
     return s
     
 def print_mean_conf95(bs_list, subj, text, n_boots=1000, func=np.nanmean,
-                      preboot=False, round_result=2):
+                      preboot=False, round_result=2, comp_pt=0,
+                      comparator=np.greater):
     bs_list = np.array(bs_list)
     if  preboot:
         cent = func(bs_list)
@@ -610,13 +644,16 @@ def print_mean_conf95(bs_list, subj, text, n_boots=1000, func=np.nanmean,
         bs = u.bootstrap_list(bs_list, func, n_boots)
     interv = conf95_interval(bs)
     upper = cent + interv[0, 0]
-    lower = cent + interv[1, 0]        
-    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+    lower = cent + interv[1, 0]
+    pt = _get_pval(bs, comp_pt, comparator)
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}'.format(subj, text, cent,
+                                                       lower, upper, pt)
     print(s)
     return s
 
 def print_diff_conf95(b_list, a_list, subj, text, n_boots=1000,
-                      func=np.nanmean, preboot=False, round_result=2):
+                      func=np.nanmean, preboot=False, round_result=2,
+                      comp_pt=0, comparator=np.greater):
     if preboot:
         b = b_list
         a = a_list
@@ -627,7 +664,9 @@ def print_diff_conf95(b_list, a_list, subj, text, n_boots=1000,
     cent = func(diff)
     upper = cent + interv[0, 0]
     lower = cent + interv[1, 0]        
-    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+    pt = _get_pval(diff, comp_pt, comparator)
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}'.format(subj, text, cent, lower,
+                                                       upper, pt)
     print(s)
     return s
 

@@ -1024,7 +1024,7 @@ rand_splitter = skms.ShuffleSplit
 def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
              shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
              impute_missing=False, verbose=False, rand_splitter=rand_splitter,
-             time_accumulate=True, **model_kwargs):
+             time_accumulate=False, **model_kwargs):
     if params is None:
         params = model_kwargs
     else:
@@ -1113,14 +1113,14 @@ def _svm_organize(*args, require_trials=20, use_avail_trials=True, pop=False,
     x_len = c_arr_masked[0][0, 0].shape[1]
     out = c_arr_masked + [int(require_trials), x_len]
     return out
-    
 
 def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
              resample=100, with_replace=False, shuff_labels=False, 
              stability=False, params=None, collapse_time=False,
              format_=True, equal_fold=False, multi_cond=False,
              use_avail_trials=True, norm=True, reduce_required=True,
-             latency=False, **kwargs):
+             latency=False, sample_pseudo=False, n_pseudo=200,
+             test_pseudo=.1, rand_splitter=rand_splitter, **kwargs):
     if format_:
         if not multi_cond:
             cat1 = (cat1,)
@@ -1145,6 +1145,8 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
             require_trials = min(c1_min, c2_min)
     folds_n, leave_out = _compute_folds_n(require_trials*cat1_f.shape[1],
                                           leave_out, equal_fold)
+    if sample_pseudo:
+        folds_n = 1
     if stability:
         tcs_shape = (resample, x_len, x_len)
     else:
@@ -1153,18 +1155,86 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
     inter = np.zeros((resample, folds_n, x_len))
     tcs = np.zeros(tcs_shape)
     for i in range(resample):
-        cat1_samp = sample_trials_svm(cat1_f, require_trials, with_replace)
-        cat2_samp = sample_trials_svm(cat2_f, require_trials, with_replace)
-        if not (stability or collapse_time):
-            tcs[i] = fold_skl(cat1_samp, cat2_samp, folds_n, model,
-                              params=params, norm=norm, shuffle=shuff_labels)
+        if sample_pseudo:
+            cat1_train, cat1_test = sample_trials_pseudo(cat1_f, 
+                                                         n_samples=n_pseudo,
+                                                         test_prop=test_pseudo)
+            cat2_train, cat2_test = sample_trials_pseudo(cat2_f, 
+                                                         n_samples=n_pseudo,
+                                                         test_prop=test_pseudo)
+            out = decode_pseudo(cat1_train, cat1_test, cat2_train, cat2_test,
+                                model=model, params=params, norm=norm,
+                                shuffle=shuff_labels)
+            tcs[i], ms[i], inter[i] = out
         else:
-            out = _fold_model(cat1_samp, cat2_samp, leave_out, model=model,
-                          shuff_labels=shuff_labels, stability=stability, 
-                          params=params, collapse_time=collapse_time,
-                          equal_fold=equal_fold, **kwargs)
-            tcs[i], _, _, ms[i], inter[i] = out
+            cat1_samp = sample_trials_svm(cat1_f, require_trials, with_replace)
+            cat2_samp = sample_trials_svm(cat2_f, require_trials, with_replace)
+            if not (stability or collapse_time):
+                tcs[i] = fold_skl(cat1_samp, cat2_samp, folds_n, model,
+                                  params=params, norm=norm, shuffle=shuff_labels)
+            else:
+                out = _fold_model(cat1_samp, cat2_samp, leave_out, model=model,
+                                  shuff_labels=shuff_labels, stability=stability, 
+                                  params=params, collapse_time=collapse_time,
+                                  equal_fold=equal_fold, **kwargs)
+                tcs[i], _, _, ms[i], inter[i] = out
     return tcs, cat1_f, cat2_f, ms, inter
+
+def sample_trials_pseudo(tf, n_samples=100, test_prop=.1):
+    n_samples_test = int(np.ceil(n_samples*test_prop))
+    n_conds = len(tf[0])
+    train_data = np.zeros((tf.shape[0], n_conds*n_samples,
+                           tf[0, 0].shape[1]))
+    test_data = np.zeros((tf.shape[0], n_conds*n_samples_test,
+                          tf[0, 0].shape[1]))
+    for i, neur_conds in enumerate(tf):
+        train_trls = []
+        test_trls = []
+        for j, neur in enumerate(neur_conds):
+            n_test = int(np.ceil(neur.shape[0]*test_prop))
+            test_trl_inds = np.random.choice(neur.shape[0], n_test,
+                                             replace=False)
+            test_inds = np.random.choice(test_trl_inds, n_samples_test)
+            test_trls.append(neur[test_inds])
+
+            trl_inds = np.arange(neur.shape[0])
+            train_ind_mask = np.logical_not(np.isin(trl_inds,
+                                                test_inds))
+            train_trl_inds = trl_inds[train_ind_mask]
+            train_inds = np.random.choice(train_trl_inds, n_samples)
+            train_trls.append(neur[train_inds])
+        train_data[i] = np.concatenate(train_trls)
+        test_data[i] = np.concatenate(test_trls)
+    return train_data, test_data
+
+def decode_pseudo(c1_tr, c1_te, c2_tr, c2_te, norm=True, shuffle=False,
+                  **kwargs):
+    train_samp = np.concatenate((c1_tr, c2_tr),
+                                axis=1)
+    test_samp = np.concatenate((c1_te, c2_te),
+                               axis=1)
+    trainlabels = np.concatenate((np.zeros(c1_tr.shape[1],
+                                           dtype=int), 
+                                  np.ones(c2_tr.shape[1],
+                                          dtype=int)))
+    testlabels = np.concatenate((np.zeros(c1_te.shape[1],
+                                          dtype=int), 
+                                 np.ones(c2_te.shape[1],
+                                         dtype=int)))
+    if norm:
+        full = np.concatenate((train_samp, test_samp), axis=1)
+        ss = skp.StandardScaler()
+        for j in range(full.shape[-1]):
+            ss.fit(full[..., j].T)
+            train_samp[..., j] = ss.transform(train_samp[..., j].T).T
+            test_samp[..., j] = ss.transform(test_samp[..., j].T).T
+    if shuffle:
+        np.random.shuffle(trainlabels)
+        np.random.shuffle(testlabels)
+    out = model_decode_tc(train_samp, trainlabels, test_samp, testlabels,
+                          **kwargs)
+    return out
+    
 
 def _compute_folds_n(use_trials, leave_out, equal_fold=False):
     if equal_fold:

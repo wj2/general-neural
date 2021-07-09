@@ -49,11 +49,14 @@ class Figure:
     def make_gss(self):
         pass
 
-    def get_axs(self, grids, sharex=None, sharey=None):
+    def get_axs(self, grids, sharex=None, sharey=None, plot_3ds=None):
         grid_arr = np.array(grids)
         ax_arr = np.zeros_like(grid_arr, dtype=object)
         for ind in u.make_array_ind_iterator(grid_arr.shape):
-            ax_arr[ind] = self.f.add_subplot(grid_arr[ind])
+            ax_kwarg = dict()
+            if plot_3ds is not None and plot_3ds[ind]:
+                ax_kwarg['projection'] = '3d'
+            ax_arr[ind] = self.f.add_subplot(grid_arr[ind], **ax_kwarg)
         return ax_arr
     
     def generate(self, panels=None):
