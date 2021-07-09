@@ -18,6 +18,23 @@ monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May',
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
 
+def merge_params(args, conf):
+    for k, v in vars(args):
+        rv = conf.get(k)
+        if rv is not None:
+            t = type(v)
+            rv = t(rv)
+            setattr(args, k, rv)
+    return args
+
+def merge_params_dict(args, d):
+    for k, v in vars(args).items():
+        rv = d.get(k)
+        print(k, v, rv)
+        if rv is not None:
+            setattr(args, k, rv)
+    return args
+
 class ConfigParserColor(configparser.ConfigParser):
 
     def getcolor(self, *args, zero_to_one=True, **kwargs):
