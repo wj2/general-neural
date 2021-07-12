@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import re
 from sklearn import svm
+import functools as ft
 
 import general.utility as u
 import general.neural_analysis as na
@@ -104,26 +105,28 @@ class ResultSequence(object):
         return str(self.val)
         
     def __lt__(self, x):
-        return self._op(x, np.less)
+        return self._op_dispatcher(x, np.less)
 
     def __le__(self, x):
-        return self._op(x, np.less_equal)
+        return self._op_dispatcher(x, np.less_equal)
 
     def __gt__(self, x):
-        return self._op(x, np.greater)
+        return self._op_dispatcher(x, np.greater)
 
     def __ge__(self, x):
-        return self._op(x, np.greater_equal)
+        return self._op_dispatcher(x, np.greater_equal)
 
     def __eq__(self, x):
-        return self._op(x, np.equal)
+        return self._op_dispatcher(x, np.equal)
 
     def __ne__(self, x):
-        return self._op(x, np.not_equal)
+        return self._op_dispatcher(x, np.not_equal)
 
     def _op_dispatcher(self, x, op):
         try:
             len(x)
+            if type(x) == str:
+                raise TypeError()
             out = self._op_rs(x, op)
         except TypeError:
             out = self._op(x, op)
@@ -147,23 +150,36 @@ class ResultSequence(object):
     def __add__(self, x):
         return self._op_dispatcher(x, np.add)
 
+def combine_ntrls(*args):
+    stacked = np.stack(args, axis=0)
+    return np.min(stacked, axis=0)
+
 class Dataset(object):
     
-    def __init__(self, date=None, experiment=None, animal=None, data=None,
-                 seconds=False, **kwargs):
-        comb_dict = dict(date=date, experiment=experiment,
-                         animal=animal, data=data, **kwargs)
-        self.data = pd.DataFrame(data=comb_dict)
-        self.session_fields = self.data['data'][0].columns
+    def __init__(self, dframe, seconds=False):
+        self.data = dframe
+        try:
+            self.session_fields = self.data['data'].iloc[0].columns
+        except KeyError as e:
+            if len(self.data['data']) == 0:
+                raise IOError('no data available')
+            else:
+                raise e
         self.n_sessions = len(self.data)
         self.data = self.data.sort_values('date', ignore_index=True)
         self.data = self.data.sort_values('animal', ignore_index=True)
         self.seconds = seconds
+        self.population_cache = {}
 
+    @classmethod
+    def from_dict(cls, seconds=False, **inputs):
+        df = pd.DataFrame(data=inputs)
+        return cls(df, seconds=seconds)
+        
     @classmethod
     def from_readfunc(cls, read_func, *args, seconds=False, **kwargs):
         super_df = read_func(*args, **kwargs)
-        return cls(seconds=seconds, **super_df)
+        return cls.from_dict(seconds=seconds, **super_df)
 
     def __getitem__(self, key):
         try:
@@ -171,6 +187,9 @@ class Dataset(object):
         except KeyError:
             out = ResultSequence(dd[key] for dd in self.data['data'])
         return out
+
+    def session_mask(self, mask):
+        return Dataset(self.data[mask], seconds=self.seconds)
 
     def mask(self, mask):
         df = {}
@@ -182,7 +201,7 @@ class Dataset(object):
             d = self.data['data'][i][m]
             dlist.append(d)
         df['data'] = dlist
-        return Dataset(**df, seconds=self.seconds)
+        return Dataset.from_dict(**df, seconds=self.seconds)
 
     def _center_spks(self, spks, tz, tzf):
         if tz is not None:
@@ -193,6 +212,7 @@ class Dataset(object):
             
     def get_response_in_window(self, begin, end, time_zero=None,
                                time_zero_field=None):
+        spks = self['spikeTimes']
         spks = self._center_spks(spks, time_zero, time_zero_field)
         out = []
         for spk in spks:
@@ -203,7 +223,8 @@ class Dataset(object):
     def _get_spikerates(self, spk, binsize, bounds, binstep, accumulate=False,
                         convert_seconds=True):
         xs = na.compute_xs(binsize, bounds[0], bounds[1], binstep)
-        spk = np.squeeze(spk)
+        if len(spk.shape) > 2:
+            spk = np.squeeze(spk)
         for i, spk_i in enumerate(spk):
             for j, spk_ij in enumerate(spk_i):
                 spk_sq = np.squeeze(spk_ij)
@@ -217,10 +238,6 @@ class Dataset(object):
                     out_arr = np.zeros(spk.shape + (tlen,))
                 out_arr[i, j] = resp_arr
         return out_arr, xs
-    
-    def combine_ntrls(self, *args):
-        stacked = np.stack(args, axis=0)
-        return np.min(stacked, axis=0)
     
     def make_pseudopop(self, outs, n_trls=None, min_trials_pseudo=10,
                        resample_pseudos=10, skl_axs=False):
@@ -253,21 +270,48 @@ class Dataset(object):
                 out_pseudo = np.zeros((resample_pseudos,) + ppop.shape)
             out_pseudo[i] = ppop
         return out_pseudo
+
+    def get_nneurs(self):
+        return self['n_neurs']
+
+    def clear_cache(self):
+        self.population_cache = {}
     
-    def get_populations(self, binsize, begin, end, binstep=None, skl_axes=False,
-                        accumulate=False, time_zero=None, time_zero_field=None,
-                        combine_pseudo=False, min_trials_pseudo=10,
-                        resample_pseudos=10, repl_nan=False):
+    # @ft.lru_cache(maxsize=10)
+    def get_populations(self, *args, cache=False, **kwargs):
+        key = args + tuple(kwargs.values())
+        if cache and key in self.population_cache.keys():
+            out = self.population_cache[key]
+        else:
+            out = self._get_populations(*args, **kwargs)
+        if cache:
+            self.population_cache[key] = out
+        return out
+    
+    def _get_populations(self, binsize, begin, end, binstep=None, skl_axes=False,
+                         accumulate=False, time_zero=None, time_zero_field=None,
+                         combine_pseudo=False, min_trials_pseudo=10,
+                         resample_pseudos=10, repl_nan=False, regions=None):
         spks = self['spikeTimes']
         spks = self._center_spks(spks, time_zero, time_zero_field)
+        regions_all = self['neur_regions']
         outs = []
         n_trls = []
-        for spk in spks:
-            spk_stack = np.stack(spk, axis=0)
-            out = self._get_spikerates(spk_stack, binsize, (begin, end),
-                                       binstep, accumulate,
-                                       convert_seconds=not self.seconds)
+        for i, spk in enumerate(spks):
+            if len(spk) == 0:
+                xs = na.compute_xs(binsize, begin, end, binstep)
+                resp_arr = np.zeros((0, self.get_nneurs()[i], len(xs)))
+                out = (resp_arr, xs)
+            else:
+                spk_stack = np.stack(spk, axis=0)
+                out = self._get_spikerates(spk_stack, binsize, (begin, end),
+                                           binstep, accumulate,
+                                           convert_seconds=not self.seconds)
             resp_arr, xs = out
+            if regions is not None and len(resp_arr) > 0:
+                regs = regions_all[i].iloc[0]
+                mask = np.isin(regs, regions)
+                resp_arr = resp_arr[:, mask]
             if repl_nan:
                 no_spk_mask = np.all(resp_arr == 0, axis=-1)
                 resp_arr[no_spk_mask] = np.nan
@@ -302,7 +346,7 @@ class Dataset(object):
         if pseudo:
             c1_n = cat1.get_ntrls()
             c2_n = cat2.get_ntrls()
-            comb_n = self.combine_ntrls(c1_n, c2_n)
+            comb_n = combine_ntrls(c1_n, c2_n)
             pop1 = self.make_pseudopop(pop1, comb_n, min_trials_pseudo,
                                        resample_pseudo, skl_axs=True)
             pop2 = self.make_pseudopop(pop2, comb_n, min_trials_pseudo,

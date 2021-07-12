@@ -10,12 +10,29 @@ import pystan as ps
 import pickle
 import itertools as it
 import configparser
+import sklearn.decomposition as skd
 from pref_looking.eyes import analyze_eyemove
 from pref_looking.bias import get_look_img
 
 monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May', 
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
+
+def merge_params(args, conf):
+    for k, v in vars(args):
+        rv = conf.get(k)
+        if rv is not None:
+            t = type(v)
+            rv = t(rv)
+            setattr(args, k, rv)
+    return args
+
+def merge_params_dict(args, d):
+    for k, v in vars(args).items():
+        rv = d.get(k)
+        if rv is not None:
+            setattr(args, k, rv)
+    return args
 
 class ConfigParserColor(configparser.ConfigParser):
 
@@ -29,6 +46,17 @@ class ConfigParserColor(configparser.ConfigParser):
         else:
             col = string
         return col
+
+    def getlist(self, *args, typefunc=None, **kwargs):
+        if typefunc is None:
+            typefunc = lambda x: x
+        string = self.get(*args, **kwargs)
+        if string is not None:
+            vals = string.split(',')
+            out = list(typefunc(v.strip()) for v in vals)
+        else:
+            out = string
+        return out
     
 class HiddenPrints:
     def __enter__(self):
@@ -248,6 +276,17 @@ def vector_angle(v1, v2, degrees=True):
     if degrees:
         theta = theta*(180/np.pi)
     return theta
+
+def participation_ratio(samps):
+    p = skd.PCA()
+    p.fit(samps)
+    pv = p.explained_variance_ratio_
+    pr = pr_only(pv)
+    return pr
+
+def pr_only(pvs):
+    pr = np.sum(pvs)**2/np.sum(pvs**2)
+    return pr
 
 def make_unit_vector(v):
     v = np.array(v)
@@ -590,6 +629,7 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
     else:
         data = data['bhv']
         bhv = data
+    print('---')
     if path_log is None and 'imglog' in data.dtype.names:
         path_log = data['imglog'][0][0]
         path_log = path_log.replace('uc/freedman/', '')
@@ -600,9 +640,17 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
     elif path_log is None and use_data_name:
         filename = bhv['DataFileName'][0][0][0]
         fn, ext = os.path.splitext(filename)
-        logname = fn + '_imglog.txt'
         folder, end = os.path.split(path_bhv)
-        path_log = os.path.join(folder, logname)
+        print(fn)
+        alt_fn1 = fn.replace('dimming-', 'dim_and_pref_looking-')
+        alt_fn2 = alt_fn1.replace('dimming_task-', 'dim_and_pref_looking-')
+        path_log = os.path.join(folder, fn + '_imglog.txt')
+        alt_path1 = os.path.join(folder, alt_fn1 + '_imglog.txt')
+        alt_path2 = os.path.join(folder, alt_fn2 + '_imglog.txt')
+        if os.path.exists(alt_path1):
+            path_log = alt_path1
+        elif os.path.exists(alt_path2):
+            path_log = alt_path2
     log = None
     if 'imglog_data' in data.dtype.names:
         raw_log = data['imglog_data'][0][0]
@@ -627,6 +675,11 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
         cns = bhv['ConditionNumber'][0,0][:, 0]
         n_pltrials = sum(c in plt_conds for c in cns)
         print('there are {} pref looking trials'.format(n_pltrials))
+    else:
+        print('---')
+        print('imglog found')
+        print(path_log)
+        print('---')
     if dates is not None:
         date_pattern = '[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}'
         m = re.search(date_pattern, path_bhv)
@@ -700,8 +753,6 @@ def load_bhvmat_imglog(path_bhv, path_log=None, noerr=True,
             entry2 = entry2.strip(b'\r\n').split(b'\t')
             tn2, s2, _, cond2, vs2, cat2, img2 = entry2
             if int(tn1) != int(x[i]['trialnum']):
-                print(entry1)
-                print(entry2)
                 print(x[i]['trialnum'])
                 print(x[0]['trialnum'])
                 # print(filename)
@@ -873,6 +924,14 @@ def make_ratio_function(func1, func2):
         return norm
     return _ratio_func
 
+def normalize_periodic_range(diff, cent=0):
+    diff = np.array(diff) - cent
+    g_mask = diff > np.pi
+    l_mask = diff < -np.pi
+    diff[g_mask] = -np.pi + (diff[g_mask] - np.pi)
+    diff[l_mask] = np.pi + (diff[l_mask] + np.pi)
+    return diff
+
 def compute_angular_separation(xy1, xy2):
     theta1 = np.rad2deg(np.arctan2(xy1[1], xy1[0]))
     theta2 = np.rad2deg(np.arctan2(xy2[1], xy2[0]))
@@ -908,6 +967,16 @@ def euclidean_distance(pt1, pt2):
     if len(pt2.shape) == 1:
         pt2 = pt2.reshape((1, pt2.shape[0]))
     return np.sqrt(np.sum((pt1 - pt2)**2, axis=1))
+
+def dict_diff(d1, d2):
+    ks = set(d1.keys()).union(d2.keys())
+    diff_dict = {}
+    for k in ks:
+        v1 = d1.get(k, None)
+        v2 = d2.get(k, None)
+        if v1 != v2:
+            diff_dict[k] = (v1, v2)
+    return diff_dict
 
 def distribute_imglogs(il_path, out_path):
     il_list = os.listdir(il_path)
@@ -980,6 +1049,25 @@ def index_func(a, b, axis=0):
     ind[mask] = 0
     return ind
 
+
+def conf_interval(dat, axis=0, perc=95, withmean=False):
+    lower = (100 - perc) / 2.
+    upper = lower + perc
+    lower_err = np.nanpercentile(dat, lower, axis=axis)
+    upper_err = np.nanpercentile(dat, upper, axis=axis)
+    err = np.vstack((upper_err, 
+                     lower_err))
+    if not withmean:
+        err = err - np.nanmean(dat, axis, keepdims=True)
+    return err
+
+def interval_inclusion(pt, distr, percentile=95):
+    err = conf_interval(distr, perc=percentile, withmean=True)
+    below = pt < err[0]
+    above = pt > err[1]
+    out = np.logical_and(below, above)
+    return out
+
 def bootstrap_test(a, b, func=np.nanmean, n=1000):
     a_m, b_m = func(a), func(b)
     a_l, b_l = len(a), len(b)
@@ -994,15 +1082,28 @@ def bootstrap_test(a, b, func=np.nanmean, n=1000):
     p = np.sum(t_stars >= t)/n
     return p
 
-def bootstrap_diff(a, b, func, n=1000):
-    stats = np.zeros(n)
+def bootstrap_diff(a, b, func=np.nanmean, n=1000, geometric=False):
+    if len(a.shape) > 1:
+        stats_shape = (n,) + a.shape[1:]
+    else:
+        stats_shape = n
+    stats = np.zeros(stats_shape)
     for i in range(n):
         a_inds = np.random.choice(np.arange(len(a)), len(a))
         a_choice = a[a_inds]
         b_inds = np.random.choice(np.arange(len(b)), len(b))
         b_choice = b[b_inds]
         stats[i] = func(a_choice) - func(b_choice)
+        if geometric:
+            std = (np.std(a_choice) + np.std(b_choice))/2
+            stats[i] = stats[i]/std
     return stats
+
+def bootstrap_tc(tc, func, axis=0, n=1000):
+    new_shape = tc.shape[:axis] + tc.shape[axis+1:]
+    out = np.zeros((n,) + new_shape)
+    func_ax = lambda x: func(x, axis=axis)
+    return bootstrap_list(tc, func_ax, n=n, out_shape=new_shape)
 
 def bootstrap_list(l, func, n=1000, out_shape=None, ret_sem=False):
     if out_shape is None:

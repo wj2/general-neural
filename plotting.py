@@ -3,7 +3,7 @@ import numpy as np
 import itertools as it
 import matplotlib.pyplot as plt
 import general.utility as u
-import seaborn as sns
+import general.neural_analysis as na
 
 def plot_single_units(xs, sus, labels, colors=None, style=(), show=False,
                       errorbar=True, alpha=.5, trial_color=(.8, .8, .8),
@@ -131,18 +131,8 @@ def biased_sem(dat, axis=0):
     err = sem(dat, axis=axis, sub=0)
     return err
     
-
-def conf_interval(dat, axis=0, perc=95):
-    lower = (100 - perc) / 2.
-    upper = lower + perc
-    lower_err = np.nanpercentile(dat, lower, axis=axis)
-    upper_err = np.nanpercentile(dat, upper, axis=axis)
-    err = np.vstack((upper_err - np.nanmean(dat, axis), 
-                     lower_err - np.nanmean(dat, axis)))
-    return err
-
 def conf95_interval(dat, axis=0):
-    return conf_interval(dat, axis=0, perc=95)
+    return u.conf_interval(dat, axis=0, perc=95)
 
 def plot_trial_structure(transition_times=(), labels=(), transition_dict=None,
                          ax=None, style=(), linestyle='dashed', 
@@ -179,7 +169,6 @@ def gen_circle_pts(n, r=1):
     pts = np.stack((np.cos(angs), np.sin(angs)), axis=1)
     return r*pts
 
-    
 def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
     if len(axvals) == val_len:
         diff = np.diff(axvals)[diff_ind]
@@ -187,6 +176,14 @@ def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
         if append:
             axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
     return axvals
+
+def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, **kwargs):
+    xs_ax = pcolormesh_axes(xs, len(xs), diff_ind=diff_ind,
+                            append=append)
+    ys_ax = pcolormesh_axes(ys, len(ys), diff_ind=diff_ind,
+                            append=append)
+    img = ax.pcolormesh(xs_ax, ys_ax, data, **kwargs)
+    return img
 
 def plot_decoding_heatmap(xs, decmat, colormap=None, show=False, title='',
                           ax=None, style=(), colorbar=True, cb_wid=.05,
@@ -321,14 +318,15 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                                 alpha=alpha)
             else:
                 ax.errorbar(xs, tr, (-er[1, :], er[0, :]), color=color,
-                            elinewidth=elinewidth, **kwargs)
+                            elinewidth=elinewidth, alpha=alpha, **kwargs)
         if len(xs_orig.shape) > 1:
             if fill:
                 ax.fill_betweenx(tr, xs+xs_er[1, :], xs+xs_er[0, :], 
                                  color=color, alpha=alpha)
             else:
                 ax.errorbar(xs, tr, yerr=None, xerr=(-xs_er[1, :], xs_er[0, :]),
-                            color=color, elinewidth=elinewidth, **kwargs)
+                            color=color, elinewidth=elinewidth, alpha=alpha,
+                            **kwargs)
         ax.set_title(title)
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
@@ -513,6 +511,27 @@ def clean_plot_bottom(ax, keeplabels=False):
     ax.xaxis.set_tick_params(size=0)
     if not keeplabels:
         plt.setp(ax.get_xticklabels(), visible=False)
+
+def make_3d_bars(ax, center=(0, 0, 0), bar_len=.1, bar_wid=.7):
+    ax.plot([center[0], center[0] + bar_len],
+            [center[1], center[1]],
+            [center[2], center[2]], color='k', linewidth=bar_wid)
+    ax.plot([center[0], center[0]],
+            [center[1], center[1] + bar_len],
+            [center[2], center[2]], color='k', linewidth=bar_wid)
+    ax.plot([center[0], center[0]],
+            [center[1], center[1]],
+            [center[2], center[2] + bar_len], color='k', linewidth=bar_wid)
+    ax.set_axis_off()
+        
+def clean_3d_plot(ax):
+    pc = (1., 1., 1., 0.)
+    ax.xaxis.set_pane_color(pc)
+    ax.yaxis.set_pane_color(pc)
+    ax.zaxis.set_pane_color(pc)
+    ax.xaxis._axinfo['grid']['color'] = pc
+    ax.yaxis._axinfo['grid']['color'] = pc
+    ax.zaxis._axinfo['grid']['color'] = pc
         
 def clean_plot(ax, i, max_i=None, ticks=True, spines=True, horiz=True):
     if spines:
@@ -561,22 +580,62 @@ def make_xaxis_scale_bar(ax, magnitude=None, double=True, anchor=0, bottom=True,
         ax.text(txt_pt[0], txt_pt[1] - text_buff, label, transform=ax.transAxes,
                 horizontalalignment='center', verticalalignment='top')
     ax.set_ylim(yl)
-
-def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrcoef,
-                      round_result=2):
-    f = lambda x: func(x[:, 0], x[:, 1])[1,0]
-    inp = np.stack((as_list, bs_list), axis=1)
+    
+def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef,
+                    rm_nan=False, confounders=None):
+    if confounders is None:
+        use_confounders = False
+        confounders = np.zeros((len(as_list), 1), dtype=bool)
+    else:
+        use_confounders = True
+    if rm_nan:
+        mask = np.logical_or(np.isnan(as_list),
+                             np.isnan(bs_list))
+        mask = np.logical_or(mask, np.any(np.isnan(confounders), axis=1))
+        mask = np.logical_not(mask)
+        as_list = as_list[mask]
+        bs_list = bs_list[mask]
+        confounders = confounders[mask]
+    if use_confounders:
+        f = lambda x: na.partial_correlation(x[:, 0], x[:, 1], x[:, 2:])
+        inp = np.stack((as_list, bs_list), axis=1)
+        if len(confounders.shape) == 1:
+            confounders = np.expand_dims(confounders, 1)
+        inp = np.concatenate((inp, confounders), axis=1)
+        print
+    else:
+        f = lambda x: func(x[:, 0], x[:, 1])[1,0]
+        inp = np.stack((as_list, bs_list), axis=1)
     cc = u.bootstrap_list(inp, f, n=n_boots)
     cent = f(inp)
     interv = conf95_interval(cc)
     upper = cent + interv[0, 0]
     lower = cent + interv[1, 0]
-    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+    return cent, lower, upper, cc
+
+def _get_pval(bs, comp_pt, comparator=np.greater):
+    p = 1 - np.sum(comparator(bs, comp_pt))/len(bs)
+    if p == 0:
+        pt = 'p < {}'.format(1/len(bs))
+    else:
+        pt = 'p = {}'.format(p)
+    return pt
+
+def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrcoef,
+                      round_result=2, confounders=None, comp_pt=0,
+                      comparator=np.greater):
+    cent, lower, upper, cc = get_corr_conf95(as_list, bs_list, n_boots=n_boots,
+                                             func=func, confounders=confounders)
+    pt = _get_pval(cc, comp_pt, comparator)
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}'.format(subj, text, cent,
+                                                       lower, upper, pt)
     print(s)
     return s
     
 def print_mean_conf95(bs_list, subj, text, n_boots=1000, func=np.nanmean,
-                      preboot=False, round_result=2):
+                      preboot=False, round_result=2, comp_pt=0,
+                      comparator=np.greater):
+    bs_list = np.array(bs_list)
     if  preboot:
         cent = func(bs_list)
         bs = bs_list
@@ -585,13 +644,16 @@ def print_mean_conf95(bs_list, subj, text, n_boots=1000, func=np.nanmean,
         bs = u.bootstrap_list(bs_list, func, n_boots)
     interv = conf95_interval(bs)
     upper = cent + interv[0, 0]
-    lower = cent + interv[1, 0]        
-    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+    lower = cent + interv[1, 0]
+    pt = _get_pval(bs, comp_pt, comparator)
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}'.format(subj, text, cent,
+                                                       lower, upper, pt)
     print(s)
     return s
 
 def print_diff_conf95(b_list, a_list, subj, text, n_boots=1000,
-                      func=np.nanmean, preboot=False, round_result=2):
+                      func=np.nanmean, preboot=False, round_result=2,
+                      comp_pt=0, comparator=np.greater):
     if preboot:
         b = b_list
         a = a_list
@@ -602,7 +664,9 @@ def print_diff_conf95(b_list, a_list, subj, text, n_boots=1000,
     cent = func(diff)
     upper = cent + interv[0, 0]
     lower = cent + interv[1, 0]        
-    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}]'.format(subj, text, cent, lower, upper)
+    pt = _get_pval(diff, comp_pt, comparator)
+    s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}'.format(subj, text, cent, lower,
+                                                       upper, pt)
     print(s)
     return s
 
