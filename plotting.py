@@ -279,7 +279,7 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                     style=(), central_tendency=np.nanmean, legend=True,
                     fill=True, log_x=False, log_y=False, line_alpha=1,
                     jagged=False, points=False, elinewidth=1, conf95=False,
-                    **kwargs):
+                    err=None, **kwargs):
     if conf95:
         error_func = conf95_interval
     with plt.style.context(style):
@@ -298,6 +298,9 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
         elif len(dat.shape) > 1:
             tr = central_tendency(dat, axis=0)
             er = error_func(dat, axis=0)
+        elif err is not None:
+            tr = dat
+            er = err
         else: 
             tr = dat
         if len(xs_orig.shape) > 1:
@@ -312,7 +315,7 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
         if points:
             ax.plot(xs, tr, 'o', color=color, alpha=line_alpha, **kwargs)
         alpha = min(line_alpha, alpha)
-        if len(dat.shape) > 1 or jagged:
+        if len(dat.shape) > 1 or jagged or err is not None:
             if fill:
                 ax.fill_between(xs, tr+er[1, :], tr+er[0, :], color=color, 
                                 alpha=alpha)
@@ -512,6 +515,22 @@ def clean_plot_bottom(ax, keeplabels=False):
     if not keeplabels:
         plt.setp(ax.get_xticklabels(), visible=False)
 
+def remove_ticks_3d(ax):
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    ax.set_zticklabels([])
+    return ax
+        
+def set_3d_background(ax, background_color=(1, 1, 1, 1), line_color=None):
+    ax.w_xaxis.set_pane_color(background_color)
+    ax.w_yaxis.set_pane_color(background_color)
+    ax.w_zaxis.set_pane_color(background_color)
+    if line_color is not None:
+        ax.xaxis.pane.set_edgecolor(line_color)
+        ax.yaxis.pane.set_edgecolor(line_color)
+        ax.zaxis.pane.set_edgecolor(line_color)
+    return ax
+        
 def make_3d_bars(ax, center=(0, 0, 0), bar_len=.1, bar_wid=.7):
     ax.plot([center[0], center[0] + bar_len],
             [center[1], center[1]],

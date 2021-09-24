@@ -36,6 +36,23 @@ def get_stan_params_ind(mf, param_name, ind_set, mask=None, skip_end=1,
         out = np.mean(out)
     return out
 
+generic_manifest = {'observed_data':'y',
+                    'log_likelihood':{'y':'log_lik'},
+                    'posterior_predictive':'err_hat'}
+manifest_dict = {'general/stan_models/logit.pkl':generic_manifest,
+                 'general/stan_models/unif_resp.pkl':generic_manifest}
+
+def fit_model(data_dict, model_path, max_treedepth=10, adapt_delta=.8,
+              manifest=None, **kwargs):
+    if manifest is None:
+        manifest = manifest_dict[model_path]
+    sm = pickle.load(open(model_path, 'rb'))
+    control = dict(max_treedepth=max_treedepth, adapt_delta=adapt_delta)
+    fit = sm.sampling(data=data_dict, control=control, **kwargs)
+    diag = ps.check_hmc_diagnostics(fit)
+    fit_az = az.from_pystan(posterior=fit, **manifest)
+    return fit, fit_az, diag
+
 def get_stan_params(mf, param, mask=None, skip_end=1):
     names = mf.flatnames
     means = mf.get_posterior_mean()[:-skip_end]

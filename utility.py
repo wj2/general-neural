@@ -29,7 +29,7 @@ def merge_params(args, conf):
 
 def merge_params_dict(args, d):
     for k, v in vars(args).items():
-        rv = d.get(k)
+        rv = d.pop(k, None)
         if rv is not None:
             setattr(args, k, rv)
     return args
