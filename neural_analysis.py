@@ -20,6 +20,7 @@ import pickle
 
 import general.decoders as gd
 import general.utility as u
+import general.nested_cv as ncv
 
 def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum',
                            ret_index=False, **kwargs):
@@ -255,7 +256,8 @@ class PartialCorrelation:
         b_guess = b_resid_guess + b_conf
         return b_guess
 
-def partial_correlation(a, b, confounders, ret_model=False):
+def partial_correlation(a, b, confounders):
+    """ bootstrapping does not work for this with few entries """
     if len(confounders.shape) == 1:
         confounders = np.expand_dims(confounders, 1)
     a_reg = linear_model.LinearRegression()
@@ -264,7 +266,8 @@ def partial_correlation(a, b, confounders, ret_model=False):
     b_reg = linear_model.LinearRegression()
     b_reg.fit(confounders, b)
     b_resid = b - b_reg.predict(confounders)
-    r = np.corrcoef(a_resid, b_resid)[1, 0]
+    r_all = np.corrcoef(a_resid, b_resid)
+    r = r_all[1, 0]
     return r
             
 def remove_low_spiking_neurons(all_discs, spiking_level, percent_trials=.9):
@@ -475,13 +478,6 @@ def roc(samples1, samples2):
         p_fa[i] = np.sum(samples2 > c)/len(samples2)
     auc = -np.trapz(p_hit, p_fa)
     return auc
-
-"""
-chapter sof thesis and their status
--- what is the status of assignment problem work
--- spend most of time sketching experimental work
-
-"""
 
 # ### HMM ###
 # def _hmm_pop_format(pop):
@@ -884,7 +880,7 @@ def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                  with_replace=False, shuff_labels=False, stability=False,
                  penalty=1, format_=True, model=svm.SVC, kernel='linear',
                  collapse_time=False, max_iter=10000, gamma='scale', pop=False,
-                 min_population=1, multi_cond=False, **kwargs):
+                 min_population=1, multi_cond=False, nested=False, **kwargs):
     spec_params = {'C':penalty, 'max_iter':max_iter, 'gamma':gamma,
                    'kernel':kernel, 'class_weight':'balanced'}
     if pop:
@@ -896,11 +892,19 @@ def svm_decoding(cat1, cat2, leave_out=1, require_trials=15, resample=100,
                            min_population=min_population,
                            collapse_time=collapse_time, **kwargs)
     else:
-        out = decoding(cat1, cat2, leave_out=leave_out, multi_cond=multi_cond,
-                       require_trials=require_trials, resample=resample,
-                       with_replace=with_replace, shuff_labels=shuff_labels,
-                       stability=stability, params=spec_params, format_=format_,
-                       model=model, collapse_time=collapse_time, **kwargs)
+        if nested:
+            out = decoding_nested(
+                cat1, cat2, leave_out=leave_out, multi_cond=multi_cond,
+                require_trials=require_trials, resample=resample,
+                params=spec_params, format_=format_,
+                model=model, **kwargs)
+        else:
+            out = decoding(
+                cat1, cat2, leave_out=leave_out, multi_cond=multi_cond,
+                require_trials=require_trials, resample=resample,
+                with_replace=with_replace, shuff_labels=shuff_labels,
+                stability=stability, params=spec_params, format_=format_,
+                model=model, collapse_time=collapse_time, **kwargs)
     return out
 
 def decoding_pop(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
@@ -1010,8 +1014,8 @@ def decode_skl(c1_train, c1_test, c2_train, c2_test, model=svm.SVC, params=None,
         for k in range(c2_test.shape[1]):
             bvals2[k, :, j] = pipe.decision_function(c2_test[:, k, :, j].T)
         wnorm = np.sqrt(np.sum(pipe[-1].coef_**2))
-        bvals1[k, :, j] = wnorm*bvals1[k, :, j]
-        bvals2[k, :, j] = wnorm*bvals2[k, :, j]
+        bvals1[k, :, j] = bvals1[k, :, j]/wnorm
+        bvals2[k, :, j] = bvals2[k, :, j]/wnorm
     if return_dists:
         out = (tcs, bvals1, bvals2)
     else:
@@ -1112,6 +1116,41 @@ def _svm_organize(*args, require_trials=20, use_avail_trials=True, pop=False,
     x_len = c_arr_masked[0][0, 0].shape[1]
     out = c_arr_masked + [int(require_trials), x_len]
     return out
+
+def decoding_nested(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
+                    resample=100, params=None,
+                    format_=True, equal_fold=False, multi_cond=False,
+                    use_avail_trials=True, norm=True, reduce_required=True,
+                    latency=False, sample_pseudo=False, n_pseudo=200,
+                    **kwargs):
+    if format_:
+        if not multi_cond:
+            cat1 = (cat1,)
+            cat2 = (cat2,)
+        out = _svm_organize(cat1, cat2, require_trials=require_trials,
+                            use_avail_trials=use_avail_trials,
+                            reduce_required=reduce_required)
+        cat1_f, cat2_f, require_trials, x_len = out
+    else:
+        if not multi_cond:
+            cat1_f = np.array(cat1, dtype=object)
+            cat1_f = np.expand_dims(cat1_f, 1)
+            cat2_f = np.array(cat2, dtype=object)
+            cat2_f = np.expand_dims(cat2_f, 1)
+        else:
+            cat1_f = cat1
+            cat2_f = cat2
+        x_len = cat2_f[0, 0].shape[1]
+        if use_avail_trials:
+            c1_min = min(len(c1_i) for c1_i in cat1_f)
+            c2_min = min(len(c2_i) for c2_i in cat2_f)
+            require_trials = min(c1_min, c2_min)
+    folds_n, leave_out = _compute_folds_n(require_trials*cat1_f.shape[1],
+                                          leave_out, equal_fold)
+    folds_n = 5
+    resample = 100
+    return ncv.nested_cv(cat1_f, cat2_f, k_folds=folds_n, n_reps=resample,
+                         **kwargs)
 
 def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15, 
              resample=100, with_replace=False, shuff_labels=False, 
@@ -1961,7 +2000,8 @@ def fit_logit(measured, outcome, manifest=glm_arviz, model_path=stan_logit_path,
         measured_m = np.mean(measured)
         measured_v = np.std(measured - measured_m)
         measured = (measured - measured_m)/measured_v
-    stan_data = {'N':len(measured), 'y':outcome, 'x':measured,
+    measured = np.expand_dims(measured, 1)
+    stan_data = {'N':len(measured), 'K':1, 'y':outcome, 'x':measured,
                  'prior_width':prior_width}
     sm_logit = pickle.load(open(model_path, 'rb'))
     m_logit = sm_logit.sampling(data=stan_data, iter=stan_iters,
