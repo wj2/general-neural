@@ -10,76 +10,15 @@ import functools as ft
 import general.utility as u
 import general.neural_analysis as na
 
-miller_file = '([A-Za-z]+)-([A-Za-z]+)-([0-9]{8})\.mat'
-miller_2d = ('spikeTimes',)
-miller_af = ('trialInfo',)
-miller_af_skips = {miller_af[0]:('Properties',)}
-miller_sf = ()
-
-def _add_two_dim_arr_to_dataframe(data, df, double_fields):
-    for td in double_fields:
-        df[td] = list(spks_trl for spks_trl in data[td])
-    return df
-
-def _add_single_to_dataframe(data, df, keys, new_keys=None):
-    for i, k in enumerate(keys):
-        if new_keys is not None:
-            new_k = new_keys[i]
-        else:
-            new_k = k
-        df[new_k] = data[k][:, 0]
-    return df
-
-def _add_structured_arr_to_dataframe(data, df, sa_keys, new_keys=None,
-                                     skips=None):
-    if skips is None:
-        skips = {}
-    for sak in sa_keys:
-        data_names = data[sak].dtype.names
-        skips_sak = skips.get(sak, ())
-        data_names = filter(lambda x: x not in skips_sak, data_names)
-        df = _add_single_to_dataframe(data[sak][0, 0], df, data_names)
-    return df
-
-def load_miller_data(folder, template=miller_file,
-                     single_fields=miller_sf, arr_fields=miller_af,
-                     double_fields=miller_2d, arr_fields_skip=miller_af_skips,
-                     max_files=np.inf):
-    fls = os.listdir(folder)
-    counter = 0
-    dates, expers, monkeys, datas = [], [], [], []
-    for fl in fls:
-        m = re.match(template, fl)
-        if m is not None:
-            df = pd.DataFrame()
-            expers.append(m.group(1))
-            monkeys.append(m.group(2))
-            date = m.group(3)
-            date_f = pd.to_datetime(int(date), format='%m%d%Y')
-            dates.append(date_f)
-            data = sio.loadmat(os.path.join(folder, fl))
-            df = _add_structured_arr_to_dataframe(data, df, arr_fields,
-                                                  skips=arr_fields_skip)
-            df = _add_two_dim_arr_to_dataframe(data, df, double_fields)
-            ain_mask = data['analogChnlInfo']['isAIN'][0,0][:, 0].astype(bool)
-            labels = data['analogChnlInfo']['chnlLabel'][0,0][ain_mask]
-            for i, l in enumerate(labels):
-                label = l[0][0]
-                dat_i = data['ain'][:, i].T
-                df[label] = list(ain_trl for ain_trl in dat_i)
-            datas.append(df)
-            counter = counter + 1
-            if counter >= max_files:
-                break
-    super_dict = dict(date=dates, experiment=expers, animal=monkeys,
-                      data=datas)
-    return super_dict
-
 class ResultSequence(object):
 
     def __init__(self, x):
         self.val = list(x)
 
+    def __hash__(self):
+        hashable = tuple(tuple(x) for x in self.val)
+        return hash(hashable)
+        
     def _op(self, x, operator):
         out = ResultSequence(operator(v, x) for v in self.val)
         return out
@@ -170,6 +109,7 @@ class Dataset(object):
         self.data = self.data.sort_values('animal', ignore_index=True)
         self.seconds = seconds
         self.population_cache = {}
+        self.mask_pop_cache = {}
 
     @classmethod
     def from_dict(cls, seconds=False, **inputs):
@@ -276,7 +216,19 @@ class Dataset(object):
 
     def clear_cache(self):
         self.population_cache = {}
-    
+
+    def mask_population(self, mask, *args, cache=False, **kwargs):
+        key = (mask,) + args + tuple(kwargs.values())
+        ret = self.mask_pop_cache.get(key)
+        if cache and ret is not None:
+            data, pop, xs = ret
+        else:
+            data = self.mask(mask)
+            pop, xs = data.get_populations(*args, **kwargs)
+        if cache:
+            self.mask_pop_cache[key] = (data, pop, xs)
+        return data, pop, xs
+        
     # @ft.lru_cache(maxsize=10)
     def get_populations(self, *args, cache=False, **kwargs):
         key = args + tuple(kwargs.values())
@@ -294,7 +246,8 @@ class Dataset(object):
                          resample_pseudos=10, repl_nan=False, regions=None):
         spks = self['spikeTimes']
         spks = self._center_spks(spks, time_zero, time_zero_field)
-        regions_all = self['neur_regions']
+        if regions is not None:
+            regions_all = self['neur_regions']
         outs = []
         n_trls = []
         for i, spk in enumerate(spks):
