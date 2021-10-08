@@ -9,8 +9,9 @@ import arviz as az
 def recompile_model(mp):
     p, ext = os.path.splitext(mp)
     stan_path = p + '.stan'
+    pkl_path = p + '.pkl'
     sm = ps.StanModel(file=stan_path)
-    pickle.dump(sm, open(mp, 'wb'))
+    pickle.dump(sm, open(pkl_path, 'wb'))
     return mp
 
 def store_models(model_collection, store_arviz=False):
@@ -40,12 +41,13 @@ generic_manifest = {'observed_data':'y',
                     'log_likelihood':{'y':'log_lik'},
                     'posterior_predictive':'err_hat'}
 manifest_dict = {'general/stan_models/logit.pkl':generic_manifest,
-                 'general/stan_models/unif_resp.pkl':generic_manifest}
+                 'general/stan_models/unif_resp.pkl':generic_manifest,
+                 'r1r2r3/stan_models/sum_od.pkl':generic_manifest}
 
 def fit_model(data_dict, model_path, max_treedepth=10, adapt_delta=.8,
-              manifest=None, **kwargs):
+              manifest=None, default_manifest=generic_manifest, **kwargs):
     if manifest is None:
-        manifest = manifest_dict[model_path]
+        manifest = manifest_dict.get(model_path, default_manifest)
     sm = pickle.load(open(model_path, 'rb'))
     control = dict(max_treedepth=max_treedepth, adapt_delta=adapt_delta)
     fit = sm.sampling(data=data_dict, control=control, **kwargs)
