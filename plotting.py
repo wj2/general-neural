@@ -1,5 +1,6 @@
 
 import numpy as np
+import scipy.stats as sts
 import itertools as it
 import matplotlib.pyplot as plt
 import general.utility as u
@@ -279,7 +280,7 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                     style=(), central_tendency=np.nanmean, legend=True,
                     fill=True, log_x=False, log_y=False, line_alpha=1,
                     jagged=False, points=False, elinewidth=1, conf95=False,
-                    err=None, **kwargs):
+                    err=None, err_x=None, **kwargs):
     if conf95:
         error_func = conf95_interval
     with plt.style.context(style):
@@ -308,6 +309,8 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
             xs = central_tendency(xs_orig, axis=0)
         else:
             xs = xs_orig
+        if err_x is not None:
+            xs_er = err_x
         trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha,
                       **kwargs)
         if color is None:
@@ -322,7 +325,7 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
             else:
                 ax.errorbar(xs, tr, (-er[1, :], er[0, :]), color=color,
                             elinewidth=elinewidth, alpha=alpha, **kwargs)
-        if len(xs_orig.shape) > 1:
+        if len(xs_orig.shape) > 1 or err_x is not None:
             if fill:
                 ax.fill_betweenx(tr, xs+xs_er[1, :], xs+xs_er[0, :], 
                                  color=color, alpha=alpha)
@@ -621,7 +624,6 @@ def get_corr_conf95(as_list, bs_list, n_boots=1000, func=np.corrcoef,
         if len(confounders.shape) == 1:
             confounders = np.expand_dims(confounders, 1)
         inp = np.concatenate((inp, confounders), axis=1)
-        print
     else:
         f = lambda x: func(x[:, 0], x[:, 1])[1,0]
         inp = np.stack((as_list, bs_list), axis=1)
@@ -650,21 +652,46 @@ def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrco
                                                        lower, upper, pt)
     print(s)
     return s
-    
+
+def _get_sem_from_bound(err, use_lower=True, p_thr=.05):
+    factor = sts.norm(0, 1).ppf(1 - p_thr/2)
+    ind = 1 if use_lower else 0
+    sem = err[ind]/factor
+    return sem    
+
 def print_mean_conf95(bs_list, subj, text, n_boots=1000, func=np.nanmean,
                       preboot=False, round_result=2, comp_pt=0,
-                      comparator=np.greater):
-    bs_list = np.array(bs_list)
-    if  preboot:
-        cent = func(bs_list)
-        bs = bs_list
+                      comparator=np.greater, supply_err=False,
+                      diff=False):
+    if supply_err:
+        factor = sts.norm(0, 1).ppf(1 - .025)
+        if diff:
+            (cent1, err1), (cent2, err2) = bs_list
+            sem1 = _get_sem_from_bound(err1)
+            sem2 = _get_sem_from_bound(err2)
+            cent = cent1 - cent2
+            sem = np.sqrt(sem1**2 + sem2**2)
+            upper = cent + factor*sem
+            lower = cent - factor*sem
+        else:
+            cent, err = bs_list
+            upper = cent + err[0]
+            lower = cent + err[1]
+            sem = err[1]/factor
+        p = sts.norm(cent, np.sqrt(sem**2)).cdf(comp_pt)
+        pt = 'p = {}'.format(p)
     else:
-        cent = func(bs_list)
-        bs = u.bootstrap_list(bs_list, func, n_boots)
-    interv = conf95_interval(bs)
-    upper = cent + interv[0, 0]
-    lower = cent + interv[1, 0]
-    pt = _get_pval(bs, comp_pt, comparator)
+        bs_list = np.array(bs_list)
+        if  preboot:
+            cent = func(bs_list)
+            bs = bs_list
+        else:
+            cent = func(bs_list)
+            bs = u.bootstrap_list(bs_list, func, n_boots)
+        interv = conf95_interval(bs)
+        upper = cent + interv[0, 0]
+        lower = cent + interv[1, 0]
+        pt = _get_pval(bs, comp_pt, comparator)
     s = '{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}'.format(subj, text, cent,
                                                        lower, upper, pt)
     print(s)

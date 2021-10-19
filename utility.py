@@ -138,10 +138,22 @@ def cosine_similarity(v1, v2):
         v1 = np.expand_dims(v1, 0)
     if len(v2.shape) == 1:
         v2 = np.expand_dims(v2, 0)
-    v1_lens = np.sqrt(np.sum(v1**2, axis=1))
-    v2_lens = np.sqrt(np.sum(v2**2, axis=1))
-    s = np.sum(v1*v2, axis=1)/(v1_lens*v2_lens)
+    v1_unit = make_unit_vector(v1)
+    v2_unit = make_unit_vector(v2)
+    s = np.sum(v1_unit*v2_unit, axis=1)
     return s 
+
+def pairwise_cosine_similarity(v1, v2=None):
+    angs = []
+    if v2 is None:
+        iter_ = it.combinations(range(len(v1)), 2)
+        for (i, j) in iter_:
+            angs.append(cosine_similarity(v1[i], v1[j])[0])
+    else:
+        iter_ = it.product(range(len(v1)), range(len(v2)))
+        for (i, j) in iter_:
+            angs.append(cosine_similarity(v1[i], v2[j])[0])
+    return np.array(angs)
 
 def voronoi_finite_polygons_2d(vor, radius=None):
     """
@@ -292,8 +304,14 @@ def make_unit_vector(v):
     v = np.array(v)
     if len(v.shape) == 1:
         v = np.expand_dims(v, 0)
-    v_len = np.expand_dims(np.sqrt(np.sum(v**2, axis=1)), 1)
-    v_norm = v/v_len
+    v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
+    mask = v_len > 0
+    v_norm = np.zeros_like(v)
+    v_norm[mask[:, 0]] = v[mask[:, 0]]/v_len[mask[:, 0]]
+    # if v_len > 0:
+    #     v_norm = v/v_len
+    # else:
+    #     v_norm = v
     return np.squeeze(v_norm)
 
 def demean_unit_std(data, collapse_dims=(), axis=0, sig_eps=.00001):
@@ -924,12 +942,16 @@ def make_ratio_function(func1, func2):
         return norm
     return _ratio_func
 
-def normalize_periodic_range(diff, cent=0):
+def normalize_periodic_range(diff, cent=0, radians=True):
+    if radians:
+        const = np.pi
+    else:
+        const = 180
     diff = np.array(diff) - cent
-    g_mask = diff > np.pi
-    l_mask = diff < -np.pi
-    diff[g_mask] = -np.pi + (diff[g_mask] - np.pi)
-    diff[l_mask] = np.pi + (diff[l_mask] + np.pi)
+    g_mask = diff > const
+    l_mask = diff < -const
+    diff[g_mask] = -const + (diff[g_mask] - const)
+    diff[l_mask] = const + (diff[l_mask] + const)
     return diff
 
 def compute_angular_separation(xy1, xy2):
