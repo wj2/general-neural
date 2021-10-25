@@ -161,15 +161,18 @@ class Dataset(object):
         return out
 
     def _get_spikerates(self, spk, binsize, bounds, binstep, accumulate=False,
-                        convert_seconds=True):
+                        convert_seconds=True, pre_bound=-2, post_bound=2):
         xs = na.compute_xs(binsize, bounds[0], bounds[1], binstep)
         if len(spk.shape) > 2:
             spk = np.squeeze(spk)
+        no_spks = np.zeros_like(spk)
         for i, spk_i in enumerate(spk):
             for j, spk_ij in enumerate(spk_i):
+                
                 spk_sq = np.squeeze(spk_ij)
                 if convert_seconds:
                     spk_sq = spk_sq*1000
+                no_spks[i, j] = len(spk_sq.shape) == 0 or len(spk_sq) == 0 
                 resp_arr = na.bin_spiketimes(spk_sq, binsize, bounds, binstep,
                                              accumulate=accumulate,
                                              spks_per_sec=not self.seconds)
@@ -177,7 +180,7 @@ class Dataset(object):
                     tlen = len(resp_arr)
                     out_arr = np.zeros(spk.shape + (tlen,))
                 out_arr[i, j] = resp_arr
-        return out_arr, xs
+        return out_arr, xs, no_spks
     
     def make_pseudopop(self, outs, n_trls=None, min_trials_pseudo=10,
                        resample_pseudos=10, skl_axs=False):
@@ -243,39 +246,45 @@ class Dataset(object):
     def _get_populations(self, binsize, begin, end, binstep=None, skl_axes=False,
                          accumulate=False, time_zero=None, time_zero_field=None,
                          combine_pseudo=False, min_trials_pseudo=10,
-                         resample_pseudos=10, repl_nan=False, regions=None):
+                         resample_pseudos=10, repl_nan=False, regions=None,
+                         ret_no_spk=False):
         spks = self['spikeTimes']
         spks = self._center_spks(spks, time_zero, time_zero_field)
         if regions is not None:
             regions_all = self['neur_regions']
         outs = []
         n_trls = []
+        no_spks = []
         for i, spk in enumerate(spks):
             if len(spk) == 0:
                 xs = na.compute_xs(binsize, begin, end, binstep)
                 resp_arr = np.zeros((0, self.get_nneurs()[i], len(xs)))
-                out = (resp_arr, xs)
+                out = (resp_arr, xs, np.ones_like(resp_arr, dtype=bool))
             else:
                 spk_stack = np.stack(spk, axis=0)
                 out = self._get_spikerates(spk_stack, binsize, (begin, end),
                                            binstep, accumulate,
                                            convert_seconds=not self.seconds)
-            resp_arr, xs = out
+            resp_arr, xs, no_spk_mask = out
             if regions is not None and len(resp_arr) > 0:
                 regs = regions_all[i].iloc[0]
                 mask = np.isin(regs, regions)
                 resp_arr = resp_arr[:, mask]
             if repl_nan:
-                no_spk_mask = np.all(resp_arr == 0, axis=-1)
                 resp_arr[no_spk_mask] = np.nan
             n_trls.append(resp_arr.shape[0])
             if skl_axes:
                 resp_arr = np.expand_dims(np.swapaxes(resp_arr, 0, 1), 1)
             outs.append(resp_arr)
+            no_spks.append(no_spk_mask)
         if combine_pseudo:
             outs = self.make_pseudopop(outs, n_trls, min_trials_pseudo,
                                        resample_pseudos)
-        return outs, xs
+        if ret_no_spk:
+            out = (outs, xs, no_spks)
+        else:
+            out = (outs, xs)
+        return out
 
     def get_ntrls(self):
         return list(len(o) for o in self['data'])
