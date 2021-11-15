@@ -943,16 +943,19 @@ def make_ratio_function(func1, func2):
     return _ratio_func
 
 def normalize_periodic_range(diff, cent=0, radians=True):
+    diff = np.array(diff)
     if radians:
         const = np.pi
     else:
         const = 180
-    diff = np.array(diff) - cent
-    g_mask = diff > const
-    l_mask = diff < -const
-    diff[g_mask] = -const + (diff[g_mask] - const)
-    diff[l_mask] = const + (diff[l_mask] + const)
-    return diff
+    m = np.mod(diff + const, 2*const)
+    m = np.mod(m + 2*const, 2*const) - const
+    # diff = np.array(diff) - cent
+    # g_mask = diff > const
+    # l_mask = diff < -const
+    # diff[g_mask] = -const + (diff[g_mask] - const)
+    # diff[l_mask] = const + (diff[l_mask] + const)
+    return m
 
 def compute_angular_separation(xy1, xy2):
     theta1 = np.rad2deg(np.arctan2(xy1[1], xy1[0]))

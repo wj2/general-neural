@@ -45,12 +45,18 @@ manifest_dict = {'general/stan_models/logit.pkl':generic_manifest,
                  'r1r2r3/stan_models/sum_od.pkl':generic_manifest}
 
 def fit_model(data_dict, model_path, max_treedepth=10, adapt_delta=.8,
-              manifest=None, default_manifest=generic_manifest, **kwargs):
+              manifest=None, default_manifest=generic_manifest,
+              fixed_param=False, **kwargs):
     if manifest is None:
         manifest = manifest_dict.get(model_path, default_manifest)
+    if fixed_param:
+        algorithm = 'Fixed_param'
+    else:
+        algorithm = None
     sm = pickle.load(open(model_path, 'rb'))
     control = dict(max_treedepth=max_treedepth, adapt_delta=adapt_delta)
-    fit = sm.sampling(data=data_dict, control=control, **kwargs)
+    fit = sm.sampling(data=data_dict, control=control, algorithm=algorithm,
+                      **kwargs)
     diag = ps.check_hmc_diagnostics(fit)
     fit_az = az.from_pystan(posterior=fit, **manifest)
     return fit, fit_az, diag

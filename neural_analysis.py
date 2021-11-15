@@ -22,6 +22,17 @@ import general.decoders as gd
 import general.utility as u
 import general.nested_cv as ncv
 
+def make_model_pipeline(model=None, norm=True, pca=None, **kwargs):
+    pipe_steps = []
+    if pca is not None:
+        pipe_steps.append(skd.PCA(pca))
+    if norm:
+        pipe_steps.append(skp.StandardScaler())
+    if model is not None:
+        pipe_steps.append(model())
+    pipe = sklpipe.make_pipeline(*pipe_steps)
+    return pipe
+
 def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum',
                            ret_index=False, **kwargs):
     data = args[data_ind]
@@ -1079,12 +1090,32 @@ def decode_skl(c1_train, c1_test, c2_train, c2_test, model=svm.SVC, params=None,
         out = tcs
     return out 
 
-rand_splitter = skms.ShuffleSplit
+def _combine_samples(*c_is):
+    data = []
+    labels = []
+    for i, c_i in enumerate(c_is):
+        ci_flat = np.concatenate(tuple(c_i[:, i] for i in range(c_i.shape[1])),
+                                 axis=1)
+        data.append(ci_flat)
+        labels.append(np.ones(ci_flat.shape[1])*i)
+    data_full = np.concatenate(data, axis=1)
+    labels_full = np.concatenate(labels)
+    return data_full, labels_full
 
+def _eval_fit_models(data, labels, estimators):
+    out = np.zeros(len(estimators))
+    for i, est in enumerate(estimators):
+        out[i] = est.score(data, labels)
+    return out
+
+rand_splitter = skms.ShuffleSplit
 def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
              shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
              impute_missing=False, verbose=False, rand_splitter=rand_splitter,
-             time_accumulate=False, **model_kwargs):
+             time_accumulate=False, gen_c1=None, gen_c2=None, test_prop=None,
+             **model_kwargs):
+    if test_prop is None:
+        test_prop = 1/folds_n
     if params is None:
         params = model_kwargs
     else:
@@ -1093,6 +1124,7 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
     # c1 is shape (neurs, inner_conds, trials, time_points)
     x_len = c1.shape[-1]
     tcs = np.zeros((folds_n, x_len))
+    tcs_gen = np.zeros_like(tcs)
     steps = []
     if norm:
         steps.append(skp.StandardScaler())
@@ -1103,19 +1135,16 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
     clf = model(**params)
     steps.append(clf)
     pipe = sklpipe.make_pipeline(*steps)
-    c1_flat = np.concatenate(tuple(c1[:, i] for i in range(c1.shape[1])),
-                             axis=1)
-    c2_flat = np.concatenate(tuple(c2[:, i] for i in range(c2.shape[1])),
-                             axis=1)
-    c_flat = np.concatenate((c1_flat, c2_flat), axis=1)
-    labels = np.concatenate((np.zeros(c1_flat.shape[1]),
-                            np.ones(c2_flat.shape[1])))
+    c_flat, labels = _combine_samples(c1, c2)
+    if gen_c1 is not None or gen_c2 is not None:
+        c_gen, l_gen = _combine_samples(*list(c for c in (gen_c1, gen_c2)
+                                              if c is not None))
     if shuffle:
         np.random.shuffle(labels)
     if rand_splitter is None:
         splitter = folds_n
     else:
-        splitter = rand_splitter(folds_n, test_size=.1)
+        splitter = rand_splitter(folds_n, test_size=test_prop)
     if verbose:
         print('--')
         print(c1_flat.shape)
@@ -1123,18 +1152,29 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
         print(c_flat.shape)
         print(splitter)
     for j in range(x_len):
-        sk_cv = skms.cross_val_score
+        sk_cv = skms.cross_validate
         if time_accumulate:
             in_list = list(c_flat[..., k] for k in range(j + 1))
             in_data = np.concatenate(in_list, axis=0).T
         else:
             in_data = c_flat[..., j].T
-        scores = sk_cv(pipe, in_data, labels,
-                       cv=splitter, n_jobs=n_jobs)
-        tcs[:, j] = scores
+        out = sk_cv(pipe, in_data, labels,
+                    cv=splitter, n_jobs=n_jobs,
+                    return_estimator=True)
+        tcs[:, j] = out['test_score']
+        # print('tcs', np.mean(tcs[:, j]), tcs[:, j])
+        if gen_c1 is not None or gen_c2 is not None:
+            tcs_gen[:, j] = _eval_fit_models(c_gen[..., j].T,
+                                             l_gen, out['estimator'])
+            # print('gen', np.mean(tcs_gen[:, j]), tcs_gen[:, j])
     if mean:
         tcs = np.mean(tcs, axis=0)
-    return tcs
+        tcs_gen = np.mean(tcs_gen, axis=0)
+    if gen_c1 is not None or gen_c2 is not None:
+        out = (tcs, tcs_gen)
+    else:
+        out = tcs
+    return out
 
 def neural_format(c, pop=False):
     lens = np.ones(len(c[0]))*np.inf
