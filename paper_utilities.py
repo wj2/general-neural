@@ -49,8 +49,10 @@ class Figure:
         self.panel_keys = tuple(m for m in dir(self)
                                 if re.match('panel_.*', m) is not None)
 
-    def make_panels(self):
-        list(getattr(self, pk)() for pk in self.panel_keys)
+    def make_panels(self, panel_keys=None):
+        if panel_keys is None:
+            panel_keys = self.panel_keys
+        list(getattr(self, pk)() for pk in panel_keys)
         
     def make_gss(self):
         pass
