@@ -6,6 +6,7 @@ import re
 import shutil
 import scipy.io as sio
 import scipy.linalg as spla
+import scipy.stats as sts
 import pystan as ps
 import pickle
 import itertools as it
@@ -66,6 +67,34 @@ class HiddenPrints:
     def __exit__(self, exc_type, exc_val, exc_tb):
         sys.stdout.close()
         sys.stdout = self._original_stdout
+
+class MultivariateUniform(object):
+
+    def __init__(self, n_dims, bounds):
+        bounds = np.array(bounds)
+        if len(bounds.shape) == 1:
+            bounds = np.expand_dims(bounds, 0)
+        if bounds.shape[0] == 1:
+            bounds = np.repeat(bounds, n_dims, axis=0)
+        if bounds.shape[0] != n_dims:
+            raise IOError('too many or too few bounds provided')
+        self.n_dims = n_dims
+        self.dim = n_dims
+        self.bounds = bounds
+        self.distr = sts.uniform(0, 1)
+        self.mags = np.expand_dims(self.bounds[:, 1] - self.bounds[:, 0], 0)
+        self.mean = np.mean(bounds, axis=1)
+
+    def get_indiv_distributions(self):
+        sd_list = list(sts.uniform(b[0], self.mags[0, i])
+                       for i, b in enumerate(self.bounds))
+        return sd_list
+
+    def rvs(self, size=None):
+        if size is None:
+            size = 1
+        samps = self.distr.rvs((size, self.n_dims))
+        return samps*self.mags + self.bounds[:, 0:1].T
 
 def get_stan_summary_col(summary, col):
     col_names = summary['summary_colnames']

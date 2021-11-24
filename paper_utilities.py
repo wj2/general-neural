@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import general.plotting_styles as gps
 import general.utility as u
 import os
+import re
 
 def split_gridspec(n_rows, start, end, spacing):
     free_space = (end - start) - (n_rows - 1)*spacing
@@ -45,7 +46,12 @@ class Figure:
         else:
             self.data = data
         self.make_gss()
+        self.panel_keys = tuple(m for m in dir(self)
+                                if re.match('panel_.*', m) is not None)
 
+    def make_panels(self):
+        list(getattr(self, pk)() for pk in self.panel_keys)
+        
     def make_gss(self):
         pass
 
