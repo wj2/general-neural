@@ -19,6 +19,20 @@ monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May',
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
 
+def arg_list_decorator(func, squeeze=False):
+    def arg_list_func(*args, force=False, **kwargs):
+        new_args = []
+        for a in args:
+            if check_list(a) and not force:
+                new_args.append(a)
+            else:
+                new_args.append((a,))
+        out = func(*new_args, **kwargs)
+        if squeeze:
+            out = np.squeeze(out)
+        return out
+    return arg_list_func        
+
 def merge_params(args, conf):
     for k, v in vars(args):
         rv = conf.get(k)
@@ -34,6 +48,28 @@ def merge_params_dict(args, d):
         if rv is not None:
             setattr(args, k, rv)
     return args
+
+def check_list(x):
+    try:
+        len(x)
+        ret = True
+    except TypeError:
+        ret = False
+    return ret
+
+class MultiBernoulli:
+
+    def __init__(self, p, dim, **kwargs):
+        self.distr = sts.bernoulli(p, **kwargs)
+        self.dim = dim
+
+    def rvs(self, shape):
+        try:
+            len(shape)
+        except TypeError:
+            shape = (shape,)
+        full_shape = shape + (self.dim,)
+        return self.distr.rvs(full_shape)
 
 class ConfigParserColor(configparser.ConfigParser):
 
@@ -342,6 +378,14 @@ def make_unit_vector(v):
     # else:
     #     v_norm = v
     return np.squeeze(v_norm)
+
+def get_min_max(*args):
+    mins = []
+    maxs = []
+    for arg in args:
+        mins.append(np.nanmin(arg))
+        maxs.append(np.nanmax(arg))
+    return np.nanmin(mins), np.nanmax(maxs)
 
 def demean_unit_std(data, collapse_dims=(), axis=0, sig_eps=.00001):
     mask_shape = np.array(data.shape)
