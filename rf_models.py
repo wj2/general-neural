@@ -217,7 +217,7 @@ def get_pwr_fi_by_param(n_units, wid, dims, scale=1):
 
 def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-3,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
-                 n_ws=100):
+                 n_ws=100, n_iters=10, T=.35, basinhop=True):
     max_pwr = max_snr*sigma_n
     def _min_func(w):
         w = w[0]
@@ -229,24 +229,28 @@ def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-3,
         loss = -fi[0, 0] + lambda_deviation*np.sqrt(fi_var[0, 0])
         return loss 
 
-    pre_ws = np.linspace(eps, 1, n_ws)
-    fis = list(_min_func((w_i,)) for w_i in pre_ws)
-    peaks, _ = sig.find_peaks(fis)
-    if len(peaks) == 0:
-        starting_ws = (.5,)
+    if basinhop:
+        minimizer_kwargs = {'bounds':((eps, 1),)}
+        res = sopt.basinhopping(_min_func, (.5,), niter=n_iters,
+                                minimizer_kwargs=minimizer_kwargs,
+                                T=T)
+        w_opt = res.x[0]
     else:
-        starting_ws = pre_ws[peaks]
-    candidate_ws = np.zeros(len(starting_ws))
-    candidate_loss = np.zeros_like(candidate_ws)
-    for i, w_i in enumerate(starting_ws):
-        res = sopt.minimize(_min_func, (w_i,), bounds=((eps, 1),))
-        candidate_ws[i] = res.x[0]
-        candidate_loss[i] = res.fun
-    w_opt = candidate_ws[np.argmin(candidate_loss)]
-    # minimizer_kwargs = {'bounds':((eps, 1),)}
-    # res = sopt.basinhopping(_min_func, (.5,), niter=5,
-    #                         minimizer_kwargs=minimizer_kwargs,
-    #                         T=.5)
+        pre_ws = np.linspace(eps, 1, n_ws)
+        fis = list(_min_func((w_i,)) for w_i in pre_ws)
+        peaks, _ = sig.find_peaks(fis)
+        if len(peaks) == 0:
+            starting_ws = (.5,)
+        else:
+            starting_ws = pre_ws[peaks]
+        candidate_ws = np.zeros(len(starting_ws))
+        candidate_loss = np.zeros_like(candidate_ws)
+        for i, w_i in enumerate(starting_ws):
+            res = sopt.minimize(_min_func, (w_i,), bounds=((eps, 1),))
+            candidate_ws[i] = res.x[0]
+            candidate_loss[i] = res.fun
+        w_opt = candidate_ws[np.argmin(candidate_loss)]
+
     pwr_pre = random_uniform_pwr(n_units, w_opt, dims, scale=1)
     rescale_opt = np.sqrt(total_pwr/pwr_pre)
     fi = random_uniform_fi(n_units, w_opt, dims, scale=rescale_opt,
