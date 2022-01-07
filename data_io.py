@@ -382,7 +382,7 @@ class Dataset(object):
                      repl_nan=False, impute_missing=False,
                      ret_pops=False, shuffle_trials=False,
                      decode_m1=None, decode_m2=None, decode_tzf=None,
-                     **kwargs):
+                     regions=None, **kwargs):
         if params is None:
             # params = {'class_weight':'balanced'}
             params = {}
@@ -403,40 +403,46 @@ class Dataset(object):
             out1 = cat1.get_populations(winsize, begin, end, stepsize,
                                         skl_axes=True, repl_nan=repl_nan,
                                         time_zero_field=time_zero_field,
-                                        shuffle_trials=shuffle_trials)
+                                        shuffle_trials=shuffle_trials,
+                                        regions=regions)
             out2 = cat2.get_populations(winsize, begin, end, stepsize,
                                         skl_axes=True, repl_nan=repl_nan,
                                         time_zero_field=time_zero_field,
-                                        shuffle_trials=shuffle_trials)
+                                        shuffle_trials=shuffle_trials,
+                                        regions=regions)
             if decode_m1 is not None:
                 dec1 = dec_data_c1.get_populations(
                     winsize, begin, end, stepsize, skl_axes=True,
                     repl_nan=repl_nan, time_zero_field=decode_tzf,
-                    shuffle_trials=shuffle_trials)[0]
+                    shuffle_trials=shuffle_trials, regions=regions)[0]
             if decode_m2 is not None:
                 dec2 = dec_data_c2.get_populations(
                     winsize, begin, end, stepsize, skl_axes=True,
                     repl_nan=repl_nan, time_zero_field=decode_tzf,
-                    shuffle_trials=shuffle_trials)[0]
+                    shuffle_trials=shuffle_trials, regions=regions)[0]
         elif 'psth' in self:
             out1 = cat1.get_psth(winsize, begin, end, 
                                  skl_axes=True, repl_nan=repl_nan,
                                  time_zero_field=time_zero_field,
-                                 shuffle_trials=shuffle_trials)
+                                 shuffle_trials=shuffle_trials,
+                                 regions=regions)
             out2 = cat2.get_psth(winsize, begin, end, 
                                  skl_axes=True, repl_nan=repl_nan,
                                  time_zero_field=time_zero_field,
-                                 shuffle_trials=shuffle_trials)
+                                 shuffle_trials=shuffle_trials,
+                                 regions=regions)
             if decode_m1 is not None:
                 dec1 = dec_data_c1.get_psth(
                     winsize, begin, end, skl_axes=True,
                     repl_nan=repl_nan, time_zero_field=decode_tzf,
-                    shuffle_trials=shuffle_trials)[0]
+                    shuffle_trials=shuffle_trials,
+                    regions=regions)[0]
             if decode_m2 is not None:
                 dec2 = dec_data_c2.get_psth(
                     winsize, begin, end, skl_axes=True,
                     repl_nan=repl_nan, time_zero_field=decode_tzf,
-                    shuffle_trials=shuffle_trials)[0]
+                    shuffle_trials=shuffle_trials,
+                    regions=regions)[0]
         else:
             raise TypeError('this Dataset has no associated neural data')
         pop1, xs = out1

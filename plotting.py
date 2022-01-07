@@ -46,6 +46,33 @@ def plot_single_units(xs, sus, labels, colors=None, style=(), show=False,
         plt.show(block=False)
     return fs
 
+def axs_adder(func, rows, cols, **ax_kwargs):
+    if rows == 1 and cols == 1:
+        axs_wrapper = ax_adder(func)
+    else:        
+        def axs_wrapper(*args, axs=None, fwid=3, **kwargs):
+            if axs is None:
+                f, axs = plt.subplots(rows, cols, figsize=(fwid*cols, fwid*rows),
+                                      **ax_kwargs)
+            out = func(*args, axs=axs, **kwargs)
+            if out is None:
+                new_out = axs
+            else:
+                new_out = (out, axs)
+            return new_out
+    return axs_wrapper
+
+def ax_adder(func):
+    def ax_wrapper(*args, ax=None, fwid=3, **kwargs):
+        if ax is None:
+            f, ax = plt.subplots(1, 1, figsize=(fwid, fwid))
+        out = func(*args, ax=ax, **kwargs)
+        if out is None:
+            new_out = ax
+        else:
+            new_out = (out, ax)
+        return new_out
+    return ax_wrapper
 
 def plot_population_average(xs, sus, labels, colors=None, style=(),
                             errorbar=True, alpha=.5, trial_color=(.8, .8, 8),

@@ -52,7 +52,7 @@ def merge_params_dict(args, d):
 def check_list(x):
     try:
         len(x)
-        ret = True
+        ret = type(x) is not str
     except TypeError:
         ret = False
     return ret

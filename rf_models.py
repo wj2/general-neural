@@ -2,10 +2,15 @@
 import functools as ft
 import numpy as np
 import scipy.stats as sts
+import scipy.special as ss
 import matplotlib.pyplot as plt
 from matplotlib import patches
 import itertools as it
+import scipy.optimize as sopt
+import scipy.integrate as sint
+import scipy.signal as sig
 
+import general.utility as u
 
 def get_population_cents_helper(ind, rf_cents, spaces, rfsizes, offsets, cents):
     for k in range(int(spaces[ind])):
@@ -186,6 +191,236 @@ def eval_ramp_vector_deriv(coords, extent, scale, baseline, sub_dim=None):
                        sub_dim=sub_dim)
     return r
 
+def get_random_uniform_fill(n_units, input_distributions, volume_factor=3,
+                            wid=None):
+    """ not proper for elongated input spaces """
+    if wid is None:
+        vol = np.product(list(np.diff(distr.interval(1))
+                              for distr in input_distributions))
+        wid = volume_factor*vol/n_units
+    means_all = np.zeros((n_units, len(input_distributions)))
+    wids_all = np.ones((n_units, len(input_distributions)))*(wid**2)
+    for i, distr in enumerate(input_distributions):
+        means_all[:, i] = distr.rvs(n_units)
+    return means_all, wids_all
+
+@u.arg_list_decorator
+def get_pwr_fi_by_param(n_units, wid, dims, scale=1):
+    out_pwr = np.zeros((len(n_units), len(wid), len(dims), len(scale)))
+    out_fi = np.zeros_like(out_pwr)
+    for (i, j, k, l) in u.make_array_ind_iterator(out_pwr.shape):
+        nu, w, d, s = n_units[i], wid[j], dims[k], scale[l]
+        out_pwr[i, j, k, l] = random_uniform_pwr(nu, w, d, scale=s)
+        fim = random_uniform_fi(nu, w, d, scale=s)
+        out_fi[i, j, k, l] = fim[0, 0]
+    return out_pwr, out_fi
+
+def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-3,
+                 volume_mult=2, lambda_deviation=2, ret_min_max=False,
+                 n_ws=100):
+    max_pwr = max_snr*sigma_n
+    def _min_func(w):
+        w = w[0]
+        pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
+        rescale = np.sqrt(total_pwr/pwr_pre)
+        fi = random_uniform_fi(n_units, w, dims, scale=rescale)
+        fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
+        pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
+        loss = -fi[0, 0] + lambda_deviation*np.sqrt(fi_var[0, 0])
+        return loss 
+
+    pre_ws = np.linspace(eps, 1, n_ws)
+    fis = list(_min_func((w_i,)) for w_i in pre_ws)
+    peaks, _ = sig.find_peaks(fis)
+    if len(peaks) == 0:
+        starting_ws = (.5,)
+    else:
+        starting_ws = pre_ws[peaks]
+    candidate_ws = np.zeros(len(starting_ws))
+    candidate_loss = np.zeros_like(candidate_ws)
+    for i, w_i in enumerate(starting_ws):
+        res = sopt.minimize(_min_func, (w_i,), bounds=((eps, 1),))
+        candidate_ws[i] = res.x[0]
+        candidate_loss[i] = res.fun
+    w_opt = candidate_ws[np.argmin(candidate_loss)]
+    # minimizer_kwargs = {'bounds':((eps, 1),)}
+    # res = sopt.basinhopping(_min_func, (.5,), niter=5,
+    #                         minimizer_kwargs=minimizer_kwargs,
+    #                         T=.5)
+    pwr_pre = random_uniform_pwr(n_units, w_opt, dims, scale=1)
+    rescale_opt = np.sqrt(total_pwr/pwr_pre)
+    fi = random_uniform_fi(n_units, w_opt, dims, scale=rescale_opt,
+                           print_=False)
+    fi_var = random_uniform_fi_var(n_units, w_opt, dims, scale=rescale_opt)
+    pwr = random_uniform_pwr(n_units, w_opt, dims, scale=rescale_opt)
+    if ret_min_max:
+        fi = fi - lambda_deviation*np.sqrt(fi_var)
+    return fi, fi_var, pwr, w_opt, rescale_opt
+
+def random_uniform_pwr(n_units, wid, dims, scale=1):
+    a = scale**2
+    b = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
+    if u.check_list(wid):
+        c = np.product(b)
+    else:
+        c = b**dims
+    return n_units*a*c
+
+def random_uniform_fi(n_units, wid, dims, scale=1, sigma_n=1, print_=False):
+    fi = np.zeros((dims, dims))
+    b_pre = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
+    for i in range(dims):
+        if u.check_list(wid):
+            mask = np.arange(dims) != i
+            b = np.product(b_pre[mask])
+            wid_i = wid[i]
+        else:
+            b = b_pre**(dims - 1)
+            wid_i = wid
+        wid_i2 = wid_i**2
+        a = n_units*(scale**2)/(sigma_n*wid_i2**2)
+        c = .5*wid_i2*(np.sqrt(np.pi)*wid_i*ss.erf(1/wid_i)
+                       - 2*np.exp(-1/wid_i2))
+        d = wid_i2*(wid_i2 - (wid_i2 + 1)*np.exp(-1/wid_i2))
+        fi[i, i] = a*b*(c - d)
+    if print_:
+        print('b: {}   c: {}   d: {}'.format(b, c, d))
+    return fi
+
+def _non_deriv_terms(wid, m):
+    return (.5*np.sqrt(np.pi)*wid*(ss.erf((1 - m)/wid) + ss.erf(m/wid)))**2
+
+def _deriv_term(wid, m):
+    pref = .25/(wid**2)
+    ft = -2*m*np.exp(-(m**2)/(wid**2))
+    st = 2*(m - 1)*np.exp(-((m - 1)**2)/(wid**2))
+    tt = np.sqrt(np.pi)*wid*(ss.erf((1 - m)/wid) + ss.erf(m/wid))
+    return (pref*(ft + st + tt))**2
+
+def _cov_terms_func(wid, i, dims, m):
+    ndts = _non_deriv_terms(wid, m)
+    if u.check_list(wid):
+        mask = np.arange(dims) != i
+        ndt = np.product(ndts[mask])
+        wid_i = wid[i]
+    else:
+        ndt = ndts**(dims - 1)
+        wid_i = wid
+    dt = _deriv_term(wid_i, m)
+    return (ndt*dt)**2
+
+def integrate_m(wid, i, dims):
+    out = []
+    if u.check_list(wid):
+        for j in range(dims):
+            if i == j:
+                f = ft.partial(_deriv_term, wid[j])
+            else:
+                f = ft.partial(_non_deriv_terms, wid[j])
+            v, err = sint.quad(f, 0, 1)
+            out.append(v)
+        var = np.product(out)
+    else:
+        f = ft.partial(_deriv_term, wid)
+        dt, err = sint.quad(f, 0, 1)
+        f = ft.partial(_non_deriv_terms, wid)
+        ndt, err = sint.quad(f, 0, 1)
+        var = dt*(ndt**(dims - 1))        
+    return var, 0
+
+def _full_cov_terms(wid, i, dims, *zs):
+    zs = np.array(zs)
+    zs_m = zs[:dims]
+    zs_n = zs[dims:2*dims]
+    mu = zs[2*dims:]
+    non_deriv = np.exp(-((zs_m - mu)**2 + (zs_n - mu)**2)/(wid**2))
+    t1 = np.product(non_deriv)
+    if u.check_list(wid):
+        wid_i = wid[i]
+    else:
+        wid_i = wid
+    t2 = ((zs_m[i] - mu[i])**2)*((zs_n[i] - mu[i])**2)/(wid_i**8)
+    return t1*t2
+
+def full_integrate_m(wid, i, dims):
+    f = ft.partial(_full_cov_terms, wid, i, dims)
+    ranges = ((0, 1),)*(3*dims)
+    val, err = sint.nquad(f, ranges)
+    return val, err
+
+# def _wid_irrel_integ(wid, n_samps=1000):
+#     rng = np.random.default_rng()
+#     diff_samps = np.diff(rng.uniform(0, 1, size=(n_samps, 2)), axis=1)**2
+#     return np.mean(np.exp(-2*diff_samps/wid**2), axis=0)
+
+def _wid_irrel_integ(wid, n_samps=1000):
+    func = lambda diff: (2 - 2*diff)*np.exp(-2*diff**2/wid**2)
+    out, err = sint.quad(func, 0, 1)
+    return out
+
+def _wid_rel_integ(wid, n_samps=1000):
+    func = lambda diff: (2 - 2*diff)*(diff**4)*np.exp(-2*diff**2/wid**2)/(wid**4)
+    out, err = sint.quad(func, 0, 1)
+    return out
+
+def _wid_full_integ(wid):
+    wid_i = wid[0]
+    wid_j1 = wid[1]
+    wid_j2 = wid[2]
+    def func(z_i, z_j1, z_j2):
+        out_i = (2 - 2*z_i)*(z_i**4)*np.exp(-2*z_i**2/wid_i**2)/(wid_i**4)
+        out_j1 = (2 - 2*z_j1)*np.exp(-2*z_j1**2/wid_j1**2)
+        out_j2 = (2 - 2*z_j2)*np.exp(-2*z_j2**2/wid_j2**2)
+        return out_i*out_j1*out_j2
+    out, err = sint.tplquad(func, 0, 1, 0, 1, 0, 1)
+    
+    return out
+
+def _wid_full_integ2(wid):
+    wid_i = wid[0]
+    wid_j1 = wid[1]
+    wid_j2 = wid[2]
+    
+    def func(z_i, z_j1, z_j2):
+        out_i = (2 - 2*z_i)*((z_i**2)*np.exp(-z_i**2/wid_i**2)/(wid_i**2))**2
+        out_j1 = (2 - 2*z_j1)*np.exp(-z_j1**2/wid_j1**2)**2 
+        out_j2 = (2 - 2*z_j2)*np.exp(-z_j2**2/wid_j2**2)**2
+        return (out_i*out_j1*out_j2)
+    out, err = sint.tplquad(func, 0, 1, 0, 1, 0, 1)    
+    return out
+
+
+def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3):
+    fi_mean = random_uniform_fi(n_units, wid, dims, scale=scale,
+                                sigma_n=sigma_n)
+    fi_v2 = np.zeros_like(fi_mean)
+    b_pre = (np.sqrt(np.pi/2)*wid*ss.erf(np.sqrt(2)/wid)
+             - .5*(wid**2)*(1 - np.exp(-2/(wid**2))))
+    for i in range(dims):
+        if u.check_list(wid):
+            mask = np.arange(dims) != i
+            jt = np.product(b_pre[mask])
+            wid_i = wid[i]
+        else:
+            jt = b_pre**(dims - 1)
+            wid_i = wid
+        wid_i2 = wid_i**2
+        wid_i4 = wid_i**4
+        a = 3*np.sqrt(2*np.pi)*(wid_i**3)*ss.erf(np.sqrt(2)/wid_i)
+        b = 4*(3*wid_i2 + 4)*np.exp(-2/wid_i2)
+        c = 32*wid_i2
+
+        d = wid_i4 - (wid_i4 + 2*wid_i2 + 2)*np.exp(-2/wid_i2)
+        e = 4*wid_i2
+        fiv = (((a - b)/c) - (d/e))*jt
+        off_diag, err = integrate_m(wid, i, dims)
+        assert err < err_thr
+        pref = (scale**4)/((sigma_n**2))
+        fi_v2[i, i] = pref*((n_units)*fiv/wid_i4
+                            + (n_units - 1)*n_units*off_diag)
+    fi_var = fi_v2 - fi_mean**2
+    return fi_var
+
 def get_output_func_distribution_shapes(n_units_pd, input_distributions,
                                         wid_scaling=1):
     means = np.zeros((len(input_distributions), n_units_pd))
@@ -200,7 +435,9 @@ def get_output_func_distribution_shapes(n_units_pd, input_distributions,
         dm_p1 = np.zeros(n_units_pd)
         half = int(np.floor(n_units_pd/2))
         dm_p1[:half] = dm[:half]
-        dm_p1[half:] = dm[-half:]
+        dm_p1[-half:] = dm[-half:]
+        if n_units_pd % 2 == 1:
+            dm_p1[half] = dm[half]
         wids[j] = dm_p1
     means_all = np.array(list(it.product(*means)))
     wids_all = np.array(list(it.product(*wids)))
@@ -214,7 +451,8 @@ def get_distribution_gaussian_resp_func(n_units_pd, input_distributions, scale=1
                                                      baseline)
     return resp_func, d_resp_func, ms, ws
 
-def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None):
+def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None,
+                            titrate_pwr=None, n_samps=10000):
     cents = np.array(cents)
     sizes = np.array(sizes)
     if len(cents.shape) <= 1:
@@ -223,10 +461,21 @@ def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None):
         sizes = np.reshape(sizes, (-1, 1))
     cents = np.expand_dims(cents, axis=0)
     sizes = np.expand_dims(sizes, axis=0)
+    if titrate_pwr is not None:
+        rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,
+                         scale=1, baseline=baseline)
+        pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps))**2, axis=1))
+        new_scale = np.sqrt(scale/pwr)
+        rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,
+                         scale=new_scale, baseline=baseline)
+    else:
+        new_scale = scale
     rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,
-                     scale=scale, baseline=baseline)
+                     scale=new_scale, baseline=baseline)
     drfs = ft.partial(eval_gaussian_vector_deriv, cents=cents, sizes=sizes,
-                      scale=scale, baseline=baseline)
+                      scale=new_scale, baseline=baseline)
+    if titrate_pwr is not None:
+        pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps))**2, axis=1))
     return rfs, drfs
 
 def make_ramp_vector_rf(num, extent, scale, baseline, sub_dim=None):

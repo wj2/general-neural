@@ -33,6 +33,51 @@ def make_model_pipeline(model=None, norm=True, pca=None, **kwargs):
     pipe = sklpipe.make_pipeline(*pipe_steps)
     return pipe
 
+def apply_transform_tc(tc, trs):
+    out = np.zeros_like(tc)
+    out[:] = np.nan
+    for j in range(tc.shape[-1]):
+        trs_tc = trs.fit_transform(tc[..., j])
+        out[..., :trs_tc.shape[-1], j] = trs_tc
+    rm_dims = np.all(np.isnan(out), axis=(0, 2))
+    out = out[:, np.logical_not(rm_dims)] 
+    return out
+
+def skl_model_target_dim_tc(m, data, target, func=skms.cross_validate,
+                            keep_keys=None, out=None, **kwargs):
+    if keep_keys is None and out is None:
+        keep_keys = {'test_score':target.shape[-2],
+                     'estimator':target.shape[-2]}
+        out = {k:np.zeros(v) for k, v in keep_keys.items()}
+    for j in range(target.shape[-2]):
+        out_j = {k:v[j] for k, v in out.items()}
+        out_j = skl_model_target_tc(m, data, target[..., j, :], func=func,
+                                    out=out_j,
+                                    keep_keys=keep_keys, **kwargs)
+        for k, v in out_j.items():
+            out[k][j] = v
+    return out
+
+def skl_model_target_tc(m, data, target, func=skms.cross_validate,
+                        keep_keys=None, out=None, **kwargs):
+    if keep_keys is None and out is None:
+        keep_keys = {'test_score':(data.shape[1],),
+                     'estimator':target.shape[-2]}
+        out = {k:np.zeros(v) for k, v in keep_keys.items()}
+    for j in range(target.shape[-1]):
+        if np.all(np.isnan(target[..., j])) or np.all(np.isnan(data)):
+            out_j = {}
+        else:
+            out_j = func(m, data, target[..., j], **kwargs)
+        for k in keep_keys.keys():
+            v = out_j.get(k)
+            if v is not None and k == 'estimator':
+                coefs = np.array(list(v_i.coef_ for v_i in v))
+                out[k][j] = coefs
+            else:
+                out[k][j] = v
+    return out
+
 def apply_function_on_runs(func, args, data_ind=0, drunfield='datanum',
                            ret_index=False, **kwargs):
     data = args[data_ind]
