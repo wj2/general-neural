@@ -217,7 +217,7 @@ def get_pwr_fi_by_param(n_units, wid, dims, scale=1):
 
 def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-3,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
-                 n_ws=500, n_iters=10, T=.35, opt_kind='basinhop'):
+                 n_ws=1000, n_iters=10, T=.35, opt_kind='basinhop'):
     max_pwr = max_snr*sigma_n
     def _min_func(w):
         w = w[0]
