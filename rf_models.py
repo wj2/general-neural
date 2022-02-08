@@ -319,6 +319,7 @@ def _cov_terms_func(wid, i, dims, m):
     dt = _deriv_term(wid_i, m)
     return (ndt*dt)**2
 
+@ft.lru_cache(maxsize=None)
 def integrate_m(wid, i, dims):
     out = []
     if u.check_list(wid):
@@ -352,6 +353,7 @@ def _full_cov_terms(wid, i, dims, *zs):
     t2 = ((zs_m[i] - mu[i])**2)*((zs_n[i] - mu[i])**2)/(wid_i**8)
     return t1*t2
 
+@ft.lru_cache(maxsize=None)
 def full_integrate_m(wid, i, dims):
     f = ft.partial(_full_cov_terms, wid, i, dims)
     ranges = ((0, 1),)*(3*dims)
@@ -363,16 +365,19 @@ def full_integrate_m(wid, i, dims):
 #     diff_samps = np.diff(rng.uniform(0, 1, size=(n_samps, 2)), axis=1)**2
 #     return np.mean(np.exp(-2*diff_samps/wid**2), axis=0)
 
+@ft.lru_cache(maxsize=None)
 def _wid_irrel_integ(wid, n_samps=1000):
     func = lambda diff: (2 - 2*diff)*np.exp(-2*diff**2/wid**2)
     out, err = sint.quad(func, 0, 1)
     return out
 
+@ft.lru_cache(maxsize=None)
 def _wid_rel_integ(wid, n_samps=1000):
     func = lambda diff: (2 - 2*diff)*(diff**4)*np.exp(-2*diff**2/wid**2)/(wid**4)
     out, err = sint.quad(func, 0, 1)
     return out
 
+@ft.lru_cache(maxsize=None)
 def _wid_full_integ(wid):
     wid_i = wid[0]
     wid_j1 = wid[1]
@@ -386,6 +391,7 @@ def _wid_full_integ(wid):
     
     return out
 
+@ft.lru_cache(maxsize=None)
 def _wid_full_integ2(wid):
     wid_i = wid[0]
     wid_j1 = wid[1]
@@ -400,12 +406,17 @@ def _wid_full_integ2(wid):
     return out
 
 
-def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3):
+def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3,
+                          ret_pieces=False):
     fi_mean = random_uniform_fi(n_units, wid, dims, scale=scale,
                                 sigma_n=sigma_n)
     fi_v2 = np.zeros_like(fi_mean)
     b_pre = (np.sqrt(np.pi/2)*wid*ss.erf(np.sqrt(2)/wid)
              - .5*(wid**2)*(1 - np.exp(-2/(wid**2))))
+    if ret_pieces:
+        piece_fiv = np.zeros(dims)
+        piece_off = np.zeros(dims)
+        piece_fim = np.zeros(dims)
     for i in range(dims):
         if u.check_list(wid):
             mask = np.arange(dims) != i
@@ -426,10 +437,21 @@ def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3):
         off_diag, err = integrate_m(wid, i, dims)
         assert err < err_thr
         pref = (scale**4)/((sigma_n**2))
+        # look at off_diag and fiv for a large RF vs small RF
         fi_v2[i, i] = pref*((n_units)*fiv/wid_i4
                             + (n_units - 1)*n_units*off_diag)
+        if ret_pieces:
+            piece_fiv[i] = pref*n_units*fiv/wid_i4
+            piece_off[i] = pref*off_diag*n_units*(n_units - 1)
+            piece_fim[i] = fi_mean[i, i]**2
     fi_var = fi_v2 - fi_mean**2
-    return fi_var
+    out = fi_var
+    if ret_pieces:
+        out = (fi_var, np.mean(piece_fiv), np.mean(piece_off),
+               np.mean(piece_fim))
+    else:
+        out = fi_var
+    return out
 
 def get_output_func_distribution_shapes(n_units_pd, input_distributions,
                                         wid_scaling=1):
@@ -476,8 +498,6 @@ def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None,
                          scale=1, baseline=baseline)
         pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps))**2, axis=1))
         new_scale = np.sqrt(scale/pwr)
-        rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,
-                         scale=new_scale, baseline=baseline)
     else:
         new_scale = scale
     rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,

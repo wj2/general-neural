@@ -62,6 +62,19 @@ def axs_adder(func, rows, cols, **ax_kwargs):
             return new_out
     return axs_wrapper
 
+def ax_3d_adder(func):
+    def ax_wrapper(*args, ax=None, fwid=3, **kwargs):
+        if ax is None:
+            f = plt.figure(figsize=(fwid, fwid))
+            ax = f.add_subplots(1, 1, 1, projection='3d')
+        out = func(*args, ax=ax, **kwargs)
+        if out is None:
+            new_out = ax
+        else:
+            new_out = (out, ax)
+        return new_out
+    return ax_wrapper
+
 def ax_adder(func):
     def ax_wrapper(*args, ax=None, fwid=3, **kwargs):
         if ax is None:
@@ -669,6 +682,25 @@ def _get_pval(bs, comp_pt, comparator=np.greater):
         pt = 'p = {}'.format(p)
     return pt
 
+def _greater_than_zero(x):
+    return np.greater(x, 0)
+
+def print_sig_fraction(boot_arr, subj, text, func=_greater_than_zero, p_thr=.05,
+                       two_sided=True):
+    n_samps = boot_arr.shape[1]
+    n_feats = boot_arr.shape[0]
+    if two_sided:
+        factor = 2
+    else:
+        factor = 1
+    p_comp = 1 - p_thr/factor
+    prop = np.sum(func(boot_arr), axis=1)/n_samps
+    n_sig = np.sum(prop > p_comp)
+    s = '{} {}: {:0.2f}% ({}/{})'.format(subj, text, 100*n_sig/n_feats, n_sig,
+                                         n_feats)
+    print(s)
+    return s   
+
 def print_corr_conf95(as_list, bs_list, subj, text, n_boots=1000, func=np.corrcoef,
                       round_result=2, confounders=None, comp_pt=0,
                       comparator=np.greater):
@@ -685,6 +717,13 @@ def _get_sem_from_bound(err, use_lower=True, p_thr=.05):
     ind = 1 if use_lower else 0
     sem = err[ind]/factor
     return sem    
+
+def print_proportion(num, denom, subj, text, *args):
+    perc = 100*num/denom
+    rep_str = '{:0.2f}% ({}/{})'.format(perc, num, denom)
+    s = text.format(subj, rep_str, *args)
+    print(s)
+    return s
 
 def print_mean_conf95(bs_list, subj, text, n_boots=1000, func=np.nanmean,
                       preboot=False, round_result=2, comp_pt=0,
@@ -828,6 +867,12 @@ def format_glm_labels(labels, label_dict, subgroups=None, separator='-'):
             grouped_labels.append(tuple(new_labels[sg_i] for sg_i in sg))
         new_labels = grouped_labels
     return new_labels
+
+@ax_adder
+def scatter_error(x_data, y_data, x_sem, y_sem, ax=None, elinewidth=1, **kwargs):
+    ax.plot(x_data, y_data, 'o', **kwargs)
+    ax.errorbar(x_data, y_data, fmt='none', xerr=x_sem, yerr=y_sem,
+                elinewidth=elinewidth, **kwargs)
 
 def plot_stanglm_selectivity_scatter(ms, params, labels, ax=None, figsize=None,
                                      time_ind=None, param_funcs=None,

@@ -1277,6 +1277,13 @@ def get_img_names(codes, famfolder='/Users/wjj/Dropbox/research/uc/freedman/'
     cs = (codes - 1).astype(np.int)
     return all_imnames[cs]
 
+def get_circle_pts(n, inp_dim, r=1):
+    angs = np.linspace(0, 2*np.pi, n)
+    pts = np.stack((np.cos(angs), np.sin(angs),) +
+                   (np.zeros_like(angs),)*(inp_dim - 2), axis=1)
+    return r*pts
+
+
 def get_cent_codes(tcodes, imgcodebeg=56, imgcodeend=180):
     return tcodes[(tcodes >= imgcodebeg)*(tcodes <= imgcodeend)]
 

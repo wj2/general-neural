@@ -24,10 +24,10 @@ import general.nested_cv as ncv
 
 def make_model_pipeline(model=None, norm=True, pca=None, **kwargs):
     pipe_steps = []
-    if pca is not None:
-        pipe_steps.append(skd.PCA(pca))
     if norm:
         pipe_steps.append(skp.StandardScaler())
+    if pca is not None:
+        pipe_steps.append(skd.PCA(pca))
     if model is not None:
         pipe_steps.append(model())
     pipe = sklpipe.make_pipeline(*pipe_steps)
@@ -685,7 +685,7 @@ def _fold_model(cat1, cat2, leave_out=1, model=svm.SVC, norm=True, eps=.00001,
 
 def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC, 
                     stability=False, params=None, collapse_time=False,
-                    pre_pca=None, norm=False):
+                    pre_pca=None, norm=False, gen_samp=None, gen_labels=None):
     n_labels = float(len(testlabels))
     if params is None:
         params = {}
@@ -694,6 +694,7 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
     else:
         pc_shape = test.shape[2]
     percent_corr = np.zeros(pc_shape)
+    percent_corr_gen = np.zeros(pc_shape)
     svs = np.zeros((test.shape[2], test.shape[0]))
     inter = np.zeros((test.shape[2]))
     steps = []
@@ -713,12 +714,20 @@ def model_decode_tc(train, trainlabels, test, testlabels, model=svm.SVC,
         if stability:
             for j in range(train.shape[2]):
                 percent_corr[i, j] = pipe.score(test[:, :, j].T, testlabels)
+                if gen_samp is not None:
+                    percent_corr_gen[i, j] = pipe.score(gen_samp[..., i].T,
+                                                        gen_labels)
         else:
             percent_corr[i] = pipe.score(test[:, :, i].T, testlabels)
-        if pipe.steps[-1][1].kernel == 'linear':
-            svs[i] = pipe.coef_[0]
-            inter[i] = pipe.intercept_[0]
-    return percent_corr, svs, inter
+            if gen_samp is not None:
+                percent_corr_gen[i] = pipe.score(gen_samp[..., i].T, gen_labels)
+        if hasattr(pipe.steps[-1][1], 'coef_') and pre_pca is None:
+            svs[i] = pipe.steps[-1][1].coef_[0]
+            inter[i] = pipe.steps[-1][1].intercept_[0]
+    out = (percent_corr, svs, inter)
+    if gen_samp is not None:
+        out = out + (percent_corr_gen,)
+    return out
 
 
 def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
@@ -1135,14 +1144,19 @@ def decode_skl(c1_train, c1_test, c2_train, c2_test, model=svm.SVC, params=None,
         out = tcs
     return out 
 
-def _combine_samples(*c_is):
+def _combine_samples(*c_is, norm_labels=False):
     data = []
     labels = []
+    if norm_labels:
+        label_val = np.linspace(-1, 1, len(c_is))
+    else:
+        label_val = np.arange(len(c_is))
     for i, c_i in enumerate(c_is):
         ci_flat = np.concatenate(tuple(c_i[:, i] for i in range(c_i.shape[1])),
                                  axis=1)
         data.append(ci_flat)
-        labels.append(np.ones(ci_flat.shape[1])*i)
+        labels.append(np.ones(ci_flat.shape[1])*label_val[i])
+    
     data_full = np.concatenate(data, axis=1)
     labels_full = np.concatenate(labels)
     return data_full, labels_full
@@ -1154,6 +1168,80 @@ def _eval_fit_models(data, labels, estimators):
     return out
 
 rand_splitter = skms.ShuffleSplit
+
+def fold_skl_multi(*cs, folds_n=20, model=svm.SVC, params=None, norm=True,
+                   shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
+                   impute_missing=False, verbose=False,
+                   rand_splitter=rand_splitter,
+                   time_accumulate=False, gen_cs=None,
+                   test_prop=None,
+                   **model_kwargs):
+    print(cs[0].shape)
+    if test_prop is None:
+        test_prop = 1/folds_n
+    if params is None:
+        params = model_kwargs
+    else:
+        model_kwargs.update(params)
+        params = model_kwargs
+    steps = []
+    if norm:
+        steps.append(skp.StandardScaler())
+    if impute_missing:
+        steps.append(skimp.SimpleImputer())
+    if pre_pca is not None:
+        steps.append(skd.PCA(n_components=pre_pca))
+    clf = model(**params)
+    steps.append(clf)
+    pipe = sklpipe.make_pipeline(*steps)
+
+    # c1 is shape (neurs, inner_conds, trials, time_points)
+    c_flat, labels = _combine_samples(*cs, norm_labels=True)
+    x_len = c_flat.shape[-1]
+    tcs = np.zeros((folds_n, x_len))
+    tcs_gen = np.zeros_like(tcs)
+    if gen_cs is not None and gen_cs[0] is not None:
+        c_gen, l_gen = _combine_samples(*gen_cs, norm_labels=True)
+    if shuffle:
+        np.random.shuffle(labels)
+    if rand_splitter is None:
+        splitter = folds_n
+    else:
+        splitter = rand_splitter(folds_n, test_size=test_prop)
+    if verbose:
+        print('--')
+        print(c_flat.shape)
+        print(splitter)
+    for j in range(x_len):
+        sk_cv = skms.cross_validate
+        if time_accumulate:
+            in_list = list(c_flat[..., k] for k in range(j + 1))
+            in_data = np.concatenate(in_list, axis=0).T
+        else:
+            in_data = c_flat[..., j].T
+        out = sk_cv(pipe, in_data, labels,
+                    cv=splitter, n_jobs=n_jobs,
+                    return_estimator=True)
+        tcs[:, j] = out['test_score']
+        # print('tcs', np.mean(tcs[:, j]), tcs[:, j])
+        if gen_cs is not None:
+            if time_accumulate:
+                gen_list = list(c_gen[..., k] for k in range(j + 1))
+                gen_data = np.concatenate(gen_list, axis=0).T
+            else:
+                gen_data = c_gen[..., j].T
+            tcs_gen[:, j] = _eval_fit_models(gen_data,
+                                             l_gen, out['estimator'])
+            # print('gen', np.mean(tcs_gen[:, j]), tcs_gen[:, j])
+    if mean:
+        tcs = np.mean(tcs, axis=0)
+        tcs_gen = np.mean(tcs_gen, axis=0)
+    if gen_cs is not None:
+        out = (tcs, tcs_gen)
+    else:
+        out = tcs
+    return out    
+
 def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
              shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
              impute_missing=False, verbose=False, rand_splitter=rand_splitter,
@@ -1166,7 +1254,6 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
     else:
         model_kwargs.update(params)
         params = model_kwargs
-    # c1 is shape (neurs, inner_conds, trials, time_points)
     x_len = c1.shape[-1]
     tcs = np.zeros((folds_n, x_len))
     tcs_gen = np.zeros_like(tcs)
@@ -1209,7 +1296,12 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
         tcs[:, j] = out['test_score']
         # print('tcs', np.mean(tcs[:, j]), tcs[:, j])
         if gen_c1 is not None or gen_c2 is not None:
-            tcs_gen[:, j] = _eval_fit_models(c_gen[..., j].T,
+            if time_accumulate:
+                gen_list = list(c_gen[..., k] for k in range(j + 1))
+                gen_data = np.concatenate(gen_list, axis=0).T
+            else:
+                gen_data = c_gen[..., j].T
+            tcs_gen[:, j] = _eval_fit_models(gen_data,
                                              l_gen, out['estimator'])
             # print('gen', np.mean(tcs_gen[:, j]), tcs_gen[:, j])
     if mean:
@@ -1302,24 +1394,46 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
              format_=True, equal_fold=False, multi_cond=False,
              use_avail_trials=True, norm=True, reduce_required=True,
              latency=False, sample_pseudo=False, n_pseudo=200,
-             test_pseudo=.1, rand_splitter=rand_splitter, **kwargs):
+             test_pseudo=.1, rand_splitter=rand_splitter, cat1_gen=None,
+             cat2_gen=None, **kwargs):
     if format_:
         if not multi_cond:
             cat1 = (cat1,)
             cat2 = (cat2,)
-        out = _svm_organize(cat1, cat2, require_trials=require_trials,
+            cat_gens = tuple((cg_i,) for cg_i in (cat1_gen, cat2_gen)
+                             if cg_i is not None)
+            cats_all = (c for c in (cat1, cat2) + cat_gens)
+        else:
+            cats_all = (c for c in (cat1, cat2, cat1_gen, cat2_gen)
+                        if c is not None)
+        out = _svm_organize(*cats_all, require_trials=require_trials,
                             use_avail_trials=use_avail_trials,
                             reduce_required=reduce_required)
-        cat1_f, cat2_f, require_trials, x_len = out
+        require_trials, x_len = out[-2:]
+        cat1_f, cat2_f = out[:2]
+        if len(out) > 4:
+            cat1_gen_f, cat2_gen_f = out[2:4]
+        else:
+            cat1_gen_f, cat2_gen_f = None, None
     else:
         if not multi_cond:
             cat1_f = np.array(cat1, dtype=object)
             cat1_f = np.expand_dims(cat1_f, 1)
             cat2_f = np.array(cat2, dtype=object)
             cat2_f = np.expand_dims(cat2_f, 1)
+            if cat1_gen is not None:
+                cat1_gen_f = np.expand_dims(np.array(cat1_gen, dtype=object), 1)
+            else:
+                cat1_gen_f = None 
+            if cat2_gen is not None:
+                cat2_gen_f = np.expand_dims(np.array(cat2_gen, dtype=object), 1)
+            else:
+                cat2_gen_f = None
         else:
             cat1_f = cat1
             cat2_f = cat2
+            cat1_gen_f = cat1_gen
+            cat2_gen_f = cat2_gen
         x_len = cat2_f[0, 0].shape[1]
         if use_avail_trials:
             c1_min = min(len(c1_i) for c1_i in cat1_f)
@@ -1329,7 +1443,18 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
                             for c1_i in cat1_f)
     c2_neur_mins = list(min(c2_ij.shape[0] for c2_ij in c2_i)
                         for c2_i in cat2_f)
-    neur_mins = np.min((c1_neur_mins, c2_neur_mins), axis=0)
+    if cat1_gen_f is not None:
+        c1_g_neur_mins = list(min(c1_ij.shape[0] for c1_ij in c1_i)
+                              for c1_i in cat1_gen_f)
+    else:
+        c1_g_neur_mins = None
+    if cat2_gen_f is not None:
+        c2_g_neur_mins = list(min(c2_ij.shape[0] for c2_ij in c2_i)
+                              for c2_i in cat2_gen_f)
+    else:
+        c2_g_neur_mins = None
+    min_list = (c1_neur_mins, c2_neur_mins, c1_g_neur_mins, c2_g_neur_mins)
+    neur_mins = np.min(list(c for c in min_list if c is not None), axis=0)
     folds_n, leave_out = _compute_folds_n(require_trials*cat1_f.shape[1],
                                           leave_out, equal_fold)
     if sample_pseudo:
@@ -1341,33 +1466,64 @@ def decoding(cat1, cat2, model=svm.SVC, leave_out=1, require_trials=15,
     ms = np.zeros((resample, folds_n, x_len, cat1_f.shape[0]))
     inter = np.zeros((resample, folds_n, x_len))
     tcs = np.zeros(tcs_shape)
+    tcs_gen = np.zeros_like(tcs)
     for i in range(resample):
         if sample_pseudo:
             cat1_train, cat1_test = sample_trials_pseudo(cat1_f, 
                                                          n_samples=n_pseudo,
                                                          test_prop=test_pseudo,
                                                          neur_mins=neur_mins)
+            if cat1_gen_f is not None:
+                cat1_gen_samp, _ = sample_trials_pseudo(cat1_gen_f,
+                                                        n_samples=n_pseudo,
+                                                        neur_mins=neur_mins)
+            else:
+                cat1_gen_samp = None
+                                                     
             cat2_train, cat2_test = sample_trials_pseudo(cat2_f, 
                                                          n_samples=n_pseudo,
                                                          test_prop=test_pseudo,
                                                          neur_mins=neur_mins)
+            if cat2_gen_f is not None:
+                cat2_gen_samp, _ = sample_trials_pseudo(cat2_gen_f,
+                                                        n_samples=n_pseudo,
+                                                        neur_mins=neur_mins)
+            else:
+                cat2_gen_samp = None
             out = decode_pseudo(cat1_train, cat1_test, cat2_train, cat2_test,
                                 model=model, params=params, norm=norm,
-                                shuffle=shuff_labels)
-            tcs[i], ms[i], inter[i] = out
+                                shuffle=shuff_labels, cat1_gen=cat1_gen_samp,
+                                cat2_gen=cat2_gen_samp)
+            tcs[i], ms[i], inter[i] = out[:-1]
+            if cat1_gen_samp is not None or cat2_gen_samp is not None:
+                tcs_gen[i] = out[-1]
         else:
             cat1_samp = sample_trials_svm(cat1_f, require_trials, with_replace)
+            if cat1_gen_f is not None:
+                cat1_gen_samp = sample_trials_svm(cat1_gen_f, require_trials,
+                                                  True)
+            else:
+                cat1_gen_samp = None
             cat2_samp = sample_trials_svm(cat2_f, require_trials, with_replace)
+            if cat2_gen_f is not None:
+                cat2_gen_samp = sample_trials_svm(cat2_gen_f, require_trials,
+                                                  True)
+            else:
+                cat2_gen_samp = None
             if not (stability or collapse_time):
                 tcs[i] = fold_skl(cat1_samp, cat2_samp, folds_n, model,
-                                  params=params, norm=norm, shuffle=shuff_labels)
+                                  params=params, norm=norm, shuffle=shuff_labels,
+                                  gen_c1=cat1_gen_samp, gen_c2=cat2_gen_samp)
             else:
                 out = _fold_model(cat1_samp, cat2_samp, leave_out, model=model,
                                   shuff_labels=shuff_labels, stability=stability, 
                                   params=params, collapse_time=collapse_time,
                                   equal_fold=equal_fold, **kwargs)
                 tcs[i], _, _, ms[i], inter[i] = out
-    return tcs, cat1_f, cat2_f, ms, inter
+    out = (tcs, cat1_f, cat2_f, ms, inter)
+    if cat1_gen_f is not None or cat2_gen_f is not None:
+        out = out + (tcs_gen,)
+    return out
 
 def sample_trials_pseudo(tf, n_samples=100, test_prop=.1, neur_mins=None):
     n_samples_test = int(np.ceil(n_samples*test_prop))
@@ -1403,7 +1559,7 @@ def sample_trials_pseudo(tf, n_samples=100, test_prop=.1, neur_mins=None):
     return train_data, test_data
 
 def decode_pseudo(c1_tr, c1_te, c2_tr, c2_te, norm=True, shuffle=False,
-                  pre_pca=.99, **kwargs):
+                  pre_pca=.99, cat1_gen=None, cat2_gen=None, **kwargs):
     train_samp = np.concatenate((c1_tr, c2_tr),
                                 axis=1)
     test_samp = np.concatenate((c1_te, c2_te),
@@ -1416,6 +1572,16 @@ def decode_pseudo(c1_tr, c1_te, c2_tr, c2_te, norm=True, shuffle=False,
                                           dtype=int), 
                                  np.ones(c2_te.shape[1],
                                          dtype=int)))
+    if cat1_gen is not None or cat2_gen is not None:
+        gen_samp = np.concatenate(list(cg for cg in (cat1_gen, cat2_gen)
+                                       if cg is not None),
+                                  axis=1)
+        gen_labels = np.concatenate(list(np.ones(cg.shape[1])*i
+                                         for i, cg in enumerate((cat1_gen, cat2_gen))
+                                         if cg is not None))
+    else:
+        gen_samp = None
+        gen_labels = None
     # steps = []
     # if pre_pca is not None:
     #     steps.append(skd.PCA(n_components=pre_pca))
@@ -1438,7 +1604,8 @@ def decode_pseudo(c1_tr, c1_te, c2_tr, c2_te, norm=True, shuffle=False,
         np.random.shuffle(trainlabels)
         # np.random.shuffle(testlabels)
     out = model_decode_tc(train_samp, trainlabels, test_samp, testlabels,
-                          norm=norm, pre_pca=pre_pca, **kwargs)
+                          norm=norm, pre_pca=pre_pca, gen_samp=gen_samp,
+                          gen_labels=gen_labels, **kwargs)
     return out
     
 

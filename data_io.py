@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import re
 from sklearn import svm
+import sklearn.linear_model as sklm
 import functools as ft
 
 import general.utility as u
@@ -111,6 +112,18 @@ def _convolve_psth(psth_tm, binsize, xs, causal_xs=False, binwidth=20):
         xs_adj = xs + cent_offset
         xs_adj = xs_adj[:out_len]
     return mult*smooth_psth, xs_adj
+
+def _format_for_svm(pops):
+    pop_format = []
+    neur_mins = []
+    for pop in pops:
+        pop_format.extend(list(neur[0] for neur in pop))
+        cond_n = pop.shape[1]
+        neur_mins.extend(np.ones(pop.shape[0])*pop.shape[2])
+    neur_pop = np.expand_dims(np.array(pop_format, dtype=object), 1)
+    neur_mins = np.array(neur_mins).astype(int)
+    return neur_pop, neur_mins
+    
 
 class Dataset(object):
     
@@ -259,13 +272,15 @@ class Dataset(object):
             self.mask_pop_cache[key] = (data, pop, xs)
         return data, pop, xs
 
-    def get_psth(self, binsize=None, begin=None, end=None, 
+    def get_psth(self, binsize=None, begin=None, end=None, binstep=None,
                  skl_axes=False, accumulate=False, time_zero=None,
                  time_zero_field=None, combine_pseudo=False, min_trials_pseudo=10,
                  resample_pseudos=10, repl_nan=False, regions=None,
                  ret_no_spk=False, causal_timing=False, shuffle_trials=False):
         psths = self['psth']
         xs_all = self['psth_timing']
+        if regions is not None:
+            regions_all = self['neur_regions']
         outs = []
         n_trls = []
         for i, psth_l in enumerate(psths):
@@ -289,14 +304,24 @@ class Dataset(object):
                 time_mask = np.logical_and(xs_i < end, time_mask)
             psth_tm = np.zeros(psth.shape[:2]
                                + (np.sum(time_mask, axis=1)[0],))
-            for i, trl in enumerate(psth):
+            for k, trl in enumerate(psth):
                 for j, trl_ij in enumerate(trl):
-                    psth_tm[i, j] = trl_ij[time_mask[i]]
+                    psth_tm[k, j] = trl_ij[time_mask[k]]
             xs_reg = xs_i[0, time_mask[0]]
             if binsize is not None:
                 assert (binsize % psth_bs) == 0
                 psth_tm, xs_reg = _convolve_psth(psth_tm, binsize/psth_bs, xs_reg,
                                                  causal_xs=causal_timing)
+            if binstep is not None:
+                xs_0 = xs_reg - xs_reg[0]
+                xs_rem = np.mod(xs_0/binstep, 1)
+                step_mask = xs_rem == 0
+                psth_tm = psth_tm[..., step_mask]
+                xs_reg = xs_reg[step_mask]
+            if regions is not None and len(psth_tm) > 0:
+                regs = regions_all[i].iloc[0]
+                mask = np.isin(regs, regions)
+                psth_tm = psth_tm[:, mask]
             if shuffle_trials:
                 rng = np.random.default_rng()
                 list(rng.shuffle(psth_tm[:, i]) for i in range(psth_tm.shape[1]))
@@ -374,87 +399,268 @@ class Dataset(object):
 
     def get_ntrls(self):
         return list(len(o) for o in self['data'])
+
+    def regress_discrete_masks(self, masks, winsize, begin, end, stepsize,
+                               n_folds=20, model=sklm.Ridge,
+                               params=None, pre_pca=None, mean=False,
+                               shuffle=False, time_zero_field=None,
+                               pseudo=False, min_trials_pseudo=10,
+                               resample_pseudo=10, repl_nan=False,
+                               impute_missing=False, ret_pops=False,
+                               shuffle_trials=False, decode_masks=None,
+                               decode_tzf=None, regions=None, combine=False,
+                               **kwargs):
+        if params is None:
+            # params = {'class_weight':'balanced'}
+            params = {}
+            params.update(kwargs)
+        cats = list(self.mask(mask_i) for mask_i in masks)
+        if decode_tzf is None:
+            decode_tzf = time_zero_field
+        if decode_masks is not None:
+            dec_data = (self.mask(mask_i) for mask_i in decode_masks)
+        else:
+            decs = (None,)*len(cats)
+        outs = list(cat_i.get_neural_activity(winsize, begin, end, stepsize,
+                                              skl_axes=True, repl_nan=repl_nan,
+                                              time_zero_field=time_zero_field,
+                                              shuffle_trials=shuffle_trials,
+                                              regions=regions)
+                    for cat_i in cats)
+        if decode_masks is not None:
+            decs = list(cat_i.get_neural_activity(
+                winsize, begin, end, stepsize, skl_axes=True, repl_nan=repl_nan,
+                time_zero_field=decode_tzf, shuffle_trials=shuffle_trials,
+                regions=regions)
+                        for cat_i in dec_data)
+        xs = outs[0][1]
+        if pseudo:
+            trls_list = list(cat_i.get_ntrls() for cat_i in cats)
+            if decode_masks is not None:
+                trls_list = trls_list + list(cat_i.get_ntrls()
+                                             for cat_i in dec_data)
+            comb_n = combine_ntrls(*trls_list)
+            pops = list(self.make_pseudopop(pop_i, comb_n, min_trials_pseudo,
+                                            resample_pseudo, skl_axs=True,
+                                            same_n_trls=True)
+                        for pop_i, xs in outs)
+            if decode_masks is not None:
+                decs = list(self.make_pseudopop(dec_i, comb_n, min_trials_pseudo,
+                                                resample_pseudo, skl_axs=True,
+                                                same_n_trls=True)
+                            for dec_i, xs in outs)
+            else:
+                decs = (None,)*resample_pseudo
+        outs = np.zeros((len(pops[0]), n_folds, len(xs)))
+        outs_gen = np.zeros_like(outs)
+        for i in range(len(pops[0])):
+            if combine:
+                ps = list(np.concatenate((pops[j][i], decs[j][i]), axis=2)
+                          for j in range(len(pops)))
+                ds = None
+            else:
+                ps = list(pop_j[i] for pop_j in pops)
+                if decode_masks is not None:
+                    ds = list(pop_j[i] for pop_j in decs)
+                else:
+                    ds = None
+            out = na.fold_skl_multi(*ps, folds_n=n_folds, model=model, params=params, 
+                                    mean=mean, pre_pca=pre_pca, shuffle=shuffle,
+                                    impute_missing=(repl_nan or impute_missing),
+                                    gen_cs=ds)
+            if not combine and (decode_masks is not None):
+                outs[i] = out[0]
+                outs_gen[i] = out[1]
+            else:
+                outs[i] = out
+        if ret_pops:
+            out = (outs, xs, pops)
+            add = tuple(di for di in decs
+                        if di[0] is not None and not combine)
+            out = out + add
+        else:
+            out = (outs, xs)
+        if decode_masks is not None:
+            out = out + (outs_gen,)
+        return out
+
+    def get_neural_activity(self, winsize, begin, end, stepsize=None, **kwargs):
+        if 'spikeTimes' in self:
+            out = self.get_populations(winsize, begin, end, binstep=stepsize,
+                                       **kwargs)
+        elif 'psth' in self:
+            out = self.get_psth(winsize, begin, end, binstep=stepsize, **kwargs)
+        else:
+            raise TypeError('no neural data associated with this dataset')
+        return out
+    
+    def _get_dec_pops(self, winsize, begin, end, stepsize, *masks, 
+                      tzfs=None, repl_nan=False, shuffle_trials=True,
+                      regions=None):
+        try:
+            assert len(tzfs) == len(masks)
+        except:
+            tzfs = (tzfs,)*len(masks)
+        out_pops = []
+        for i, m in enumerate(masks):
+            if m is not None:
+                cat_m = self.mask(m)
+                out_m = cat_m.get_neural_activity(winsize, begin, end, stepsize,
+                                                  skl_axes=True,
+                                                  repl_nan=repl_nan,
+                                                  time_zero_field=tzfs[i],
+                                                  shuffle_trials=shuffle_trials,
+                                                  regions=regions)
+                pop_m, xs = out_m
+            else:
+                pop_m = (None,)*len(self.data)
+            out_pops.append(pop_m)
+        return xs, out_pops
+
+
+    
+            
+        # cat1 = self.mask(m1)
+        # cat2 = self.mask(m2)
+        # if decode_tzf is None:
+        #     decode_tzf = time_zero_field
+        # if decode_m1 is not None:
+        #     dec_data_c1 = self.mask(decode_m1)
+        # else:
+        #     dec1 = (None,)*len(cat1)
+        # if decode_m2 is not None:
+        #     dec_data_c2 = self.mask(decode_m2)
+        # else:
+        #     dec2 = (None,)*len(cat2)
+        # out1 = cat1.get_neural_activity(winsize, begin, end, stepsize,
+        #                                 skl_axes=True, repl_nan=repl_nan,
+        #                                 time_zero_field=time_zero_field,
+        #                                 shuffle_trials=shuffle_trials,
+        #                                 regions=regions)
+        # out2 = cat2.get_neural_activity(winsize, begin, end, stepsize,
+        #                                 skl_axes=True, repl_nan=repl_nan,
+        #                                 time_zero_field=time_zero_field,
+        #                                 shuffle_trials=shuffle_trials,
+        #                                 regions=regions)
+        # if decode_m1 is not None:
+        #     dec1 = dec_data_c1.get_neural_activity(
+        #         winsize, begin, end, stepsize, skl_axes=True,
+        #         repl_nan=repl_nan, time_zero_field=decode_tzf,
+        #         shuffle_trials=shuffle_trials, regions=regions)[0]
+        # if decode_m2 is not None:
+        #     dec2 = dec_data_c2.get_neural_activity(
+        #         winsize, begin, end, stepsize, skl_axes=True,
+        #         repl_nan=repl_nan, time_zero_field=decode_tzf,
+        #         shuffle_trials=shuffle_trials, regions=regions)[0]
+        # pop1, xs = out1
+        # pop2, xs = out2
+    
+    def decode_masks_upsample(self, m1, m2, winsize, begin, end, stepsize,
+                              model=svm.LinearSVC, params=None,
+                              pre_pca=None, mean=False, shuffle=False,
+                              time_zero_field=None, pseudo=False,
+                              min_trials_pseudo=10, resample_pseudo=10,
+                              repl_nan=False, impute_missing=False,
+                              ret_pops=False, shuffle_trials=False,
+                              decode_m1=None, decode_m2=None, decode_tzf=None,
+                              regions=None, combine=False, n_pseudo=500,
+                              **kwargs):
+        out = self._get_dec_pops(winsize, begin, end, stepsize,
+                                 m1, m2, decode_m1, decode_m2, 
+                                 tzfs=(time_zero_field, time_zero_field,
+                                       decode_tzf, decode_tzf),
+                                 repl_nan=repl_nan, regions=regions,
+                                 shuffle_trials=shuffle_trials)
+        xs, pops = out
+        pop1, pop2, dec1, dec2 = pops
+        if params is None:
+            params = {'class_weight':'balanced', 'max_iter':10000}
+            params.update(kwargs)            
+        
+        cat1_f, _ = _format_for_svm(pop1)
+        cat2_f, _ = _format_for_svm(pop2)
+        if dec1 is not None:
+            cat1_gen_f, _ = _format_for_svm(dec1)
+        else:
+            cat1_gen_f = None
+        if dec2 is not None:
+            cat2_gen_f, _ = _format_for_svm(dec2)
+        else:
+            cat2_gen_f = None
+            
+        out_dec = na.decoding(cat1_f, cat2_f, format_=False, multi_cond=True,
+                              sample_pseudo=True, resample=resample_pseudo,
+                              pre_pca=pre_pca, require_trials=min_trials_pseudo,
+                              cat1_gen=cat1_gen_f, cat2_gen=cat2_gen_f,
+                              model=model, params=params)
+        out = (out_dec[0], xs)
+        if ret_pops:
+            out = out + tuple(pops)
+        if dec1 is not None or dec2 is not None:
+            out = out + (out_dec[-1],)
+        return out
+
+    def make_pseudo_pops(self, winsize, begin, end, stepsize, *masks,
+                         tzfs=None, repl_nan=False, shuffle_trials=True,
+                         regions=None, min_trials=10, resamples=10,
+                         skl_axs=True, same_n_trls=True):
+        xs, pops = self._get_dec_pops(winsize, begin, end, stepsize, *masks,
+                                      tzfs=tzfs, repl_nan=repl_nan,
+                                      shuffle_trials=shuffle_trials,
+                                      regions=regions)
+        pops_pseudo = self.sample_pseudo_pops(*pops, min_trials=min_trials,
+                                              resamples=resamples,
+                                              skl_axs=skl_axs,
+                                              same_n_trls=same_n_trls)
+        return xs, pops_pseudo
+    
+    def sample_pseudo_pops(self, *pops, min_trials=10, resamples=10,
+                           skl_axs=True, same_n_trls=True):
+        trls_list = []
+        for pop in pops:
+            ci_n = list(pop_i.shape[2] for pop_i in pop)
+            trls_list.append(ci_n)
+        comb_n = combine_ntrls(*trls_list)
+        pops_pseudo = []
+        for pop in pops:
+            pop_i = self.make_pseudopop(pop, comb_n, min_trials,
+                                        resamples, skl_axs=skl_axs,
+                                        same_n_trls=same_n_trls)
+            pops_pseudo.append(pop_i)
+        return pops_pseudo        
     
     def decode_masks(self, m1, m2, winsize, begin, end, stepsize, n_folds=20,
-                     model=svm.SVC, params=None, pre_pca=None,
+                     model=svm.LinearSVC, params=None, pre_pca=None,
                      mean=False, shuffle=False, time_zero_field=None,
                      pseudo=False, min_trials_pseudo=10, resample_pseudo=10,
                      repl_nan=False, impute_missing=False,
                      ret_pops=False, shuffle_trials=False,
                      decode_m1=None, decode_m2=None, decode_tzf=None,
-                     regions=None, **kwargs):
+                     regions=None, combine=False, max_iter=10000,
+                     **kwargs):
+        out = self._get_dec_pops(winsize, begin, end, stepsize,
+                                 m1, m2, decode_m1, decode_m2, 
+                                 tzfs=(time_zero_field, time_zero_field,
+                                       decode_tzf, decode_tzf),
+                                 repl_nan=repl_nan, regions=regions,
+                                 shuffle_trials=shuffle_trials)
+        print(regions)
+        xs, pops = out
+        pop1, pop2, dec1, dec2 = pops
         if params is None:
-            # params = {'class_weight':'balanced'}
-            params = {}
-            params.update(kwargs)            
-        cat1 = self.mask(m1)
-        cat2 = self.mask(m2)
-        if decode_tzf is None:
-            decode_tzf = time_zero_field
-        if decode_m1 is not None:
-            dec_data_c1 = self.mask(decode_m1)
-        else:
-            dec1 = (None,)*len(cat1)
-        if decode_m2 is not None:
-            dec_data_c2 = self.mask(decode_m2)
-        else:
-            dec2 = (None,)*len(cat2)
-        if 'spikeTimes' in self:
-            out1 = cat1.get_populations(winsize, begin, end, stepsize,
-                                        skl_axes=True, repl_nan=repl_nan,
-                                        time_zero_field=time_zero_field,
-                                        shuffle_trials=shuffle_trials,
-                                        regions=regions)
-            out2 = cat2.get_populations(winsize, begin, end, stepsize,
-                                        skl_axes=True, repl_nan=repl_nan,
-                                        time_zero_field=time_zero_field,
-                                        shuffle_trials=shuffle_trials,
-                                        regions=regions)
-            if decode_m1 is not None:
-                dec1 = dec_data_c1.get_populations(
-                    winsize, begin, end, stepsize, skl_axes=True,
-                    repl_nan=repl_nan, time_zero_field=decode_tzf,
-                    shuffle_trials=shuffle_trials, regions=regions)[0]
-            if decode_m2 is not None:
-                dec2 = dec_data_c2.get_populations(
-                    winsize, begin, end, stepsize, skl_axes=True,
-                    repl_nan=repl_nan, time_zero_field=decode_tzf,
-                    shuffle_trials=shuffle_trials, regions=regions)[0]
-        elif 'psth' in self:
-            out1 = cat1.get_psth(winsize, begin, end, 
-                                 skl_axes=True, repl_nan=repl_nan,
-                                 time_zero_field=time_zero_field,
-                                 shuffle_trials=shuffle_trials,
-                                 regions=regions)
-            out2 = cat2.get_psth(winsize, begin, end, 
-                                 skl_axes=True, repl_nan=repl_nan,
-                                 time_zero_field=time_zero_field,
-                                 shuffle_trials=shuffle_trials,
-                                 regions=regions)
-            if decode_m1 is not None:
-                dec1 = dec_data_c1.get_psth(
-                    winsize, begin, end, skl_axes=True,
-                    repl_nan=repl_nan, time_zero_field=decode_tzf,
-                    shuffle_trials=shuffle_trials,
-                    regions=regions)[0]
-            if decode_m2 is not None:
-                dec2 = dec_data_c2.get_psth(
-                    winsize, begin, end, skl_axes=True,
-                    repl_nan=repl_nan, time_zero_field=decode_tzf,
-                    shuffle_trials=shuffle_trials,
-                    regions=regions)[0]
-        else:
-            raise TypeError('this Dataset has no associated neural data')
-        pop1, xs = out1
-        pop2, xs = out2
+            params = {'class_weight':'balanced', 'max_iter':max_iter}
+            # params.update(kwargs)            
+            
         if pseudo:
-            c1_n = cat1.get_ntrls()
-            c2_n = cat2.get_ntrls()
+            c1_n = list(pop_i.shape[2] for pop_i in pop1)
+            c2_n = list(pop_i.shape[2] for pop_i in pop2)
             trls_list = (c1_n, c2_n)
             if decode_m1 is not None:
-                trls_list = trls_list + (dec_data_c1.get_ntrls(),)
+                g1_n = list(pop_i.shape[2] for pop_i in dec1)
+                trls_list = trls_list + (g1_n,)
             if decode_m2 is not None:
-                trls_list = trls_list + (dec_data_c2.get_ntrls(),)
+                g2_n = list(pop_i.shape[2] for pop_i in dec2)
+                trls_list = trls_list + (g2_n,)
             comb_n = combine_ntrls(*trls_list)
             pop1 = self.make_pseudopop(pop1, comb_n, min_trials_pseudo,
                                        resample_pseudo, skl_axs=True,
@@ -472,21 +678,42 @@ class Dataset(object):
                                            resample_pseudo, skl_axs=True)
             else:
                 dec2 = (None,)*resample_pseudo
+        print(pop1.shape)
         outs = np.zeros((len(pop2), n_folds, len(xs)))
         outs_gen = np.zeros_like(outs)
+        multi_out_flag = not combine and (decode_m1 is not None
+                                          or decode_m2 is not None)
         for i, p1 in enumerate(pop1):
-            out = na.fold_skl(p1, pop2[i], n_folds, model=model, params=params, 
-                              mean=mean, pre_pca=pre_pca, shuffle=shuffle,
-                              impute_missing=(repl_nan or impute_missing),
-                              gen_c1=dec1[i], gen_c2=dec2[i])
-            if decode_m1 is not None or decode_m2 is not None:
+            if combine:
+                p1 = np.concatenate((p1, dec1[i]), axis=2)
+                p2 = np.concatenate((pop2[i], dec2[i]), axis=2)
+                d1 = None
+                d2 = None 
+            else:
+                p2 = pop2[i]
+                d1 = dec1[i]
+                d2 = dec2[i]
+            if p1.shape[0] == 0:
+                shape = (n_folds, len(xs))
+                if multi_out_flag:
+                    out = (np.zeros(shape)*np.nan,
+                           np.zeros(shape)*np.nan)
+                else:
+                    out = np.zeros(shape)*np.nan
+            else:
+                out = na.fold_skl(p1, p2, n_folds, model=model, params=params, 
+                                  mean=mean, pre_pca=pre_pca, shuffle=shuffle,
+                                  impute_missing=(repl_nan or impute_missing),
+                                  gen_c1=d1, gen_c2=d2, **kwargs)
+            if not combine and (decode_m1 is not None or decode_m2 is not None):
                 outs[i] = out[0]
                 outs_gen[i] = out[1]
             else:
                 outs[i] = out
         if ret_pops:
             out = (outs, xs, pop1, pop2)
-            add = tuple(di for di in (dec1, dec2) if di[0] is not None)
+            add = tuple(di for di in (dec1, dec2)
+                        if di[0] is not None and not combine)
             out = out + add
         else:
             out = (outs, xs)
