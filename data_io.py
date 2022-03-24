@@ -164,6 +164,10 @@ class Dataset(object):
         top_level = key in self.data.keys()
         session_level = key in self.data['data'].iloc[0].columns
         return top_level or session_level
+
+    @property
+    def session_keys(self):
+        return self.data['data'].iloc[0].columns
     
     def session_mask(self, mask):
         return Dataset(self.data[mask], seconds=self.seconds)
@@ -220,11 +224,13 @@ class Dataset(object):
         return out_arr, xs, no_spks
     
     def make_pseudopop(self, outs, n_trls=None, min_trials_pseudo=10,
-                       resample_pseudos=10, skl_axs=False, same_n_trls=False):
+                       n_trls_mask=None, resample_pseudos=10, skl_axs=False,
+                       same_n_trls=False):
         if n_trls is None:
             n_trls = list(len(o) for o in outs)
-        n_trls = np.array(n_trls)
-        n_trls_mask = n_trls >= min_trials_pseudo
+        if n_trls_mask is None:
+            n_trls = np.array(n_trls)
+            n_trls_mask = n_trls >= min_trials_pseudo
         outs_mask = np.array(outs, dtype=object)[n_trls_mask]
         if skl_axs:
             trl_ax = 2
@@ -237,6 +243,7 @@ class Dataset(object):
         else:
             n_trls_actual = np.array(list(o.shape[trl_ax] for o in outs))
             min_trls = np.min(n_trls_actual[n_trls_mask])
+            
         for i in range(resample_pseudos):
             for j, pop in enumerate(outs_mask):
                 trl_inds = np.random.choice(pop.shape[trl_ax], min_trls,
@@ -284,7 +291,10 @@ class Dataset(object):
         outs = []
         n_trls = []
         for i, psth_l in enumerate(psths):
-            psth = np.stack(psth_l, axis=0)
+            if len(psth_l) > 0:
+                psth = np.stack(psth_l, axis=0)
+            else:
+                psth = np.zeros((0, 0, len(xs_all[i])))
             xs = xs_all[i]
             if time_zero is not None:
                 xs_i = np.repeat(np.expand_dims(xs - time_zero, 0),
@@ -293,6 +303,8 @@ class Dataset(object):
                 xs_exp = np.expand_dims(xs, 0)
                 tzf = self[time_zero_field][i]
                 tzf_exp = np.expand_dims(tzf, 1)
+                if len(tzf_exp) == 0:
+                    tzf_exp = np.zeros((1, 1))
                 xs_i = xs_exp - tzf_exp
             else:
                 xs_i = np.repeat(np.expand_dims(xs, 0), len(psth_l), 0)
@@ -624,7 +636,8 @@ class Dataset(object):
         pops_pseudo = []
         for pop in pops:
             pop_i = self.make_pseudopop(pop, comb_n, min_trials,
-                                        resamples, skl_axs=skl_axs,
+                                        resample_pseudos=resamples,
+                                        skl_axs=skl_axs,
                                         same_n_trls=same_n_trls)
             pops_pseudo.append(pop_i)
         return pops_pseudo        
@@ -637,7 +650,7 @@ class Dataset(object):
                      ret_pops=False, shuffle_trials=False,
                      decode_m1=None, decode_m2=None, decode_tzf=None,
                      regions=None, combine=False, max_iter=10000,
-                     **kwargs):
+                     dec_less=True, **kwargs):
         out = self._get_dec_pops(winsize, begin, end, stepsize,
                                  m1, m2, decode_m1, decode_m2, 
                                  tzfs=(time_zero_field, time_zero_field,
@@ -655,30 +668,48 @@ class Dataset(object):
             c1_n = list(pop_i.shape[2] for pop_i in pop1)
             c2_n = list(pop_i.shape[2] for pop_i in pop2)
             trls_list = (c1_n, c2_n)
+            trls_list_dec = ()
             if decode_m1 is not None:
                 g1_n = list(pop_i.shape[2] for pop_i in dec1)
-                trls_list = trls_list + (g1_n,)
+                if dec_less:
+                    trls_list_dec = trls_list_dec + (g1_n,)
+                else:
+                    trls_list = trls_list + (g1_n,)
             if decode_m2 is not None:
                 g2_n = list(pop_i.shape[2] for pop_i in dec2)
-                trls_list = trls_list + (g2_n,)
+                if dec_less:
+                    trls_list_dec = trls_list_dec + (g2_n,)
+                else:
+                    trls_list = trls_list + (g2_n,)
+            
             comb_n = combine_ntrls(*trls_list)
+            if dec_less:
+                comb_n_dec = combine_ntrls(*trls_list_dec)
+            else:
+                comb_n_dec = comb_n
+                
             pop1 = self.make_pseudopop(pop1, comb_n, min_trials_pseudo,
-                                       resample_pseudo, skl_axs=True,
-                                       same_n_trls=True)
+                                       resample_pseudos=resample_pseudo,
+                                       skl_axs=True, same_n_trls=True)
             pop2 = self.make_pseudopop(pop2, comb_n, min_trials_pseudo,
-                                       resample_pseudo, skl_axs=True,
-                                       same_n_trls=True)
+                                       resample_pseudos=resample_pseudo,
+                                       skl_axs=True, same_n_trls=True)
+            n_trls_mask = comb_n >= min_trials_pseudo
             if decode_m1 is not None:
-                dec1 = self.make_pseudopop(dec1, comb_n, min_trials_pseudo,
-                                           resample_pseudo, skl_axs=True)
+                dec1 = self.make_pseudopop(dec1, comb_n_dec, 
+                                           n_trls_mask=n_trls_mask,
+                                           resample_pseudos=resample_pseudo,
+                                           skl_axs=True, same_n_trls=True)
             else:
                 dec1 = (None,)*resample_pseudo
             if decode_m2 is not None:
-                dec2 = self.make_pseudopop(dec2, comb_n, min_trials_pseudo,
-                                           resample_pseudo, skl_axs=True)
+                dec2 = self.make_pseudopop(dec2, comb_n_dec, 
+                                           n_trls_mask=n_trls_mask,
+                                           resample_pseudos=resample_pseudo,
+                                           skl_axs=True, same_n_trls=True)
             else:
                 dec2 = (None,)*resample_pseudo
-        print(pop1.shape)
+        print(pop1.shape, pop2.shape, dec1.shape, dec2.shape)
         outs = np.zeros((len(pop2), n_folds, len(xs)))
         outs_gen = np.zeros_like(outs)
         multi_out_flag = not combine and (decode_m1 is not None

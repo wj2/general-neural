@@ -9,6 +9,7 @@ import itertools as it
 import scipy.optimize as sopt
 import scipy.integrate as sint
 import scipy.signal as sig
+import joblib as jl
 
 import general.utility as u
 
@@ -215,9 +216,136 @@ def get_pwr_fi_by_param(n_units, wid, dims, scale=1):
         out_fi[i, j, k, l] = fim[0, 0]
     return out_pwr, out_fi
 
-def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-3,
+def get_lattice_uniform_pop(total_pwr, n_units, dims, w_use=None,
+                            scale_use=None, sigma_n=1, **kwargs):
+    distrs = (sts.uniform(0, 1),)*dims
+    stim_distr = u.MultivariateUniform(dims, (0, 1))
+
+    n_units_pd = int(np.round(n_units**(1/dims)))
+    ms, ws = get_output_func_distribution_shapes(n_units_pd, distrs,
+                                                 wid_scaling=1)
+    scale = total_pwr
+    titrate_pwr = stim_distr
+    
+    rf, drf = make_gaussian_vector_rf(ms, ws**2, scale, 0,
+                                      titrate_pwr=titrate_pwr,
+                                      **kwargs)
+    noise_distr = sts.multivariate_normal(np.zeros(n_units_pd**dims),
+                                          sigma_n)
+    
+    return stim_distr, rf, drf, noise_distr
+
+def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
+                           scale_use=None, sigma_n=1, **kwargs):
+    distrs = (sts.uniform(0, 1),)*dims
+    stim_distr = u.MultivariateUniform(dims, (0, 1))
+
+    ms, ws = get_random_uniform_fill(n_units, distrs, wid=w_use)
+    if scale_use is not None:
+        scale = scale_use
+        titrate_pwr = None 
+    else:
+        scale = total_pwr
+        titrate_pwr = stim_distr
+    rf, drf = make_gaussian_vector_rf(ms, ws, scale, 0,
+                                      titrate_pwr=titrate_pwr,
+                                      **kwargs)
+    noise_distr = sts.multivariate_normal(np.zeros(n_units), sigma_n)
+    
+    return stim_distr, rf, drf, noise_distr
+
+def ml_decode_rf(reps, func, dim, init_guess=None):
+    if init_guess is None:
+        init_guess = np.zeros((reps.shape[0], dim))*.5
+        
+    def f(x):
+        x_shaped = np.reshape(x, init_guess.shape)
+        err = np.sum((func(x_shaped) - reps)**2)
+        return err
+
+    n_vars = np.product(init_guess.shape)
+    bounds = ((0, 1),)*n_vars
+    # out = sopt.minimize(f, init_guess, bounds=bounds)
+    out = sopt.basinhopping(f, init_guess, niter=100,
+                            minimizer_kwargs=dict(bounds=bounds))
+    x_opt = np.reshape(out.x, init_guess.shape)
+    return x_opt
+
+def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None):
+    guesses = np.array(list(it.product(np.linspace(0, 1, n_gran),
+                                       repeat=dim)))
+    g_reps = func(guesses)
+    g_reps = np.expand_dims(g_reps, 1)
+    reps = np.expand_dims(reps, 0)
+    g_ind = np.argmin(np.sum((g_reps - reps)**2, axis=-1), axis=0)
+    return guesses[g_ind]
+
+@u.arg_list_decorator
+def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
+                    n_samps_per_pop=100, n_jobs=-1, give_guess=True,
+                    pop_func='random', spk_cost='l1', **kwargs):
+    if pop_func == 'random':
+        pop_func = get_random_uniform_pop
+    elif pop_func == 'lattice':
+        pop_func = get_lattice_uniform_pop
+    else:
+        raise IOError('unrecognized pop_func indicator {}'.format(pop_func))
+    if spk_cost == 'l1':
+        cost_func = lambda x: np.mean(np.sum(np.abs(x), axis=1))
+        titrate_func = lambda x, y: x/y
+    elif spk_cost == 'l2':
+        cost_func = lambda x: np.mean(np.sum(x**2, axis=1))
+        titrate_func = lambda x, y: np.sqrt(x/y)
+    else:
+        raise IOError('unrecognized spk_cost indicator {}'.format(spk_cost))
+
+    packs = np.zeros((len(total_pwr), len(n_units), len(dims), n_pops),
+                     dtype=object)
+    configs = {}
+    for ind in u.make_array_ind_iterator(packs.shape):
+        conf_ind = configs.get(ind[:-1])
+        pi, ni, di = ind[:-1]
+        if conf_ind is None:
+            out = max_fi_power(total_pwr[pi], n_units[ni], dims[di],
+                               sigma_n=sigma_n)
+            fi, _, _, w_opt, rescale_opt = out
+            conf_ind = fi, w_opt, rescale_opt
+            configs[ind[:2]] = conf_ind
+        else:
+            fi, w_opt, rescale_opt = conf_ind
+        stim_d, rf, _, noise = pop_func(total_pwr[pi], n_units[ni], dims[di],
+                                        w_use=w_opt, sigma_n=sigma_n,
+                                        scale_use=rescale_opt,
+                                        cost_func=cost_func,
+                                        titrate_func=titrate_func)
+        packs[ind] = (stim_d, rf, noise)
+        
+    def _emp_rf_pop(stim_i, rf_i, noise_i):
+        random_state = np.random.randint(1, 2**32, 1)[0]
+        samps_i = stim_i.rvs(n_samps_per_pop,
+                             random_state=random_state)
+        rep_i = rf_i(samps_i) + noise_i.rvs(n_samps_per_pop,
+                                            random_state=random_state)
+        if give_guess:
+            init = samps_i
+        else:
+            init = None
+        dec_i = brute_decode_rf(rep_i, rf_i, samps_i.shape[1],
+                                init_guess=init)
+        mse_i = (samps_i - dec_i)**2
+        return mse_i
+    
+    par = jl.Parallel(n_jobs=n_jobs, backend='loky')
+    out = par(jl.delayed(_emp_rf_pop)(*packs[ind])
+              for ind in u.make_array_ind_iterator(packs.shape))
+    out_arr = np.zeros_like(packs)
+    for i, ind in enumerate(u.make_array_ind_iterator(out_arr.shape)):
+        out_arr[ind] = out[i]
+    return out_arr, configs
+
+def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
-                 n_ws=1000, n_iters=10, T=.35, opt_kind='basinhop'):
+                 n_ws=5000, n_iters=10, T=.35, opt_kind='brute'):
     max_pwr = max_snr*sigma_n
     def _min_func(w):
         w = w[0]
@@ -276,6 +404,7 @@ def random_uniform_pwr(n_units, wid, dims, scale=1):
         c = b**dims
     return n_units*a*c
 
+## try to gain intuition for falling precision with increasing dimensionality
 def random_uniform_fi(n_units, wid, dims, scale=1, sigma_n=1, print_=False):
     fi = np.zeros((dims, dims))
     b_pre = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
@@ -484,7 +613,8 @@ def get_distribution_gaussian_resp_func(n_units_pd, input_distributions, scale=1
     return resp_func, d_resp_func, ms, ws
 
 def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None,
-                            titrate_pwr=None, n_samps=10000):
+                            titrate_pwr=None, n_samps=10000, cost_func=None,
+                            titrate_func=None):
     cents = np.array(cents)
     sizes = np.array(sizes)
     if len(cents.shape) <= 1:
@@ -496,8 +626,14 @@ def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None,
     if titrate_pwr is not None:
         rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,
                          scale=1, baseline=baseline)
-        pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps))**2, axis=1))
-        new_scale = np.sqrt(scale/pwr)
+        if cost_func is None:
+            pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps))**2, axis=1))
+        else:
+            pwr = cost_func(rfs(titrate_pwr.rvs(n_samps)))
+        if titrate_func is None:
+            new_scale = np.sqrt(scale/pwr)
+        else:
+            new_scale = titrate_func(scale, pwr)
     else:
         new_scale = scale
     rfs = ft.partial(eval_gaussian_vector_rf, cents=cents, sizes=sizes,

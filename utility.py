@@ -126,10 +126,10 @@ class MultivariateUniform(object):
                        for i, b in enumerate(self.bounds))
         return sd_list
 
-    def rvs(self, size=None):
+    def rvs(self, size=None, **kwargs):
         if size is None:
             size = 1
-        samps = self.distr.rvs((size, self.n_dims))
+        samps = self.distr.rvs((size, self.n_dims), **kwargs)
         return samps*self.mags + self.bounds[:, 0:1].T
 
 def get_stan_summary_col(summary, col):
@@ -370,9 +370,10 @@ def make_unit_vector(v):
     if len(v.shape) == 1:
         v = np.expand_dims(v, 0)
     v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
-    mask = v_len > 0
-    v_norm = np.zeros_like(v)
-    v_norm[mask[:, 0]] = v[mask[:, 0]]/v_len[mask[:, 0]]
+    mask = np.squeeze(v_len > 0)
+    v_norm = np.zeros_like(v, dtype=float)
+    v_set = v[mask]/v_len[mask]
+    v_norm[mask] = v_set # v[mask]/v_len[mask]
     # if v_len > 0:
     #     v_norm = v/v_len
     # else:

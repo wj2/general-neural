@@ -5,6 +5,31 @@ import itertools as it
 import matplotlib.pyplot as plt
 import general.utility as u
 import general.neural_analysis as na
+from matplotlib.collections import LineCollection
+
+def line_speed_func(*args):
+    diffs = np.diff(np.stack(args, axis=1), axis=0)
+    speeds = np.sqrt(np.sum(diffs**2, axis=1))
+    speeds = np.concatenate((speeds[:1], speeds), axis=0)
+    return speeds
+
+def plot_colored_line(xs, ys, col_inds=None, cmap=plt.get_cmap('Blues'),
+                      norm=plt.Normalize(0., 1.), func=None, ax=None,
+                      **kwargs):
+    if ax is None:
+        f, ax = plt.subplots(1, 1)
+    if func is not None:
+        col_inds = func(xs, ys)
+    elif col_inds is None:
+        col_inds = np.linspace(0, 1, len(xs))
+    norm.autoscale(col_inds)
+    points = np.array([xs, ys]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = LineCollection(segments, array=col_inds, cmap=cmap, norm=norm,
+                        **kwargs)
+    ax.add_collection(lc)
+    return lc
+    
 
 def plot_single_units(xs, sus, labels, colors=None, style=(), show=False,
                       errorbar=True, alpha=.5, trial_color=(.8, .8, .8),
@@ -218,12 +243,29 @@ def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
             axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
     return axvals
 
-def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, **kwargs):
-    xs_ax = pcolormesh_axes(xs, len(xs), diff_ind=diff_ind,
+def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, equal_bins=False,
+               **kwargs):
+    if equal_bins:
+        xs_bins = np.arange(len(xs))
+        ys_bins = np.arange(len(ys))
+    else:
+        xs_bins = xs
+        ys_bins = ys
+    xs_ax = pcolormesh_axes(xs_bins, len(xs_bins), diff_ind=diff_ind,
                             append=append)
-    ys_ax = pcolormesh_axes(ys, len(ys), diff_ind=diff_ind,
+    ys_ax = pcolormesh_axes(ys_bins, len(ys_bins), diff_ind=diff_ind,
                             append=append)
     img = ax.pcolormesh(xs_ax, ys_ax, data, **kwargs)
+
+    if equal_bins:
+        ax.set_xticks(xs_bins)
+        ax.set_xticklabels(xs)
+        
+        ax.set_yticks(ys_bins)
+        ax.set_yticklabels(ys)
+    else:
+        ax.set_xticks(xs)
+        ax.set_yticks(ys)
     return img
 
 def plot_decoding_heatmap(xs, decmat, colormap=None, show=False, title='',

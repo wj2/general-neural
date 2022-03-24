@@ -31,7 +31,8 @@ def make_mxn_gridspec(gs, n_rows, n_cols, top, bottom, left, right,
 class Figure:
 
     def __init__(self, fsize, params, data=None, bf=None,
-                 colors=None, style_func=gps.set_paper_style):
+                 colors=None, style_func=gps.set_paper_style,
+                 find_panel_keys=True):
         if style_func is not None:
             style_func(colors)
         self.f = plt.figure(figsize=fsize)
@@ -46,8 +47,9 @@ class Figure:
         else:
             self.data = data
         self.make_gss()
-        self.panel_keys = tuple(m for m in dir(self)
-                                if re.match('panel_.*', m) is not None)
+        if find_panel_keys:
+            self.panel_keys = tuple(m for m in dir(self)
+                                    if re.match('panel_.*', m) is not None)
 
     def make_panels(self, panel_keys=None):
         if panel_keys is None:
@@ -58,11 +60,12 @@ class Figure:
         pass
 
     def get_axs(self, grids, sharex=False, sharey=False, plot_3ds=None,
-                all_3d=False):
+                all_3d=False, squeeze=False, **all_ax_kwargs):
         grid_arr = np.array(grids)
         ax_arr = np.zeros_like(grid_arr, dtype=object)
         for i, ind in enumerate(u.make_array_ind_iterator(grid_arr.shape)):
             ax_kwarg = dict()
+            ax_kwarg.update(all_ax_kwargs)
             if plot_3ds is not None and plot_3ds[ind] or all_3d:
                 ax_kwarg['projection'] = '3d'
             if i > 0 and sharex:
@@ -72,6 +75,8 @@ class Figure:
             ax_arr[ind] = self.f.add_subplot(grid_arr[ind], **ax_kwarg)
             if i == 0:
                 share_ax = ax_arr[ind]
+        if squeeze:
+            ax_arr = np.squeeze(ax_arr)
         return ax_arr
     
     def generate(self, panels=None):
