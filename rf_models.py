@@ -237,6 +237,7 @@ def get_lattice_uniform_pop(total_pwr, n_units, dims, w_use=None,
 
 def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
                            scale_use=None, sigma_n=1, **kwargs):
+    dims = int(dims)
     distrs = (sts.uniform(0, 1),)*dims
     stim_distr = u.MultivariateUniform(dims, (0, 1))
 
@@ -306,14 +307,15 @@ def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
         conf_ind = configs.get(ind[:-1])
         pi, ni, di = ind[:-1]
         if conf_ind is None:
-            out = max_fi_power(total_pwr[pi], n_units[ni], dims[di],
+            out = max_fi_power(total_pwr[pi], n_units[ni], int(dims[di]),
                                sigma_n=sigma_n)
             fi, _, _, w_opt, rescale_opt = out
             conf_ind = fi, w_opt, rescale_opt
             configs[ind[:2]] = conf_ind
         else:
             fi, w_opt, rescale_opt = conf_ind
-        stim_d, rf, _, noise = pop_func(total_pwr[pi], n_units[ni], dims[di],
+        stim_d, rf, _, noise = pop_func(total_pwr[pi], n_units[ni],
+                                        int(dims[di]),
                                         w_use=w_opt, sigma_n=sigma_n,
                                         scale_use=rescale_opt,
                                         cost_func=cost_func,
