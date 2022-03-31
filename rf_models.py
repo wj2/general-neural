@@ -280,6 +280,13 @@ def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None):
     g_ind = np.argmin(np.sum((g_reps - reps)**2, axis=-1), axis=0)
     return guesses[g_ind]
 
+def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1):
+    crossing = sts.norm(0, 1).cdf(-np.sqrt(2*pwr)/(2*sigma_n))
+    factor = min(n_units, (scale/w_opt)**dim)
+    approx_prob = crossing*factor
+    err_mag = (scale**2)/6
+    return approx_prob, err_mag
+
 @u.arg_list_decorator
 def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
                     n_samps_per_pop=100, n_jobs=-1, give_guess=True,
@@ -309,7 +316,10 @@ def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
             out = max_fi_power(total_pwr[pi], n_units[ni], dims[di],
                                sigma_n=sigma_n)
             fi, _, _, w_opt, rescale_opt = out
-            conf_ind = fi, w_opt, rescale_opt
+            tp, tm = compute_threshold_err_prob(total_pwr[pi], n_units[ni],
+                                                     dims[di], w_opt,
+                                                     sigma_n=sigma_n)
+            conf_ind = fi, w_opt, rescale_opt, tp, tm
             configs[ind[:2]] = conf_ind
         else:
             fi, w_opt, rescale_opt = conf_ind
@@ -345,7 +355,8 @@ def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
 
 def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
-                 n_ws=5000, n_iters=10, T=.35, opt_kind='brute'):
+                 n_ws=5000, n_iters=10, T=.35, opt_kind='brute',
+                 use_w=None):
     max_pwr = max_snr*sigma_n
     def _min_func(w):
         w = w[0]
@@ -357,7 +368,9 @@ def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
         loss = -fi[0, 0] + lambda_deviation*np.sqrt(fi_var[0, 0])
         return loss 
 
-    if opt_kind == 'basinhop':
+    if use_w is not None:
+        w_opt = use_w
+    elif opt_kind == 'basinhop':
         minimizer_kwargs = {'bounds':((eps, 1),)}
         res = sopt.basinhopping(_min_func, (.5,), niter=n_iters,
                                 minimizer_kwargs=minimizer_kwargs,
