@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import general.utility as u
 import general.neural_analysis as na
 from matplotlib.collections import LineCollection
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 def line_speed_func(*args):
     diffs = np.diff(np.stack(args, axis=1), axis=0)
@@ -13,9 +14,11 @@ def line_speed_func(*args):
     speeds = np.concatenate((speeds[:1], speeds), axis=0)
     return speeds
 
-def plot_colored_line(xs, ys, col_inds=None, cmap=plt.get_cmap('Blues'),
+def plot_colored_line(xs, ys, zs=None, col_inds=None, cmap='Blues',
                       norm=plt.Normalize(0., 1.), func=None, ax=None,
                       **kwargs):
+    if u.check_list(cmap):
+        cmap = plt.get_cmap(cmap)
     if ax is None:
         f, ax = plt.subplots(1, 1)
     if func is not None:
@@ -23,11 +26,20 @@ def plot_colored_line(xs, ys, col_inds=None, cmap=plt.get_cmap('Blues'),
     elif col_inds is None:
         col_inds = np.linspace(0, 1, len(xs))
     norm.autoscale(col_inds)
-    points = np.array([xs, ys]).T.reshape(-1, 1, 2)
+    if zs is None:
+        points = np.array([xs, ys]).T.reshape(-1, 1, 2)
+        lc_func = LineCollection
+    else:
+        points = np.array([xs, ys, zs]).T.reshape(-1, 1, 3)
+        lc_func = Line3DCollection
     segments = np.concatenate([points[:-1], points[1:]], axis=1)
-    lc = LineCollection(segments, array=col_inds, cmap=cmap, norm=norm,
-                        **kwargs)
+    lc = lc_func(segments, array=col_inds, cmap=cmap, norm=norm,
+                 **kwargs)
     ax.add_collection(lc)
+    if zs is not None:
+        ax.plot(xs, ys, zs, alpha=0)
+    else:
+        ax.plot(xs, ys, alpha=0)
     return lc
     
 
