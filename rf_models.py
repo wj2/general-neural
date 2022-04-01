@@ -282,8 +282,12 @@ def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None):
     return guesses[g_ind]
 
 def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1):
+    ### DOUBLE CHECK RF width squaring
+    ### inaccuracy might be heterogeneity in the distance term, small
+    ### fluctuations can make a big difference 
     crossing = sts.norm(0, 1).cdf(-np.sqrt(2*pwr)/(2*sigma_n))
-    factor = min(n_units, (scale/w_opt)**dim)
+    effective_dim = (scale/(w_opt))**dim
+    factor = min(n_units, effective_dim) - 1
     approx_prob = crossing*factor
     err_mag = (scale**2)/6
     return approx_prob, err_mag
