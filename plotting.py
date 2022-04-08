@@ -368,6 +368,12 @@ def plot_pt_werr(x, data, central_tendency=np.nanmean, ax=None, **kwargs):
                         **kwargs)
     ax.plot(xs, central_tendency(dats, axis=0), 'o', color=l[0].get_color())
     return ax
+
+def plot_trace_wpts(x, data, ax=None, color=None, **kwargs):
+    l = plot_trace_werr(x, data, ax=ax, **kwargs, fill=False,
+                        errorbar=False, color=color)
+    for i, data_i in enumerate(data):
+        ax.plot(x, data_i, 'o', color=l[0].get_color(), **kwargs)
     
 def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,

@@ -10,6 +10,7 @@ import sklearn.decomposition as skd
 import sklearn.exceptions as ske
 import sklearn.model_selection as skms
 import sklearn.impute as skimp
+import sklearn.naive_bayes as sknb
 import arviz as az
 from dPCA.dPCA import dPCA
 import warnings
@@ -32,6 +33,29 @@ def make_model_pipeline(model=None, norm=True, pca=None, **kwargs):
         pipe_steps.append(model())
     pipe = sklpipe.make_pipeline(*pipe_steps)
     return pipe
+
+def nearest_decoder(*cats, cv_runs=20, cv_prop=.1, pre_pca=None, norm=True,
+                    cv_type=skms.ShuffleSplit, model=sknb.GaussianNB,
+                    accumulate_time=True, **kwargs):
+    pipe = make_model_pipeline(model, norm=norm, pca=pre_pca)
+    labels = np.concatenate(list((i,)*cat_i.shape[-2]
+                                 for i, cat_i in enumerate(cats)))
+    cats_all = np.concatenate(cats, axis=-2)[:, 0]
+    cv = cv_type(cv_runs, test_size=cv_prop)
+
+    out = np.zeros((cv_runs, cats_all.shape[-1]))
+    out_info = np.zeros(cats_all.shape[-1], dtype=object)
+    for i in range(cats_all.shape[-1]):
+        if accumulate_time:
+            dec_pop = list(cats_all[..., j] for j in range(i + 1))
+            dec_pop = np.concatenate(dec_pop, axis=0).T
+        else:
+            dec_pop = cats_all[..., i].T
+        res = skms.cross_validate(pipe, dec_pop, labels,
+                                  cv=cv, return_estimator=True)
+        out[:, i] = res['test_score']
+        out_info[i] = res
+    return out, out_info
 
 def apply_transform_tc(tc, trs):
     out = np.zeros_like(tc)

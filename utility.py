@@ -206,7 +206,7 @@ def cosine_similarity(v1, v2):
         v1_unit = np.expand_dims(v1_unit, 0)
     if len(v2.shape) == 1:
         v2_unit = np.expand_dims(v2_unit, 0)
-        
+
     s = np.sum(v1_unit*v2_unit, axis=1)
     return s 
 

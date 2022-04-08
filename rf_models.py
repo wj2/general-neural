@@ -236,7 +236,8 @@ def get_lattice_uniform_pop(total_pwr, n_units, dims, w_use=None,
     return stim_distr, rf, drf, noise_distr
 
 def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
-                           scale_use=None, sigma_n=1, **kwargs):
+                           scale_use=None, sigma_n=1, ret_params=False,
+                           **kwargs):
     dims = int(dims)
     distrs = (sts.uniform(0, 1),)*dims
     stim_distr = u.MultivariateUniform(dims, (0, 1))
@@ -253,7 +254,10 @@ def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
                                       **kwargs)
     noise_distr = sts.multivariate_normal(np.zeros(n_units), sigma_n)
     
-    return stim_distr, rf, drf, noise_distr
+    out = (stim_distr, rf, drf, noise_distr)
+    if ret_params:
+        out = out + (ms, ws)
+    return out
 
 def ml_decode_rf(reps, func, dim, init_guess=None):
     if init_guess is None:
@@ -281,14 +285,21 @@ def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None):
     g_ind = np.argmin(np.sum((g_reps - reps)**2, axis=-1), axis=0)
     return guesses[g_ind]
 
-def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1):
-    ### DOUBLE CHECK RF width squaring
-    ### inaccuracy might be heterogeneity in the distance term, small
-    ### fluctuations can make a big difference 
-    crossing = sts.norm(0, 1).cdf(-np.sqrt(2*pwr)/(2*sigma_n))
-    effective_dim = (scale/(w_opt))**dim
-    factor = min(n_units, effective_dim) - 1
-    approx_prob = crossing*factor
+@ft.lru_cache(maxsize=None)
+def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
+                               resp_scale=1):
+    mu_p = 2*pwr
+    std_p = np.sqrt(2*random_uniform_pwr_var(n_units, w_opt, dim,
+                                             scale=resp_scale))
+    def integ_func(d):
+        prob = sts.norm(mu_p, std_p).pdf(d)
+        cumu = sts.norm(0, 1).cdf(-np.sqrt(d)/(2*sigma_n))
+        return prob*cumu
+
+    v, err = sint.quad(integ_func, 0, np.inf)
+    effective_dim = (scale/(2*w_opt))**dim
+    factor = max(min(n_units, effective_dim) - 1, 0)
+    approx_prob = v*factor # min(v*factor, 1)
     err_mag = (scale**2)/6
     return approx_prob, err_mag
 
@@ -322,8 +333,9 @@ def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
                                sigma_n=sigma_n)
             fi, _, _, w_opt, rescale_opt = out
             tp, tm = compute_threshold_err_prob(total_pwr[pi], n_units[ni],
-                                                     dims[di], w_opt,
-                                                     sigma_n=sigma_n)
+                                                dims[di], w_opt,
+                                                sigma_n=sigma_n,
+                                                resp_scale=rescale_opt)
             conf_ind = fi, w_opt, rescale_opt, tp, tm
             configs[ind[:2]] = conf_ind
         else:
@@ -359,36 +371,109 @@ def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
         out_arr[ind] = out[i]
     return out_arr, configs
 
+def random_uniform_pwr_var(n_units, wid, dims, scale=1):
+    pwr = random_uniform_pwr(n_units, wid, dims, scale=scale)
+    a = scale**4
+    b = (np.sqrt(np.pi/2)*wid*ss.erf(np.sqrt(2)/wid)
+         - .5*(wid**2)*(1 - np.exp(-2/(wid**2))))
+    if u.check_list(wid):
+        c = np.product(b)
+    else:
+        c = b**dims
+    pwr2 = a*c
+    r_var = n_units*(pwr2 - (pwr/n_units)**2)
+    return r_var
+
+def _min_mse_func_nostd(w, n_units=None, dims=None, total_pwr=None,
+                        lambda_deviation=None):
+    w = w[0]
+    pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
+    rescale = np.sqrt(total_pwr/pwr_pre)
+    fi = random_uniform_fi(n_units, w, dims, scale=rescale)
+    fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
+    fi_corr = fi[0, 0]
+
+    pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
+    prob, em = compute_threshold_err_prob(total_pwr, n_units, dims, w,
+                                          resp_scale=rescale)
+    threshold_mse = prob*em
+    fi_mse = 1/fi_corr
+    if fi_mse < 0:
+        fi_mse = np.inf
+    m_prob = min(prob, 1)
+    loss = (1 - m_prob)*fi_mse + threshold_mse
+    return loss    
+
+def _min_mse_func(w, n_units=None, dims=None, total_pwr=None,
+                        lambda_deviation=None):
+    w = w[0]
+    pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
+    rescale = np.sqrt(total_pwr/pwr_pre)
+    fi = random_uniform_fi(n_units, w, dims, scale=rescale)
+    fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
+    fi_corr = fi[0, 0] - lambda_deviation*np.sqrt(fi_var[0, 0])
+    
+    pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
+    prob, em = compute_threshold_err_prob(total_pwr, n_units, dims, w,
+                                          resp_scale=rescale)
+    threshold_mse = prob*em
+    fi_mse = 1/fi_corr
+    if fi_mse < 0:
+        fi_mse = np.inf
+    m_prob = min(prob, 1)
+    loss = (1 - m_prob)*fi_mse + threshold_mse
+    return loss    
+
+def _min_mse_func_inverted(w, n_units=None, dims=None, total_pwr=None,
+                           lambda_deviation=None):
+    w = w[0]
+    pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
+    rescale = np.sqrt(total_pwr/pwr_pre)
+    fi = random_uniform_fi(n_units, w, dims, scale=rescale)
+    fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
+    fi_corr = fi[0, 0] - lambda_deviation*np.sqrt(fi_var[0, 0])
+    
+    prob, em = compute_threshold_err_prob(total_pwr, n_units, dims, w,
+                                          resp_scale=rescale)
+    
+    m_prob = min(prob, 1)
+    loss = -(1 - m_prob)*fi_corr - m_prob*(1/em)
+    return loss    
+
+def _min_func(w, n_units=None, dims=None, total_pwr=None,
+              lambda_deviation=None):
+    w = w[0]
+    pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
+    rescale = np.sqrt(total_pwr/pwr_pre)
+    fi = random_uniform_fi(n_units, w, dims, scale=rescale)
+    fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
+    pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
+    loss = -fi[0, 0] + lambda_deviation*np.sqrt(fi_var[0, 0])
+    return loss 
+
 def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
                  n_ws=5000, n_iters=10, T=.35, opt_kind='brute',
-                 use_w=None):
+                 use_min_func=_min_func, use_w=None):
     max_pwr = max_snr*sigma_n
-    def _min_func(w):
-        w = w[0]
-        pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
-        rescale = np.sqrt(total_pwr/pwr_pre)
-        fi = random_uniform_fi(n_units, w, dims, scale=rescale)
-        fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
-        pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
-        loss = -fi[0, 0] + lambda_deviation*np.sqrt(fi_var[0, 0])
-        return loss 
+    min_func = ft.partial(use_min_func, n_units=n_units, dims=dims,
+                          total_pwr=total_pwr, lambda_deviation=lambda_deviation)
 
     if use_w is not None:
         w_opt = use_w
     elif opt_kind == 'basinhop':
         minimizer_kwargs = {'bounds':((eps, 1),)}
-        res = sopt.basinhopping(_min_func, (.5,), niter=n_iters,
+        res = sopt.basinhopping(min_func, (.5,), niter=n_iters,
                                 minimizer_kwargs=minimizer_kwargs,
                                 T=T)
         w_opt = res.x[0]
     elif opt_kind == 'brute':
         pre_ws = np.linspace(eps, 1, n_ws)
-        fis = list(_min_func((w_i,)) for w_i in pre_ws)
-        w_opt = pre_ws[np.argmin(fis)]
+        fis = list(min_func((w_i,)) for w_i in pre_ws)
+        w_opt = pre_ws[np.nanargmin(fis)]
     elif opt_kind == 'peak_finding':
         pre_ws = np.linspace(eps, 1, n_ws)
-        fis = list(_min_func((w_i,)) for w_i in pre_ws)
+        fis = list(min_func((w_i,)) for w_i in pre_ws)
         peaks, _ = sig.find_peaks(fis)
         if len(peaks) == 0:
             starting_ws = (.5,)
@@ -397,7 +482,7 @@ def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
         candidate_ws = np.zeros(len(starting_ws))
         candidate_loss = np.zeros_like(candidate_ws)
         for i, w_i in enumerate(starting_ws):
-            res = sopt.minimize(_min_func, (w_i,), bounds=((eps, 1),))
+            res = sopt.minimize(min_func, (w_i,), bounds=((eps, 1),))
             candidate_ws[i] = res.x[0]
             candidate_loss[i] = res.fun
         w_opt = candidate_ws[np.argmin(candidate_loss)]
@@ -411,7 +496,7 @@ def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
     fi_var = random_uniform_fi_var(n_units, w_opt, dims, scale=rescale_opt)
     pwr = random_uniform_pwr(n_units, w_opt, dims, scale=rescale_opt)
     if ret_min_max:
-        fi = fi - lambda_deviation*np.sqrt(fi_var)
+        fi = min_func([w_opt])
     return fi, fi_var, pwr, w_opt, rescale_opt
 
 def random_uniform_pwr(n_units, wid, dims, scale=1):
