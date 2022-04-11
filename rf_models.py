@@ -330,7 +330,7 @@ def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
         pi, ni, di = ind[:-1]
         if conf_ind is None:
             out = max_fi_power(total_pwr[pi], n_units[ni], int(dims[di]),
-                               sigma_n=sigma_n)
+                               sigma_n=sigma_n, use_min_func=_min_mse_func)
             fi, _, _, w_opt, rescale_opt = out
             tp, tm = compute_threshold_err_prob(total_pwr[pi], n_units[ni],
                                                 dims[di], w_opt,
