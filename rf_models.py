@@ -462,8 +462,8 @@ def _min_func(w, n_units=None, dims=None, total_pwr=None,
 
 def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
-                 n_ws=5000, n_iters=10, T=.35, opt_kind='brute',
-                 use_min_func=_min_func, use_w=None):
+                 n_ws=200, n_iters=10, T=.35, opt_kind='brute',
+                 use_min_func=_min_mse_func, use_w=None):
     max_pwr = max_snr*sigma_n
     min_func = ft.partial(use_min_func, n_units=n_units, dims=dims,
                           total_pwr=total_pwr, lambda_deviation=lambda_deviation)
