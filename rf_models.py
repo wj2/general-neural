@@ -287,7 +287,7 @@ def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None):
 
 @ft.lru_cache(maxsize=None)
 def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
-                               resp_scale=1):
+                               resp_scale=1, ret_components=False):
     mu_p = 2*pwr
     std_p = np.sqrt(2*random_uniform_pwr_var(n_units, w_opt, dim,
                                              scale=resp_scale))
@@ -301,12 +301,16 @@ def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
     factor = max(min(n_units, effective_dim) - 1, 0)
     approx_prob = v*factor # min(v*factor, 1)
     err_mag = (scale**2)/6
-    return approx_prob, err_mag
+    out = (approx_prob, err_mag)
+    if ret_components:
+        comp = (effective_dim, v, mu_p, std_p)
+        out = out + comp
+    return out
 
 @u.arg_list_decorator
 def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
                     n_samps_per_pop=100, n_jobs=-1, give_guess=True,
-                    pop_func='random', spk_cost='l1', **kwargs):
+                    pop_func='random', spk_cost='l2', **kwargs):
     if pop_func == 'random':
         pop_func = get_random_uniform_pop
     elif pop_func == 'lattice':
@@ -376,12 +380,17 @@ def random_uniform_pwr_var(n_units, wid, dims, scale=1):
     a = scale**4
     b = (np.sqrt(np.pi/2)*wid*ss.erf(np.sqrt(2)/wid)
          - .5*(wid**2)*(1 - np.exp(-2/(wid**2))))
+    f = ft.partial(_non_deriv_terms, wid)
+    off_term, err = sint.quad(f, 0, 1)
     if u.check_list(wid):
         c = np.product(b)
+        off_term_prod = np.product(off_term)
     else:
         c = b**dims
-    pwr2 = a*c
-    r_var = n_units*(pwr2 - (pwr/n_units)**2)
+        off_term_prod = off_term**dims
+    pwr2 = a*(n_units*c + n_units*(n_units - 1)*off_term_prod) - pwr**2
+    # r_var = (pwr2 - (pwr/n_units)**2
+    r_var = pwr2
     return r_var
 
 def _min_mse_func_nostd(w, n_units=None, dims=None, total_pwr=None,
