@@ -286,20 +286,25 @@ def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None):
     return guesses[g_ind]
 
 @ft.lru_cache(maxsize=None)
-def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
-                               resp_scale=1, ret_components=False):
-    mu_p = 2*pwr
-    std_p = np.sqrt(2*random_uniform_pwr_var(n_units, w_opt, dim,
-                                             scale=resp_scale))
+def _thresh_integrate(mu_p, std_p, sigma_n=1):
     def integ_func(d):
         prob = sts.norm(mu_p, std_p).pdf(d)
         cumu = sts.norm(0, 1).cdf(-np.sqrt(d)/(2*sigma_n))
         return prob*cumu
 
-    v, err = sint.quad(integ_func, 0, np.inf)
+    return sint.quad(integ_func, 0, np.inf)
+
+def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
+                               resp_scale=1, ret_components=False):
+    mu_p = 2*pwr
+    std_p = np.sqrt(2*random_uniform_pwr_var(n_units, w_opt, dim,
+                                             scale=resp_scale))
+
+    v, err = _thresh_integrate(mu_p, std_p, sigma_n=sigma_n)
+    
     effective_dim = (scale/(2*w_opt))**dim
     factor = max(min(n_units, effective_dim) - 1, 0)
-    approx_prob = v*factor # min(v*factor, 1)
+    approx_prob = v*factor
     err_mag = (scale**2)/6
     out = (approx_prob, err_mag)
     if ret_components:

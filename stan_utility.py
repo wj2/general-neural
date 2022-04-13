@@ -6,11 +6,11 @@ import pystan as ps
 import re
 import arviz as az
 
-def recompile_model(mp):
+def recompile_model(mp, **kwargs):
     p, ext = os.path.splitext(mp)
     stan_path = p + '.stan'
     pkl_path = p + '.pkl'
-    sm = ps.StanModel(file=stan_path)
+    sm = ps.StanModel(file=stan_path, **kwargs)
     pickle.dump(sm, open(pkl_path, 'wb'))
     return mp
 
