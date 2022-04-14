@@ -380,13 +380,18 @@ def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
         out_arr[ind] = out[i]
     return out_arr, configs
 
+@ft.lru_cache(maxsize=None)
+def _integrate_pwr_var(wid):
+    int_func = ft.partial(_non_deriv_terms, wid)
+    return sint.quad(int_func, 0, 1)
+
 def random_uniform_pwr_var(n_units, wid, dims, scale=1):
     pwr = random_uniform_pwr(n_units, wid, dims, scale=scale)
     a = scale**4
     b = (np.sqrt(np.pi/2)*wid*ss.erf(np.sqrt(2)/wid)
          - .5*(wid**2)*(1 - np.exp(-2/(wid**2))))
     f = ft.partial(_non_deriv_terms, wid)
-    off_term, err = sint.quad(f, 0, 1)
+    off_term, err = _integrate_pwr_var(wid)
     if u.check_list(wid):
         c = np.product(b)
         off_term_prod = np.product(off_term)
