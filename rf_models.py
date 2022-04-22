@@ -292,15 +292,36 @@ def _thresh_integrate(mu_p, std_p, sigma_n=1):
         cumu = sts.norm(0, 1).cdf(-np.sqrt(d)/(2*sigma_n))
         return prob*cumu
 
+    # def integ_func_alt(d):
+    #     prob = sts.norm(mu_p, std_p).pdf(d)
+    #     sd = np.sqrt(d)/(2*sigma_n)
+    #     cumu = .5 + (1/np.sqrt(np.pi))*(-sd + (sd**3)/3)
+    #     # THIS ALMOST WORKS
+    #     return prob*cumu                                        
+
+    # print(sint.quad(integ_func_alt, 0, (2*sigma_n)**2)[0])
     return sint.quad(integ_func, 0, np.inf)
 
+def _approx_thresh_integrate(mu_p, std_p, sigma_n=1, bins=500, lam=3):
+    ds = np.linspace(0, mu_p + lam*std_p, bins)
+
+    probs = sts.norm(mu_p, std_p).pdf(ds)
+    cumus = sts.norm(0, 1).cdf(-np.sqrt(ds)/(2*sigma_n))
+    e1 = np.sum(probs*cumus*np.diff(ds)[0])
+    return e1
+
 def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
-                               resp_scale=1, ret_components=False):
+                               resp_scale=1, ret_components=False,
+                               use_approx=True):
     mu_p = 2*pwr
     std_p = np.sqrt(2*random_uniform_pwr_var(n_units, w_opt, dim,
                                              scale=resp_scale))
 
-    v, err = _thresh_integrate(mu_p, std_p, sigma_n=sigma_n)
+    if use_approx:
+        v = _approx_thresh_integrate(mu_p, std_p, sigma_n=sigma_n)
+        err = 0
+    else:
+        v, err = _thresh_integrate(mu_p, std_p, sigma_n=sigma_n)
     
     effective_dim = (scale/(2*w_opt))**dim
     factor = max(min(n_units, effective_dim) - 1, 0)
@@ -385,22 +406,29 @@ def _integrate_pwr_var(wid):
     int_func = ft.partial(_non_deriv_terms, wid)
     return sint.quad(int_func, 0, 1)
 
-def random_uniform_pwr_var(n_units, wid, dims, scale=1):
+def _taylor_pwr_var(wid):
+    # return ((.5*np.sqrt(np.pi)*wid)**2)*(4 - wid*8/np.sqrt(np.pi))
+    return ((.5*np.sqrt(np.pi)*wid)**2)*(4 - wid*(4 + np.pi)/np.sqrt(np.pi)
+                                         + (np.pi/8)*wid**2)
+
+def random_uniform_pwr_var(n_units, wid, dims, scale=1, use_taylor=False):
     pwr = random_uniform_pwr(n_units, wid, dims, scale=scale)
     a = scale**4
     b = (np.sqrt(np.pi/2)*wid*ss.erf(np.sqrt(2)/wid)
          - .5*(wid**2)*(1 - np.exp(-2/(wid**2))))
-    f = ft.partial(_non_deriv_terms, wid)
-    off_term, err = _integrate_pwr_var(wid)
+    if use_taylor:
+        off_term = _taylor_pwr_var(wid)
+        err = 0
+    else:
+        off_term, err = _integrate_pwr_var(wid)
     if u.check_list(wid):
         c = np.product(b)
         off_term_prod = np.product(off_term)
     else:
         c = b**dims
         off_term_prod = off_term**dims
-    pwr2 = a*(n_units*c + n_units*(n_units - 1)*off_term_prod) - pwr**2
-    # r_var = (pwr2 - (pwr/n_units)**2
-    r_var = pwr2
+    pwr2 = a*(n_units*c + n_units*(n_units - 1)*off_term_prod)
+    r_var = pwr2 - pwr**2
     return r_var
 
 def _min_mse_func_nostd(w, n_units=None, dims=None, total_pwr=None,
@@ -527,6 +555,11 @@ def random_uniform_pwr(n_units, wid, dims, scale=1):
         c = b**dims
     return n_units*a*c
 
+def random_uniform_fi_simplified(pwr, wid, sigma=1):
+    a = pwr*(.5*np.sqrt(np.pi) - wid)
+    b = sigma*(wid**2)*(np.sqrt(np.pi) - wid)
+    return a/b
+
 ## try to gain intuition for falling precision with increasing dimensionality
 def random_uniform_fi(n_units, wid, dims, scale=1, sigma_n=1, print_=False):
     fi = np.zeros((dims, dims))
@@ -571,6 +604,88 @@ def _cov_terms_func(wid, i, dims, m):
     dt = _deriv_term(wid_i, m)
     return (ndt*dt)**2
 
+def ni_non_deriv_term(w):
+    spi = np.sqrt(np.pi)
+    a = (2*w/spi)*np.exp(-1/(w**2))*ss.erf(1/w)
+    b = ss.erf(1/w)**2
+    c = -(np.sqrt(2)/spi)*w*ss.erf(np.sqrt(2)/w)
+    d = ss.erf(1/(2*w))
+    e = 2*(w/spi)*(np.exp(-1/(4*w**2)) - 1)
+    return np.pi*(w**2)*(a + b + c + d + e)/2
+
+def ni_deriv_term(w):
+    spi = np.sqrt(np.pi)
+    stwo = np.sqrt(2)
+    pref = 1/(16*w**4)
+
+    a = .25*(w**2)*(stwo*spi*w*ss.erf(stwo/w) - 4*np.exp(-2/(w**2)))
+    b = .5*w*np.exp(-1/(w**2))*(2*w - stwo*spi*np.exp(-1/(2*w**2))*(w**2 - 1)
+                              *ss.erf(1/(stwo*w)))
+    c = -spi*(w**3)*(ss.erf(1/w) - stwo*np.exp(-1/(2*w**2))
+                     *ss.erf(1/(stwo*w)))
+    d = -.5*spi*(w**3)*(stwo*ss.erf(stwo/w) - 2*np.exp(-1/(w**2))*ss.erf(1/w))
+
+    e = b
+    f = a
+    g = d
+    h = c
+
+    i = c
+    j = g
+    k = np.pi*(w**2)*((2*w/stwo)*np.exp(-1/(w**2))*ss.erf(1/w) + ss.erf(1/w)**2
+                      - (stwo/spi)*w*ss.erf(stwo/w))
+    l = np.pi*(w**2)*(ss.erf(1/(2*w)) + (2*w/spi)*(np.exp(-1/(4*(w**2))) - 1))
+
+    m = d
+    n = h
+    o = l
+    p = k
+    
+    big_sum = (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
+    return pref*np.sum(big_sum)
+
+def non_term_m(wid, i, dims):
+    out = []
+    if u.check_list(wid):
+        for j in range(dims):
+            w = wid[j]
+            if i == j:
+                b = (4*np.sqrt(np.pi) - np.sqrt(np.pi*2)*15/2
+                     - 4*np.sqrt(np.pi)*np.exp(-1/(4*w**2)))
+                v = (1/(16*w**2))*(4*np.pi + b*w)
+            else:
+                a = (np.sqrt(2) - 2 + 2*np.exp(-1/(4*w**2)))
+                v = ((w**2)*np.pi/2)*(2 - a*w/np.sqrt(np.pi))
+            out.append(v)
+        var = np.product(out)
+    else:
+        w = wid
+        b = (4*np.sqrt(np.pi) - np.sqrt(np.pi*2)*15/2
+             - 4*np.sqrt(np.pi)*np.exp(-1/(4*w**2)))
+        dt = (1/(16*w**2))*(4*np.pi + b*w)
+        a = (-np.sqrt(2) - 2 + 2*np.exp(-1/(4*w**2)))
+        ndt = ((w**2)*np.pi/2)*(2 - a*w/np.sqrt(np.pi))
+        var = dt*(ndt**(dims - 1))
+    return var    
+
+def non_integrate_m(wid, i, dims):
+    out = []
+    if u.check_list(wid):
+        for j in range(dims):
+            if i == j:
+                v = ni_deriv_term(wid[j])
+            else:
+                v = ni_non_deriv_term(wid[j])
+            out.append(v)
+        var = np.product(out)
+    else:
+        dt = ni_deriv_term(wid)
+        ndt = ni_non_deriv_term(wid)
+        var = dt*(ndt**(dims - 1))
+    # print('dt ', dt)
+    # print('ndt', ndt)
+    return var
+
 @ft.lru_cache(maxsize=None)
 def integrate_m(wid, i, dims):
     out = []
@@ -589,6 +704,8 @@ def integrate_m(wid, i, dims):
         f = ft.partial(_non_deriv_terms, wid)
         ndt, err = sint.quad(f, 0, 1)
         var = dt*(ndt**(dims - 1))        
+    # print('dt ', dt)
+    # print('ndt', ndt)    
     return var, 0
 
 def _full_cov_terms(wid, i, dims, *zs):
@@ -657,9 +774,8 @@ def _wid_full_integ2(wid):
     out, err = sint.tplquad(func, 0, 1, 0, 1, 0, 1)    
     return out
 
-
 def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3,
-                          ret_pieces=False):
+                          ret_pieces=False, non_integrate=False):
     fi_mean = random_uniform_fi(n_units, wid, dims, scale=scale,
                                 sigma_n=sigma_n)
     fi_v2 = np.zeros_like(fi_mean)
@@ -686,7 +802,12 @@ def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3,
         d = wid_i4 - (wid_i4 + 2*wid_i2 + 2)*np.exp(-2/wid_i2)
         e = 4*wid_i2
         fiv = (((a - b)/c) - (d/e))*jt
-        off_diag, err = integrate_m(wid, i, dims)
+        if non_integrate:
+            off_diag = non_term_m(wid, i, dims)
+            err = 0
+        else:
+            off_diag, err = integrate_m(wid, i, dims)
+        # print('od', off_diag)
         assert err < err_thr
         pref = (scale**4)/((sigma_n**2))
         # look at off_diag and fiv for a large RF vs small RF

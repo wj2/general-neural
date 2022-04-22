@@ -8,6 +8,10 @@ import general.neural_analysis as na
 from matplotlib.collections import LineCollection
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
+def set_ax_color(ax, color, sides=('bottom', 'top', 'left', 'right')):
+    for s in sides:
+        ax.spines[s].set_color(color)
+
 def line_speed_func(*args):
     diffs = np.diff(np.stack(args, axis=1), axis=0)
     speeds = np.sqrt(np.sum(diffs**2, axis=1))
