@@ -29,7 +29,11 @@ def plot_colored_line(xs, ys, zs=None, col_inds=None, cmap='Blues',
         col_inds = func(xs, ys)
     elif col_inds is None:
         col_inds = np.linspace(0, 1, len(xs))
-    norm.autoscale(col_inds)
+    if norm is not None:
+        norm.autoscale(col_inds)
+        print('norm')
+    else:
+        norm = plt.Normalize(0, 1)
     if zs is None:
         points = np.array([xs, ys]).T.reshape(-1, 1, 2)
         lc_func = LineCollection
@@ -252,8 +256,12 @@ def gen_circle_pts(n, r=1):
     return r*pts
 
 def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
+    axvals = np.array(axvals)
     if len(axvals) == val_len:
-        diff = np.diff(axvals)[diff_ind]
+        if len(axvals) < 2:
+            diff = 0
+        else:
+            diff = np.diff(axvals)[diff_ind]
         axvals_shift = axvals - diff/2
         if append:
             axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))

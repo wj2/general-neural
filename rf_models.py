@@ -292,14 +292,12 @@ def _thresh_integrate(mu_p, std_p, sigma_n=1):
         cumu = sts.norm(0, 1).cdf(-np.sqrt(d)/(2*sigma_n))
         return prob*cumu
 
-    # def integ_func_alt(d):
-    #     prob = sts.norm(mu_p, std_p).pdf(d)
-    #     sd = np.sqrt(d)/(2*sigma_n)
-    #     cumu = .5 + (1/np.sqrt(np.pi))*(-sd + (sd**3)/3)
-    #     # THIS ALMOST WORKS
-    #     return prob*cumu                                        
+    def integ_func_alt(d):
+        prob = sts.norm(mu_p, std_p).pdf(d)
+        sd = np.sqrt(d)/(2*sigma_n)
+        cumu = .5 + (1/np.sqrt(np.pi))*(-sd + (sd**3)/3)
+        return prob*cumu                                        
 
-    # print(sint.quad(integ_func_alt, 0, (2*sigma_n)**2)[0])
     return sint.quad(integ_func, 0, np.inf)
 
 def _approx_thresh_integrate(mu_p, std_p, sigma_n=1, bins=500, lam=3):
@@ -310,9 +308,46 @@ def _approx_thresh_integrate(mu_p, std_p, sigma_n=1, bins=500, lam=3):
     e1 = np.sum(probs*cumus*np.diff(ds)[0])
     return e1
 
+def rf_volume(wid, dim, wid_factor=2):
+    num = ((wid_factor*wid)**dim)*np.pi**(dim/2)
+    denom = ss.gamma(dim/2 + 1)
+    return num/denom
+
+def get_ws_range(total_pwr, n_units, dim_, n_ws=100, lambda_dev=1):
+    ws = np.linspace(.001, .5, n_ws)
+    
+    fi_mm = np.zeros(n_ws)
+    p_v1 = np.zeros_like(fi_mm)
+    p_v2 = np.zeros_like(fi_mm)
+    p_m2 = np.zeros_like(fi_mm)
+    p_thr = np.zeros_like(fi_mm)
+    eff_dim = np.zeros_like(fi_mm)
+    p_single = np.zeros_like(fi_mm)
+    mus_p = np.zeros_like(fi_mm)
+    stds_p = np.zeros_like(fi_mm)
+    thr_mag = np.zeros_like(fi_mm)
+
+    for i, w in enumerate(ws):
+        pwr = random_uniform_pwr(n_units, w, dim_, scale=1)
+        rescale = np.sqrt(total_pwr/pwr)
+        fi = random_uniform_fi(n_units, w, dim_, scale=rescale)
+        out = random_uniform_fi_var(n_units, w, dim_, scale=rescale,
+                                        ret_pieces=True)
+        fi_v, p_v1[i], p_v2[i], p_m2[i] = out
+        fi_mm[i] = fi[0, 0] - lambda_dev*np.sqrt(fi_v[0, 0])
+        out = compute_threshold_err_prob(total_pwr, n_units, dim_, w,
+                                         resp_scale=rescale,
+                                         ret_components=True)
+        eff_dim[i], p_single[i], mus_p[i], stds_p[i] = out[2:]
+        p_thr[i] = out[0]
+        thr_mag = out[1]
+    fi_mm[fi_mm < 0] = np.nan
+    total_mse = p_thr*thr_mag + (1 - p_thr)/fi_mm
+    return ws, total_mse, fi_mm, p_thr, thr_mag, p_single, mus_p, stds_p
+
 def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
                                resp_scale=1, ret_components=False,
-                               use_approx=True):
+                               use_approx=True, print_=False):
     mu_p = 2*pwr
     std_p = np.sqrt(2*random_uniform_pwr_var(n_units, w_opt, dim,
                                              scale=resp_scale))
@@ -322,10 +357,12 @@ def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
         err = 0
     else:
         v, err = _thresh_integrate(mu_p, std_p, sigma_n=sigma_n)
+
+    effective_dim = (scale**dim)/rf_volume(w_opt, dim)
     
-    effective_dim = (scale/(2*w_opt))**dim
     factor = max(min(n_units, effective_dim) - 1, 0)
     approx_prob = v*factor
+    approx_prob = min(approx_prob, 1)
     err_mag = (scale**2)/6
     out = (approx_prob, err_mag)
     if ret_components:
@@ -452,7 +489,7 @@ def _min_mse_func_nostd(w, n_units=None, dims=None, total_pwr=None,
     return loss    
 
 def _min_mse_func(w, n_units=None, dims=None, total_pwr=None,
-                        lambda_deviation=None):
+                  lambda_deviation=None):
     w = w[0]
     pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
     rescale = np.sqrt(total_pwr/pwr_pre)
@@ -468,7 +505,10 @@ def _min_mse_func(w, n_units=None, dims=None, total_pwr=None,
     if fi_mse < 0:
         fi_mse = np.inf
     m_prob = min(prob, 1)
-    loss = (1 - m_prob)*fi_mse + threshold_mse
+    loss = (1 - m_prob)*fi_mse + m_prob*em # threshold_mse
+
+    # print((1 - m_prob)*fi_mse)
+    # print((m_prob)*em)
     return loss    
 
 def _min_mse_func_inverted(w, n_units=None, dims=None, total_pwr=None,
@@ -515,7 +555,8 @@ def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
                                 T=T)
         w_opt = res.x[0]
     elif opt_kind == 'brute':
-        pre_ws = np.linspace(eps, 1, n_ws)
+        # pre_ws = np.linspace(eps, 1, n_ws)
+        pre_ws = np.linspace(eps, .4, n_ws)
         fis = list(min_func((w_i,)) for w_i in pre_ws)
         w_opt = pre_ws[np.nanargmin(fis)]
     elif opt_kind == 'peak_finding':
@@ -803,7 +844,7 @@ def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3,
         e = 4*wid_i2
         fiv = (((a - b)/c) - (d/e))*jt
         if non_integrate:
-            off_diag = non_term_m(wid, i, dims)
+            off_diag = non_integrate_m(wid, i, dims)
             err = 0
         else:
             off_diag, err = integrate_m(wid, i, dims)
