@@ -313,7 +313,7 @@ def rf_volume(wid, dim, wid_factor=2):
     denom = ss.gamma(dim/2 + 1)
     return num/denom
 
-def get_ws_range(total_pwr, n_units, dim_, n_ws=100, lambda_dev=1):
+def get_ws_range(total_pwr, n_units, dim_, n_ws=100, lambda_dev=2):
     ws = np.linspace(.001, .5, n_ws)
     
     fi_mm = np.zeros(n_ws)
@@ -497,15 +497,15 @@ def _min_mse_func(w, n_units=None, dims=None, total_pwr=None,
     fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
     fi_corr = fi[0, 0] - lambda_deviation*np.sqrt(fi_var[0, 0])
     
-    pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
+    # pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
     prob, em = compute_threshold_err_prob(total_pwr, n_units, dims, w,
                                           resp_scale=rescale)
     threshold_mse = prob*em
     fi_mse = 1/fi_corr
     if fi_mse < 0:
         fi_mse = np.inf
-    m_prob = min(prob, 1)
-    loss = (1 - m_prob)*fi_mse + m_prob*em # threshold_mse
+    # m_prob = min(prob, 1)
+    loss = (1 - prob)*fi_mse + prob*em # threshold_mse
 
     # print((1 - m_prob)*fi_mse)
     # print((m_prob)*em)
@@ -541,7 +541,7 @@ def _min_func(w, n_units=None, dims=None, total_pwr=None,
 def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
                  n_ws=200, n_iters=10, T=.35, opt_kind='brute',
-                 use_min_func=_min_mse_func, use_w=None):
+                 use_min_func=_min_mse_func, use_w=None, max_w=.5):
     max_pwr = max_snr*sigma_n
     min_func = ft.partial(use_min_func, n_units=n_units, dims=dims,
                           total_pwr=total_pwr, lambda_deviation=lambda_deviation)
@@ -549,18 +549,18 @@ def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
     if use_w is not None:
         w_opt = use_w
     elif opt_kind == 'basinhop':
-        minimizer_kwargs = {'bounds':((eps, 1),)}
+        minimizer_kwargs = {'bounds':((eps, max_w),)}
         res = sopt.basinhopping(min_func, (.5,), niter=n_iters,
                                 minimizer_kwargs=minimizer_kwargs,
                                 T=T)
         w_opt = res.x[0]
     elif opt_kind == 'brute':
         # pre_ws = np.linspace(eps, 1, n_ws)
-        pre_ws = np.linspace(eps, .4, n_ws)
+        pre_ws = np.linspace(eps, max_w, n_ws)
         fis = list(min_func((w_i,)) for w_i in pre_ws)
         w_opt = pre_ws[np.nanargmin(fis)]
     elif opt_kind == 'peak_finding':
-        pre_ws = np.linspace(eps, 1, n_ws)
+        pre_ws = np.linspace(eps, max_w, n_ws)
         fis = list(min_func((w_i,)) for w_i in pre_ws)
         peaks, _ = sig.find_peaks(fis)
         if len(peaks) == 0:
