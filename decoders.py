@@ -27,8 +27,14 @@ pd_arviz = {'observed_data':'y',
 
 class PeriodicDecoder:
 
-    def __init__(self, C=1, epsilon=1, kernel='rbf', 
-                 include_x=False, **kernel_params):
+    def __init__(self, **params):
+        self.set_params(**params)
+
+    def get_params(self, deep=True):
+        return self.params
+        
+    def set_params(self, C=1, epsilon=1, kernel='rbf', 
+                   include_x=False, **kernel_params):
         self.c = C
         self.epsilon = epsilon
         self._fit = None
@@ -121,6 +127,64 @@ class PeriodicDecoderTF(PeriodicDecoder):
         else:
             out = distr.sample()
         return out
+
+
+def _norm_period(x, y):
+    return tf.atan2(tf.sin(x - y), tf.cos(x - y))
+    
+def _periodic_loss(x, y):
+    return _norm_period(x, y)**2
+
+class PDRegression(PeriodicDecoder):
+
+    def __init__(self, **params):
+        self.params = params
+        self.set_params(**params)
+
+    def get_params(self, deep=True):
+        return self.params
+
+    def set_params(self, epochs=1000, verbose=False, learning_rate=.01,
+                   period=np.pi*2, loss=_periodic_loss, **kwargs):
+        self.epochs = epochs
+        self.period = period
+        self.verbose = verbose
+        self.learning_rate = learning_rate
+        self.loss = loss
+        super().set_params(**kwargs)
+        
+    def make_decoding_model(self, x_inp):
+        layers = []
+        layers.append(tfkl.InputLayer(input_shape=x_inp.shape[1]))
+        
+        reg = None # tfk.regularizers.l2(1/(100*self.c))
+        layers.append(tfkl.Dense(1, kernel_regularizer=reg))
+        model = tfk.Sequential(layers)
+        return model
+
+    def _preproc_y(self, y):
+        y = 2*np.pi*y/self.period
+        return y
+    
+    def fit(self, x, y, *args, verbose=False):
+        self.kernel_fit(x)
+        y = self._preproc_y(y)
+        x_kern = self.kernel_transform(x)
+        model = self.make_decoding_model(x_kern)
+        opt = tf.optimizers.Adam(learning_rate=self.learning_rate)
+        model.compile(optimizer=opt, loss=self.loss)
+        model.fit(x_kern, y, epochs=self.epochs,
+                  verbose=(self.verbose or verbose));
+        self._fit = model
+        return self
+
+    def predict(self, x, period=False):
+        x_kern = self.kernel_transform(x)
+        out = np.squeeze(self._fit(x_kern).numpy())
+        if period:
+            out = _norm_period(out, np.pi)
+        return out
+    
 
 class PeriodicDecoderStan:
 

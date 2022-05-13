@@ -489,7 +489,7 @@ def _min_mse_func_nostd(w, n_units=None, dims=None, total_pwr=None,
     return loss    
 
 def _min_mse_func(w, n_units=None, dims=None, total_pwr=None,
-                  lambda_deviation=None):
+                  lambda_deviation=None, ret_pieces=False):
     w = w[0]
     pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
     rescale = np.sqrt(total_pwr/pwr_pre)
@@ -497,19 +497,17 @@ def _min_mse_func(w, n_units=None, dims=None, total_pwr=None,
     fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
     fi_corr = fi[0, 0] - lambda_deviation*np.sqrt(fi_var[0, 0])
     
-    # pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
     prob, em = compute_threshold_err_prob(total_pwr, n_units, dims, w,
                                           resp_scale=rescale)
-    threshold_mse = prob*em
     fi_mse = 1/fi_corr
     if fi_mse < 0:
         fi_mse = np.inf
-    # m_prob = min(prob, 1)
-    loss = (1 - prob)*fi_mse + prob*em # threshold_mse
-
-    # print((1 - m_prob)*fi_mse)
-    # print((m_prob)*em)
-    return loss    
+    loss = (1 - prob)*fi_mse + prob*em
+    if ret_pieces:
+        out = (loss, fi_mse, fi, fi_var, prob, em)
+    else:
+        out = loss
+    return out 
 
 def _min_mse_func_inverted(w, n_units=None, dims=None, total_pwr=None,
                            lambda_deviation=None):
@@ -537,6 +535,25 @@ def _min_func(w, n_units=None, dims=None, total_pwr=None,
     pwr_end = random_uniform_pwr(n_units, w, dims, scale=rescale)
     loss = -fi[0, 0] + lambda_deviation*np.sqrt(fi_var[0, 0])
     return loss 
+
+def min_mse_power(total_pwr, n_units, dims, sigma_n=1, eps=1e-4,
+                  lambda_deviation=2, local_min_max=False, n_ws=200,
+                  max_w=.5):
+    min_func = ft.partial(_min_mse_func, n_units=n_units, dims=dims,
+                          total_pwr=total_pwr,
+                          lambda_deviation=lambda_deviation)
+
+    ws = np.linspace(eps, max_w, n_ws)
+    mses = list(min_func((w_i,)) for w_i in ws)
+    w_opt = ws[np.nanargmin(mses)]
+
+    out = _min_mse_func((w_opt,), n_units, dims, total_pwr,
+                        lambda_deviation*local_min_max,
+                        ret_pieces=True)
+    local_mse = out[1]
+    nonlocal_mse = out[-1]
+    nonlocal_prob = out[-2]
+    return local_mse, nonlocal_mse, nonlocal_prob
 
 def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
@@ -645,22 +662,29 @@ def _cov_terms_func(wid, i, dims, m):
     dt = _deriv_term(wid_i, m)
     return (ndt*dt)**2
 
-def ni_non_deriv_term(w):
+def ni_non_deriv_term(w, approx=False):
     spi = np.sqrt(np.pi)
     a = (2*w/spi)*np.exp(-1/(w**2))*ss.erf(1/w)
     b = ss.erf(1/w)**2
     c = -(np.sqrt(2)/spi)*w*ss.erf(np.sqrt(2)/w)
     d = ss.erf(1/(2*w))
     e = 2*(w/spi)*(np.exp(-1/(4*w**2)) - 1)
-    return np.pi*(w**2)*(a + b + c + d + e)/2
 
-def ni_deriv_term(w):
+    if approx:
+        de = d + e
+    else:
+        _f = lambda x: ss.erf((1 - x)/w)*ss.erf(x/w)
+        de = sint.quad(_f, 0, 1)[0]
+    
+    return np.pi*(w**2)*(a + b + c + de)/2
+
+def ni_deriv_term(w, approx=False):
     spi = np.sqrt(np.pi)
     stwo = np.sqrt(2)
     pref = 1/(16*w**4)
 
     a = .25*(w**2)*(stwo*spi*w*ss.erf(stwo/w) - 4*np.exp(-2/(w**2)))
-    b = .5*w*np.exp(-1/(w**2))*(2*w - stwo*spi*np.exp(-1/(2*w**2))*(w**2 - 1)
+    b = .5*w*np.exp(-1/(w**2))*(2*w - stwo*spi*np.exp(1/(2*w**2))*(w**2 - 1)
                               *ss.erf(1/(stwo*w)))
     c = -spi*(w**3)*(ss.erf(1/w) - stwo*np.exp(-1/(2*w**2))
                      *ss.erf(1/(stwo*w)))
@@ -673,9 +697,13 @@ def ni_deriv_term(w):
 
     i = c
     j = g
-    k = np.pi*(w**2)*((2*w/stwo)*np.exp(-1/(w**2))*ss.erf(1/w) + ss.erf(1/w)**2
+    k = np.pi*(w**2)*((2*w/spi)*np.exp(-1/(w**2))*ss.erf(1/w) + ss.erf(1/w)**2
                       - (stwo/spi)*w*ss.erf(stwo/w))
-    l = np.pi*(w**2)*(ss.erf(1/(2*w)) + (2*w/spi)*(np.exp(-1/(4*(w**2))) - 1))
+    if approx:
+        l = np.pi*(w**2)*(ss.erf(1/(2*w)) + (2*w/spi)*(np.exp(-1/(4*(w**2))) - 1))
+    else:
+        _f = lambda x: ss.erf((1 - x)/w)*ss.erf(x/w)
+        l = np.pi*(w**2)*sint.quad(_f, 0, 1)[0]
 
     m = d
     n = h
@@ -814,6 +842,49 @@ def _wid_full_integ2(wid):
         return (out_i*out_j1*out_j2)
     out, err = sint.tplquad(func, 0, 1, 0, 1, 0, 1)    
     return out
+
+def random_uniform_fi_var_simp(n_units, w, dims, total_pwr, sigma_n=1):
+    spi = np.sqrt(np.pi)
+    stwo = np.sqrt(2)
+
+    pref1 = (total_pwr**2)/(4*(n_units**2)*(sigma_n**2)*(w**3))
+    pref2 = ((spi - w)*w)**(-2*dims)
+    pref = pref1*pref2
+
+    a = w*(n_units**2)*(spi - 2*w)**2
+    b = ((spi - w)*w)**(2*(dims - 1))
+    ab = a*b
+
+    pref_cde = 2**(-2 - dims)*n_units
+    c = (3*stwo*spi - 8*w)*((stwo*spi - w)*w)**(dims - 1)
+    d = ((n_units - 1)*np.pi**(dims - .5)*w
+         *(w**2*(1 + (-2 - stwo + 2*np.exp(-1/(4*w**2)))*w/spi
+                 + ss.erf(1/(2*w))))**(dims - 1))
+    e = (4*spi - 16*w - 7*stwo*w + 8*np.exp(-1/(4*w**2))*w +
+         4*spi*ss.erf(1/(2*w)) + 8*stwo*np.exp(-1/(2*w**2))*w*ss.erf(1/(stwo*w)))
+        
+    return -pref*(ab - pref_cde*(c + d*e))
+
+def random_uniform_fi_var_simp2(n_units, w, dims, total_pwr, sigma_n=1):
+    spi = np.sqrt(np.pi)
+    stwo = np.sqrt(2)
+
+    pref1 = (total_pwr**2)/(4*(n_units**2)*(sigma_n**2)*(w**3))
+    pref2 = ((spi - w)*w)**(-2*dims)
+    pref = pref1*pref2
+
+    a = w*(n_units**2)*(spi - 2*w)**2
+    b = ((spi - w)*w)**(2*(dims - 1))
+    ab = a*b
+
+    pref_cde = 2**(-2 - dims)*n_units
+    c = (3*stwo*spi - 8*w)*((stwo*spi - w)*w)**(dims - 1)
+    d = ((n_units - 1)*np.pi**(dims - .5)*w
+         *(w**2*(2 + (-2 - stwo)*w/spi))**(dims - 1))
+    e = (8*spi - 16*w - 7*stwo*w)
+        
+    return -pref*(ab - pref_cde*(c + d*e))
+
 
 def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3,
                           ret_pieces=False, non_integrate=False):
