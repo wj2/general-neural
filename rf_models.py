@@ -497,14 +497,16 @@ def _min_mse_func(w, n_units=None, dims=None, total_pwr=None,
     fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
     fi_corr = fi[0, 0] - lambda_deviation*np.sqrt(fi_var[0, 0])
     
-    prob, em = compute_threshold_err_prob(total_pwr, n_units, dims, w,
-                                          resp_scale=rescale)
+    out = compute_threshold_err_prob(total_pwr, n_units, dims, w,
+                                     resp_scale=rescale,
+                                     ret_components=True)
+    prob, em, ed, v, mu_p, std_p = out
     fi_mse = 1/fi_corr
     if fi_mse < 0:
         fi_mse = np.inf
     loss = (1 - prob)*fi_mse + prob*em
     if ret_pieces:
-        out = (loss, fi_mse, fi, fi_var, prob, em)
+        out = (loss, fi_mse, fi, fi_var, prob, em, ed, v, mu_p, std_p)
     else:
         out = loss
     return out 
@@ -537,23 +539,26 @@ def _min_func(w, n_units=None, dims=None, total_pwr=None,
     return loss 
 
 def min_mse_power(total_pwr, n_units, dims, sigma_n=1, eps=1e-4,
-                  lambda_deviation=2, local_min_max=False, n_ws=200,
-                  max_w=.5):
+                  lambda_deviation=2, local_min_max=False, n_ws=1000,
+                  max_w=1):
     min_func = ft.partial(_min_mse_func, n_units=n_units, dims=dims,
                           total_pwr=total_pwr,
                           lambda_deviation=lambda_deviation)
 
     ws = np.linspace(eps, max_w, n_ws)
     mses = list(min_func((w_i,)) for w_i in ws)
-    w_opt = ws[np.nanargmin(mses)]
+    if not np.all(np.isnan(mses)):
+        w_opt = ws[np.nanargmin(mses)]
+    else:
+        w_opt = np.nan
 
     out = _min_mse_func((w_opt,), n_units, dims, total_pwr,
                         lambda_deviation*local_min_max,
                         ret_pieces=True)
     local_mse = out[1]
-    nonlocal_mse = out[-1]
-    nonlocal_prob = out[-2]
-    return local_mse, nonlocal_mse, nonlocal_prob
+    nonlocal_mse = out[5]
+    nonlocal_prob = out[4]
+    return local_mse, nonlocal_mse, nonlocal_prob, w_opt, out
 
 def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
                  volume_mult=2, lambda_deviation=2, ret_min_max=False,
