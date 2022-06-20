@@ -206,6 +206,28 @@ def get_random_uniform_fill(n_units, input_distributions, volume_factor=3,
     return means_all, wids_all
 
 @u.arg_list_decorator
+def get_fi_thresh(n_units, pwrs, dims, wid, lam=2, approx_w=False):
+    out_fi = np.zeros((len(n_units), len(pwrs), len(dims), len(wid)))
+    out_nl = np.zeros_like(out_fi)
+    out_w = np.zeros_like(out_fi)
+    out_var = np.zeros_like(out_fi)
+    for (i, j, k, l) in u.make_array_ind_iterator(out_fi.shape):
+        nu_, pwr, dim, w = n_units[i], pwrs[j], dims[k], wid[l]
+        if w is None:
+            if approx_w:
+                w = random_uniform_pwr_trs(nu_, lam, dim)
+            else:
+                out = min_mse_power(pwr, nu_, dim, max_w=.5, n_ws=200,
+                                    lambda_deviation=lam)
+                w = out[-2]
+        out_w[i, j, k, l] = w 
+        out_fi[i, j, k, l] = random_uniform_fi_pwr(nu_, pwr, w, dim)
+        out = get_thresh_prob(pwr, nu_, dim, w)
+        out_nl[i, j, k, l] = out[0]
+        out_var[i, j, k, l] = random_uniform_pwr_var_fix(nu_, pwr, w, dim)
+    return out_fi, out_nl, out_w, out_var
+
+@u.arg_list_decorator
 def get_pwr_fi_by_param(n_units, wid, dims, scale=1):
     out_pwr = np.zeros((len(n_units), len(wid), len(dims), len(scale)))
     out_fi = np.zeros_like(out_pwr)
@@ -231,7 +253,7 @@ def get_lattice_uniform_pop(total_pwr, n_units, dims, w_use=None,
                                       titrate_pwr=titrate_pwr,
                                       **kwargs)
     noise_distr = sts.multivariate_normal(np.zeros(n_units_pd**dims),
-                                          sigma_n)
+                                          sigma_n, allow_singular=True)
     
     return stim_distr, rf, drf, noise_distr
 
@@ -252,7 +274,8 @@ def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
     rf, drf = make_gaussian_vector_rf(ms, ws, scale, 0,
                                       titrate_pwr=titrate_pwr,
                                       **kwargs)
-    noise_distr = sts.multivariate_normal(np.zeros(n_units), sigma_n)
+    noise_distr = sts.multivariate_normal(np.zeros(n_units), sigma_n,
+                                          allow_singular=True)
     
     out = (stim_distr, rf, drf, noise_distr)
     if ret_params:
@@ -276,14 +299,27 @@ def ml_decode_rf(reps, func, dim, init_guess=None):
     x_opt = np.reshape(out.x, init_guess.shape)
     return x_opt
 
-def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None):
-    guesses = np.array(list(it.product(np.linspace(0, 1, n_gran),
-                                       repeat=dim)))
-    g_reps = func(guesses)
+def brute_decode_decouple(reps, func, dim, dim_i=(0,), n_gran=200,
+                          init_guess=None, **kwargs):
+    guesses = np.ones((n_gran**len(dim_i), dim))*np.nan
+    all_guess = np.array(list(it.product(np.linspace(0, 1, n_gran),
+                                         repeat=len(dim_i))))
+    guesses[:, dim_i] = all_guess
+    mg = _min_guess(func, reps, guesses, **kwargs)
+    return mg
+
+def _min_guess(func, reps, guesses, **kwargs):
+    g_reps = func(guesses, **kwargs)
     g_reps = np.expand_dims(g_reps, 1)
     reps = np.expand_dims(reps, 0)
-    g_ind = np.argmin(np.sum((g_reps - reps)**2, axis=-1), axis=0)
+    g_ind = np.argmin(np.nansum((g_reps - reps)**2, axis=-1), axis=0)
     return guesses[g_ind]
+
+
+def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None, **kwargs):
+    guesses = np.array(list(it.product(np.linspace(0, 1, n_gran),
+                                       repeat=dim)))
+    return _min_guess(func, reps, guesses, **kwargs)
 
 @ft.lru_cache(maxsize=None)
 def _thresh_integrate(mu_p, std_p, sigma_n=1):
@@ -300,12 +336,15 @@ def _thresh_integrate(mu_p, std_p, sigma_n=1):
 
     return sint.quad(integ_func, 0, np.inf)
 
-def _approx_thresh_integrate(mu_p, std_p, sigma_n=1, bins=500, lam=3):
+def _approx_thresh_integrate(mu_p, std_p, sigma_n=1, bins=500, lam=3,
+                             ret_all=False):
     ds = np.linspace(0, mu_p + lam*std_p, bins)
 
     probs = sts.norm(mu_p, std_p).pdf(ds)
     cumus = sts.norm(0, 1).cdf(-np.sqrt(ds)/(2*sigma_n))
-    e1 = np.sum(probs*cumus*np.diff(ds)[0])
+    e1 = probs*cumus*np.diff(ds)[0]
+    if not ret_all:
+        e1 = np.sum(e1)
     return e1
 
 def rf_volume(wid, dim, wid_factor=2):
@@ -345,19 +384,91 @@ def get_ws_range(total_pwr, n_units, dim_, n_ws=100, lambda_dev=2):
     total_mse = p_thr*thr_mag + (1 - p_thr)/fi_mm
     return ws, total_mse, fi_mm, p_thr, thr_mag, p_single, mus_p, stds_p
 
+def opt_w_approx(pwr, dims, sigma=1, w_factor=2):
+    alpha = (1/6)*(sigma/np.sqrt(pwr*np.pi))*np.exp(-pwr/(4*sigma**2))
+    beta = dims*ss.gamma(dims/2 + 1)*w_factor**(-dims - 1)/(np.pi**dims/2)
+    comb = pwr*alpha*beta/(5*sigma)
+    return comb**(1/(dims + 2))
+
+def min_mse_vec(pwr, n_units, dims, wid=None, ret_components=False,
+                **kwargs):
+    if wid is None:
+        wid = np.linspace(.001, .5, n_ws)
+    out = mse_w_range(pwr, n_units, dims, wid=wid, ret_components=True,
+                      **kwargs)
+    mse, l_mse, nl_mse, nl_prob = out
+    min_ind = np.argmin(mse)
+
+    out = mse[min_ind]
+    if ret_components:
+        out = (out, l_mse[min_ind], nl_mse[min_ind], nl_prob[min_ind],
+               wid[min_ind])
+    return out
+
+def mse_w_range(pwr, n_units, dims, sigma_n=1, lam=2, w_factor=2, wid=None,
+                n_ws=10000, ret_components=False):
+    if wid is None:
+        wid = np.linspace(.001, .5, n_ws)
+    fi = random_uniform_fi_vec(pwr, n_units, wid, dims, sigma_n=sigma_n)
+    p, em = compute_threshold_vec(pwr, n_units, dims, wid, sigma_n=sigma_n,
+                                  lam=lam)
+    out = 1/fi + p*em
+    if ret_components:
+        l_mse = 1/fi
+        nl_mse = em
+        nl_prob = p
+        out = (out, l_mse, nl_mse, nl_prob)
+    return out
+
+def compute_threshold_vec(pwr, n_units, dim, wid, sigma_n=1, lam=2,
+                          stim_scale=1):
+    scale = random_uniform_scale_vec(pwr, n_units, wid, dim)
+
+    v_std = np.sqrt(random_uniform_pwr_var(n_units, wid, dim,
+                                           scale=scale, vec=True))
+    
+    v_lam = pwr - (lam/np.sqrt(2))*v_std
+    v_lam = np.max([v_lam, np.zeros(v_lam.shape)], axis=0)
+    p_pre = (sigma_n/np.sqrt(v_lam*np.pi))*np.exp(-v_lam/(4*sigma_n**2))
+
+    effective_dim = (scale**dim)/rf_volume(wid, dim)
+
+    f = np.min([np.ones(effective_dim.shape)*n_units, effective_dim], axis=0)
+    factor = np.max([f, np.zeros(f.shape)], axis=0)
+    
+    approx_prob = np.min([p_pre*factor, np.ones(factor.shape)], axis=0) 
+    err_mag = np.ones(approx_prob.shape)*(stim_scale**2)/6
+    return approx_prob, err_mag   
+    
+def get_thresh_prob(pwr, n_units, dim, w, **kwargs):
+    pwr_pre = random_uniform_pwr(n_units, w, dim, scale=1)
+    rescale = np.sqrt(pwr/pwr_pre)
+    return compute_threshold_err_prob(pwr, n_units, dim, w, resp_scale=rescale,
+                                      **kwargs)
+
 def compute_threshold_err_prob(pwr, n_units, dim, w_opt, sigma_n=1, scale=1,
-                               resp_scale=1, ret_components=False,
+                               lam=2, resp_scale=1, ret_components=False,
                                use_approx=True, print_=False):
-    mu_p = 2*pwr
+    sigma_n = np.sqrt(sigma_n)
+    mu_p = np.sqrt(2*pwr)
     std_p = np.sqrt(2*random_uniform_pwr_var(n_units, w_opt, dim,
                                              scale=resp_scale))
+    v_std = np.sqrt(random_uniform_pwr_var(n_units, w_opt, dim,
+                                           scale=resp_scale))
 
     if use_approx:
-        v = _approx_thresh_integrate(mu_p, std_p, sigma_n=sigma_n)
+        v_lam = max(mu_p**2 - lam*std_p/np.sqrt(2), 0)
+        v_lam = pwr - (lam/np.sqrt(2))*v_std
+        v = (sigma_n/np.sqrt(v_lam*np.pi))*np.exp(-v_lam/(4*sigma_n**2))
+        # print(pwr, w_opt, mu_p, std_p)
+        # print('a', v)
+        v_obs = _approx_thresh_integrate(mu_p, std_p, sigma_n=sigma_n)
+        # print('b', v)
         err = 0
     else:
         v, err = _thresh_integrate(mu_p, std_p, sigma_n=sigma_n)
-
+    lam = 2
+    arg = np.sqrt(mu_p - lam*std_p)/(2*sigma_n)
     effective_dim = (scale**dim)/rf_volume(w_opt, dim)
     
     factor = max(min(n_units, effective_dim) - 1, 0)
@@ -438,6 +549,25 @@ def emp_rf_decoding(total_pwr, n_units, dims, sigma_n=1, n_pops=10,
         out_arr[ind] = out[i]
     return out_arr, configs
 
+def random_uniform_pwr_trs_partial(n_units, wid, lam, dim):
+    spi = np.sqrt(np.pi)
+    stwo = np.sqrt(2)
+    inner_left_num = np.pi - wid*spi*(stwo + 2)/2
+    inner_left_denom = spi/stwo - wid/2
+    inner_left = inner_left_num/inner_left_denom
+    left = 1 + (n_units - 1)*(wid**dim)*inner_left**dim
+    inner_right = ((spi - wid)**2)/(spi/stwo - wid/2)
+    right = ((1 + lam**2)/(lam**2))*n_units*(wid**dim)*inner_right**dim
+    return left, right
+
+def random_uniform_pwr_trs(n_units, lam, dim):
+    spi = np.sqrt(np.pi)
+    stwo = np.sqrt(2)
+    
+    out_denom = stwo*spi*((1/lam**2)*n_units + 1)**(1/dim)
+    out = 1/out_denom
+    return out
+
 @ft.lru_cache(maxsize=None)
 def _integrate_pwr_var(wid):
     int_func = ft.partial(_non_deriv_terms, wid)
@@ -445,20 +575,53 @@ def _integrate_pwr_var(wid):
 
 def _taylor_pwr_var(wid):
     # return ((.5*np.sqrt(np.pi)*wid)**2)*(4 - wid*8/np.sqrt(np.pi))
+    
     return ((.5*np.sqrt(np.pi)*wid)**2)*(4 - wid*(4 + np.pi)/np.sqrt(np.pi)
                                          + (np.pi/8)*wid**2)
 
-def random_uniform_pwr_var(n_units, wid, dims, scale=1, use_taylor=False):
-    pwr = random_uniform_pwr(n_units, wid, dims, scale=scale)
+def _approx_pwr_var(wid, do_integral=False, eps=1e-3):
+    # return ((.5*np.sqrt(np.pi)*wid)**2)*(4 - wid*8/np.sqrt(np.pi))
+    spi = np.sqrt(np.pi)
+    stwo = np.sqrt(2)
+    a = (2/spi)*wid*np.exp(-1/wid**2)*ss.erf(1/wid)
+    b = ss.erf(1/wid)**2
+    c = -(stwo/spi)*wid*ss.erf(stwo/wid)
+    if do_integral:
+        _f = lambda x: ss.erf((1 - x)/wid)*ss.erf(x/wid)
+        d, err = sint.quad(_f, 0, 1)
+        assert err < eps
+    else:
+        d = ss.erf(1/(2*wid)) - (2/spi)*wid*(1 - np.exp(-1/(4*wid**2)))
+    out = 2*(a + b + c + d)*(.5*spi*wid)**2
+    
+    return out
+
+def random_uniform_pwr_var_approx(n_units, pwr, wid, dims):
+    prefix = (pwr**2)/n_units
+    inner = 1/((wid*np.sqrt(2*np.pi))**dims) - 1
+    return prefix*inner
+
+def random_uniform_pwr_var_fix(n_units, pwr, wid, dims):
+    pwr_pre = random_uniform_pwr(n_units, wid, dims, scale=1)
+    rescale = np.sqrt(pwr/pwr_pre)
+    out = random_uniform_pwr_var(n_units, wid, dims, scale=rescale)
+    return out
+
+def random_uniform_pwr_var(n_units, wid, dims, scale=1, use_taylor=False,
+                           use_approx=True, vec=False):
+    pwr = random_uniform_pwr(n_units, wid, dims, scale=scale, vec=vec)
     a = scale**4
     b = (np.sqrt(np.pi/2)*wid*ss.erf(np.sqrt(2)/wid)
          - .5*(wid**2)*(1 - np.exp(-2/(wid**2))))
     if use_taylor:
         off_term = _taylor_pwr_var(wid)
         err = 0
+    elif use_approx:
+        off_term = _approx_pwr_var(wid)
+        err = 0 
     else:
         off_term, err = _integrate_pwr_var(wid)
-    if u.check_list(wid):
+    if (not vec) and u.check_list(wid):
         c = np.product(b)
         off_term_prod = np.product(off_term)
     else:
@@ -489,16 +652,20 @@ def _min_mse_func_nostd(w, n_units=None, dims=None, total_pwr=None,
     return loss    
 
 def _min_mse_func(w, n_units=None, dims=None, total_pwr=None,
-                  lambda_deviation=None, ret_pieces=False):
+                  lambda_deviation=None, ret_pieces=False,
+                  sigma_n=1):
     w = w[0]
     pwr_pre = random_uniform_pwr(n_units, w, dims, scale=1)
     rescale = np.sqrt(total_pwr/pwr_pre)
-    fi = random_uniform_fi(n_units, w, dims, scale=rescale)
-    fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale)
+    fi = random_uniform_fi(n_units, w, dims, scale=rescale,
+                           sigma_n=sigma_n)
+    fi_var = random_uniform_fi_var(n_units, w, dims, scale=rescale,
+                                   sigma_n=sigma_n)
     fi_corr = fi[0, 0] - lambda_deviation*np.sqrt(fi_var[0, 0])
     
     out = compute_threshold_err_prob(total_pwr, n_units, dims, w,
                                      resp_scale=rescale,
+                                     sigma_n=sigma_n,
                                      ret_components=True)
     prob, em, ed, v, mu_p, std_p = out
     fi_mse = 1/fi_corr
@@ -542,7 +709,7 @@ def min_mse_power(total_pwr, n_units, dims, sigma_n=1, eps=1e-4,
                   lambda_deviation=2, local_min_max=False, n_ws=1000,
                   max_w=1):
     min_func = ft.partial(_min_mse_func, n_units=n_units, dims=dims,
-                          total_pwr=total_pwr,
+                          total_pwr=total_pwr, sigma_n=sigma_n,
                           lambda_deviation=lambda_deviation)
 
     ws = np.linspace(eps, max_w, n_ws)
@@ -609,21 +776,67 @@ def max_fi_power(total_pwr, n_units, dims, sigma_n=1, max_snr=2, eps=1e-4,
         fi = min_func([w_opt])
     return fi, fi_var, pwr, w_opt, rescale_opt
 
-def random_uniform_pwr(n_units, wid, dims, scale=1):
-    a = scale**2
-    b = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
+def random_uniform_unit_mean(wid, dims, scale=1):
+    b = (np.sqrt(2*np.pi)*wid*ss.erf(1/(np.sqrt(2)*wid))
+         - 2*(wid**2)*(1 - np.exp(-1/(2*wid**2))))
     if u.check_list(wid):
         c = np.product(b)
     else:
         c = b**dims
+    return scale*c
+
+def random_uniform_unit_var(wid, dims, scale=1):
+    v2 = random_uniform_pwr(1, wid, dims, scale=scale)
+    v = random_uniform_unit_mean(wid, dims, scale=scale)
+    return v2 - v**2
+
+def random_uniform_pwr(n_units, wid, dims, scale=1, vec=True):
+    a = scale**2
+    b = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
+    if (not vec) and u.check_list(wid):
+        c = np.product(b)
+    else:
+        c = b**dims
     return n_units*a*c
+
+def random_uniform_fi_ms(pwr, wid, sigma=1):
+    a = pwr*.5
+    b = sigma*(wid**2)
+    return a/b    
 
 def random_uniform_fi_simplified(pwr, wid, sigma=1):
     a = pwr*(.5*np.sqrt(np.pi) - wid)
     b = sigma*(wid**2)*(np.sqrt(np.pi) - wid)
     return a/b
 
-## try to gain intuition for falling precision with increasing dimensionality
+def random_uniform_fi_pwr(n_units, pwr, wid, dims, sigma_n=1, ret_num=True):
+    p = random_uniform_pwr(n_units, wid, dims, scale=1)
+    rescale = np.sqrt(pwr/p)
+    out = random_uniform_fi(n_units, wid, dims, scale=rescale, sigma_n=sigma_n)
+    if ret_num:
+        out = out[0, 0]
+    return out
+
+def random_uniform_scale_vec(pwr, n_units, wid, dims):
+    denom = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
+    denom = (denom**dims)*n_units
+    scale = np.sqrt(pwr/denom)
+    return scale
+
+def random_uniform_fi_vec(pwr, n_units, wid, dims, sigma_n=1):
+    scale = random_uniform_scale_vec(pwr, n_units, wid, dims)
+    wid_i2 = wid**2
+    wid_i = wid
+    b_pre = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
+    b = b_pre**(dims - 1)
+    
+    a = n_units*(scale**2)/(sigma_n*wid_i2**2)
+    c = .5*wid_i2*(np.sqrt(np.pi)*wid_i*ss.erf(1/wid_i)
+                   - 2*np.exp(-1/wid_i2))
+    d = wid_i2*(wid_i2 - (wid_i2 + 1)*np.exp(-1/wid_i2))
+    fi = a*b*(c - d)
+    return fi
+
 def random_uniform_fi(n_units, wid, dims, scale=1, sigma_n=1, print_=False):
     fi = np.zeros((dims, dims))
     b_pre = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
@@ -890,6 +1103,11 @@ def random_uniform_fi_var_simp2(n_units, w, dims, total_pwr, sigma_n=1):
         
     return -pref*(ab - pref_cde*(c + d*e))
 
+def random_uniform_fi_var_pwr(n_units, pwr, wid, dims, **kwargs):
+    pre_pwr = random_uniform_pwr(n_units, wid, dims, scale=1)
+    rescale = np.sqrt(pwr/pre_pwr)
+    return random_uniform_fi_var(n_units, wid, dims, scale=rescale,
+                                 **kwargs)[0, 0]
 
 def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3,
                           ret_pieces=False, non_integrate=False):
