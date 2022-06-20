@@ -391,7 +391,7 @@ def opt_w_approx(pwr, dims, sigma=1, w_factor=2):
     return comb**(1/(dims + 2))
 
 def min_mse_vec(pwr, n_units, dims, wid=None, ret_components=False,
-                **kwargs):
+                n_ws=10000, **kwargs):
     if wid is None:
         wid = np.linspace(.001, .5, n_ws)
     out = mse_w_range(pwr, n_units, dims, wid=wid, ret_components=True,
@@ -785,7 +785,8 @@ def random_uniform_unit_mean(wid, dims, scale=1):
         c = b**dims
     return scale*c
 
-def random_uniform_unit_var(wid, dims, scale=1):
+def random_uniform_unit_var(pwr, n_units, wid, dims):
+    scale = random_uniform_scale_vec(pwr, n_units, wid, dims)
     v2 = random_uniform_pwr(1, wid, dims, scale=scale)
     v = random_uniform_unit_mean(wid, dims, scale=scale)
     return v2 - v**2
@@ -830,7 +831,7 @@ def random_uniform_fi_vec(pwr, n_units, wid, dims, sigma_n=1):
     b_pre = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
     b = b_pre**(dims - 1)
     
-    a = n_units*(scale**2)/(sigma_n*wid_i2**2)
+    a = n_units*(scale**2)/(sigma_n*wid_i2)**2
     c = .5*wid_i2*(np.sqrt(np.pi)*wid_i*ss.erf(1/wid_i)
                    - 2*np.exp(-1/wid_i2))
     d = wid_i2*(wid_i2 - (wid_i2 + 1)*np.exp(-1/wid_i2))
@@ -849,7 +850,7 @@ def random_uniform_fi(n_units, wid, dims, scale=1, sigma_n=1, print_=False):
             b = b_pre**(dims - 1)
             wid_i = wid
         wid_i2 = wid_i**2
-        a = n_units*(scale**2)/(sigma_n*wid_i2**2)
+        a = n_units*(scale**2)/(sigma_n*wid_i2)**2
         c = .5*wid_i2*(np.sqrt(np.pi)*wid_i*ss.erf(1/wid_i)
                        - 2*np.exp(-1/wid_i2))
         d = wid_i2*(wid_i2 - (wid_i2 + 1)*np.exp(-1/wid_i2))
@@ -1144,7 +1145,7 @@ def random_uniform_fi_var(n_units, wid, dims, scale=1, sigma_n=1, err_thr=1e-3,
             off_diag, err = integrate_m(wid, i, dims)
         # print('od', off_diag)
         assert err < err_thr
-        pref = (scale**4)/((sigma_n**2))
+        pref = (scale**4)/((sigma_n**4))
         # look at off_diag and fiv for a large RF vs small RF
         fi_v2[i, i] = pref*((n_units)*fiv/wid_i4
                             + (n_units - 1)*n_units*off_diag)
