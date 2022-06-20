@@ -7,6 +7,8 @@ import re
 from sklearn import svm
 import sklearn.linear_model as sklm
 import functools as ft
+import quantities as pq
+import neo
 
 import general.utility as u
 import general.neural_analysis as na
@@ -354,6 +356,47 @@ class Dataset(object):
             psth_c = np.sum(psth[..., time_filt], axis=-1)
             psths_collapsed.append(psth_c)
         return psths_collapsed
+
+    def get_spiketrains(self, begin, end, time_zero_field=None,
+                        regions=None, time_zero=None,
+                        repl_nan=False, ret_no_spk=False):
+        spks = self['spikeTimes']
+        spks = self._center_spks(spks, time_zero, time_zero_field)
+        if regions is not None:
+            regions_all = self['neur_regions']
+        outs = []
+        n_trls = []
+        no_spks = []
+        for i, spk in enumerate(spks):
+            if len(spk) == 0:
+                xs = na.compute_xs(binsize, begin, end, binstep)
+                resp_arr = np.zeros((0, self.get_nneurs()[i], len(xs)))
+                out = (resp_arr, xs, np.ones_like(resp_arr, dtype=bool))
+            else:
+                spk_stack = np.stack(spk, axis=0)
+                resp_arr = np.zeros(spk_stack.shape, dtype=object)
+                no_spk_mask = np.zeros_like(resp_arr, dtype=bool)
+                for i, j in u.make_array_ind_iterator(spk_stack.shape):
+                    spk_ij = spk_stack[i, j]
+                    mask = np.logical_and(spk_ij > begin, spk_ij < end)
+                    resp_arr[i, j] = neo.SpikeTrain(spk_ij[mask]*pq.s, end*pq.s,
+                                                    t_start=begin*pq.s)
+                    if len(spk_ij[mask]) == 0:
+                        no_spk_mask[i, j] = True
+            if regions is not None and len(resp_arr) > 0:
+                regs = regions_all[i].iloc[0]
+                mask = np.isin(regs, regions)
+                resp_arr = resp_arr[mask]
+            if repl_nan:
+                resp_arr[no_spk_mask] = np.nan
+            n_trls.append(resp_arr.shape[0])
+            outs.append(resp_arr)
+            no_spks.append(no_spk_mask)
+        if ret_no_spk:
+            out = (outs, no_spks)
+        else:
+            out = (outs)
+        return out
     
     # @ft.lru_cache(maxsize=10)
     def get_populations(self, *args, cache=False, **kwargs):

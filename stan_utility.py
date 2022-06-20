@@ -46,7 +46,7 @@ manifest_dict = {'general/stan_models/logit.pkl':generic_manifest,
 
 def fit_model(data_dict, model_path, max_treedepth=10, adapt_delta=.8,
               manifest=None, default_manifest=generic_manifest,
-              fixed_param=False, **kwargs):
+              arviz_convert=True, fixed_param=False, **kwargs):
     if manifest is None:
         manifest = manifest_dict.get(model_path, default_manifest)
     if fixed_param:
@@ -58,7 +58,10 @@ def fit_model(data_dict, model_path, max_treedepth=10, adapt_delta=.8,
     fit = sm.sampling(data=data_dict, control=control, algorithm=algorithm,
                       **kwargs)
     diag = ps.check_hmc_diagnostics(fit)
-    fit_az = az.from_pystan(posterior=fit, **manifest)
+    if arviz_convert:
+        fit_az = az.from_pystan(posterior=fit, **manifest)
+    else:
+        fit_az = None
     return fit, fit_az, diag
 
 def get_stan_params(mf, param, mask=None, skip_end=1):
