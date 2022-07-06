@@ -308,8 +308,8 @@ def brute_decode_decouple(reps, func, dim, dim_i=(0,), n_gran=200,
     mg = _min_guess(func, reps, guesses, **kwargs)
     return mg
 
-def _min_guess(func, reps, guesses, **kwargs):
-    g_reps = func(guesses, **kwargs)
+def _min_guess(func, reps, guesses, add_dc=0, **kwargs):
+    g_reps = func(guesses, **kwargs) + add_dc
     g_reps = np.expand_dims(g_reps, 1)
     reps = np.expand_dims(reps, 0)
     g_ind = np.argmin(np.nansum((g_reps - reps)**2, axis=-1), axis=0)
@@ -396,8 +396,8 @@ def min_mse_vec(pwr, n_units, dims, wid=None, ret_components=False,
         wid = np.linspace(.001, .5, n_ws)
     out = mse_w_range(pwr, n_units, dims, wid=wid, ret_components=True,
                       **kwargs)
-    mse, l_mse, nl_mse, nl_prob = out
-    min_ind = np.argmin(mse)
+    mse, l_mse, nl_mse, nl_prob, ws = out
+    min_ind = np.nanargmin(mse)
 
     out = mse[min_ind]
     if ret_components:
@@ -412,12 +412,12 @@ def mse_w_range(pwr, n_units, dims, sigma_n=1, lam=2, w_factor=2, wid=None,
     fi = random_uniform_fi_vec(pwr, n_units, wid, dims, sigma_n=sigma_n)
     p, em = compute_threshold_vec(pwr, n_units, dims, wid, sigma_n=sigma_n,
                                   lam=lam)
-    out = 1/fi + p*em
+    out = (1 - p)/fi + p*em
     if ret_components:
         l_mse = 1/fi
         nl_mse = em
         nl_prob = p
-        out = (out, l_mse, nl_mse, nl_prob)
+        out = (out, l_mse, nl_mse, nl_prob, wid)
     return out
 
 def compute_threshold_vec(pwr, n_units, dim, wid, sigma_n=1, lam=2,
@@ -785,8 +785,8 @@ def random_uniform_unit_mean(wid, dims, scale=1):
         c = b**dims
     return scale*c
 
-def random_uniform_unit_var(pwr, n_units, wid, dims):
-    scale = random_uniform_scale_vec(pwr, n_units, wid, dims)
+def random_uniform_unit_var(pwr, n_units, wid, dims, modules=1):
+    scale = random_uniform_scale_vec(pwr, n_units, wid, dims, modules=modules)
     v2 = random_uniform_pwr(1, wid, dims, scale=scale)
     v = random_uniform_unit_mean(wid, dims, scale=scale)
     return v2 - v**2
@@ -818,9 +818,11 @@ def random_uniform_fi_pwr(n_units, pwr, wid, dims, sigma_n=1, ret_num=True):
         out = out[0, 0]
     return out
 
-def random_uniform_scale_vec(pwr, n_units, wid, dims):
-    denom = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
-    denom = (denom**dims)*n_units
+def random_uniform_scale_vec(pwr, n_units, wid, dims, modules=1):
+    denom1 = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
+    denom2 = (modules - 1)*(np.sqrt(np.pi*2)*wid*ss.erf(1/(np.sqrt(2)*wid))
+                            - 2*(wid**2)*(1 - np.exp(-1/(2*(wid**2)))))
+    denom = (denom1**dims + denom2**(2*dims))*n_units
     scale = np.sqrt(pwr/denom)
     return scale
 

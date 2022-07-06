@@ -19,7 +19,7 @@ import string
 import os
 import pickle
 
-import general.decoders as gd
+# import general.decoders as gd
 import general.utility as u
 import general.nested_cv as ncv
 
@@ -778,7 +778,8 @@ def svm_regression(ds, r, leave_out=1, require_trials=15, resample=100,
                          collapse_time=collapse_time, **kwargs)
     return out
 
-def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderStanTime,
+
+def pop_regression_timestan(pop, reg_vals, model=None,
                             norm=True, pre_pca=None, impute_missing=False,
                             pre_rescale=False, **model_params):
     x_len = pop.shape[-1]
@@ -831,7 +832,7 @@ def pop_regression_timestan(pop, reg_vals, model=gd.PeriodicDecoderStanTime,
         tcs_shuff[:, j] = 1 - scores_shuff
     return tcs, tcs_shuff, (m1, m2), comp
 
-def pop_regression_stan(pop, reg_vals, model=gd.PeriodicDecoder, norm=True,
+def pop_regression_stan(pop, reg_vals, model=None, norm=True,
                         pre_pca=.99, impute_missing=False, do_arviz=False,
                         **model_params):
     x_len = pop.shape[-1]
