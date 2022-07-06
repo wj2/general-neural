@@ -431,7 +431,7 @@ def compute_threshold_vec(pwr, n_units, dim, wid, sigma_n=1, lam=2,
     v_lam = np.max([v_lam, np.zeros(v_lam.shape)], axis=0)
     p_pre = (sigma_n/np.sqrt(v_lam*np.pi))*np.exp(-v_lam/(4*sigma_n**2))
 
-    effective_dim = (scale**dim)/rf_volume(wid, dim)
+    effective_dim = (stim_scale**dim)/rf_volume(wid, dim)
 
     f = np.min([np.ones(effective_dim.shape)*n_units, effective_dim], axis=0)
     factor = np.max([f, np.zeros(f.shape)], axis=0)
