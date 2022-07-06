@@ -30,7 +30,7 @@ def make_model_pipeline(model=None, norm=True, pca=None, **kwargs):
     if pca is not None:
         pipe_steps.append(skd.PCA(pca))
     if model is not None:
-        pipe_steps.append(model())
+        pipe_steps.append(model(**kwargs))
     pipe = sklpipe.make_pipeline(*pipe_steps)
     return pipe
 

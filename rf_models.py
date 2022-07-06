@@ -397,7 +397,7 @@ def min_mse_vec(pwr, n_units, dims, wid=None, ret_components=False,
     out = mse_w_range(pwr, n_units, dims, wid=wid, ret_components=True,
                       **kwargs)
     mse, l_mse, nl_mse, nl_prob = out
-    min_ind = np.argmin(mse)
+    min_ind = np.nanargmin(mse)
 
     out = mse[min_ind]
     if ret_components:
