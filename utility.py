@@ -12,6 +12,7 @@ import pickle
 import itertools as it
 import configparser
 import sklearn.decomposition as skd
+import sklearn.preprocessing as skp
 from pref_looking.eyes import analyze_eyemove
 from pref_looking.bias import get_look_img
 
@@ -363,6 +364,13 @@ def participation_ratio(samps):
     pr = pr_only(pv)
     return pr
 
+def strict_dim(samps, eps=1e-10):
+    p = skd.PCA()
+    samps = skp.StandardScaler().fit_transform(samps)
+    p.fit(samps)
+    pv = p.explained_variance_
+    return np.sum(pv > eps)   
+
 def pr_only(pvs):
     pr = np.sum(pvs)**2/np.sum(pvs**2)
     return pr
@@ -381,6 +389,26 @@ def make_unit_vector(v):
     # else:
     #     v_norm = v
     return np.squeeze(v_norm)
+
+
+def make_param_sweep_dicts(file_template, default_range_func=np.linspace,
+                           **kwargs):
+    ranges = []
+    params = []
+    for param, range_args in kwargs.items():
+        if len(range_args) > 3:
+            range_func_p = range_args[-1]
+            range_args = range_args[:3]
+        else:
+            range_func_p = default_range_func
+        p_range = range_func_p(*range_args)
+        ranges.append(p_range)
+        params.append(param)
+    for i, vals in enumerate(it.product(*ranges)):
+        i_dict = {p:vals[j] for j, p in enumerate(params)}
+        fname = file_template.format(i)
+        pickle.dump(i_dict, open(fname, 'wb'))
+    return i
 
 def get_min_max(*args):
     mins = []
