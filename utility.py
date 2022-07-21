@@ -1234,6 +1234,24 @@ def bootstrap_tc(tc, func, axis=0, n=1000):
     func_ax = lambda x: func(x, axis=axis)
     return bootstrap_list(tc, func_ax, n=n, out_shape=new_shape)
 
+def bootstrap_mean(l, n=None):
+    if n is None:
+        n = len(l)
+    return bootstrap_list(l, np.nanmean, n=n)
+
+def discretize_group(split, *args, n_bins=10, scaler=np.linspace, eps=1e-10,
+                     func=bootstrap_mean, **kwargs):
+    bins = scaler(np.min(split) - eps, np.max(split) + eps, n_bins)
+    groups = np.digitize(split, bins)
+    split_mus = []
+    other_mus = list([] for arg in args) 
+    for gi in np.unique(groups):
+        mask = groups  == gi
+        split_mus.append(func(split[mask], **kwargs))
+        for i, arg in enumerate(args):
+            other_mus[i].append(func(arg[mask], **kwargs))
+    return split_mus, other_mus
+
 def bootstrap_list(l, func, n=1000, out_shape=None, ret_sem=False):
     if out_shape is None:
         stats = np.zeros(n)
