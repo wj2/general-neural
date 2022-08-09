@@ -1206,9 +1206,18 @@ def get_output_func_distribution_shapes(n_units_pd, input_distributions,
     return means_all, wids_all
 
 def get_distribution_gaussian_resp_func(n_units_pd, input_distributions, scale=1,
-                                        baseline=0, wid_scaling=1):
+                                        baseline=0, wid_scaling=1,
+                                        random_widths=False, rand_frac=.5):
     ms, ws = get_output_func_distribution_shapes(n_units_pd, input_distributions,
                                                  wid_scaling=wid_scaling)
+    if random_widths:
+        rng = np.random.default_rng()
+        min_w = np.min(ws)
+        for ind in u.make_array_ind_iterator(ws.shape):
+            w_now = ws[ind]
+            w_new =  rng.normal(w_now, w_now*rand_frac, size=1)
+            ws[ind] = max(w_new, min_w)
+        
     resp_func, d_resp_func = make_gaussian_vector_rf(ms, ws, scale,
                                                      baseline)
     return resp_func, d_resp_func, ms, ws
