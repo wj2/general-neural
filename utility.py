@@ -390,7 +390,6 @@ def make_unit_vector(v):
     #     v_norm = v
     return np.squeeze(v_norm)
 
-
 def make_param_sweep_dicts(file_template, default_range_func=np.linspace,
                            **kwargs):
     ranges = []

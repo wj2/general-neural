@@ -321,6 +321,25 @@ def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None, **kwargs):
                                        repeat=dim)))
     return _min_guess(func, reps, guesses, **kwargs)
 
+def refine_decode_rf(reps, func, dim, n_gran=10, **kwargs):
+    guesses = np.array(list(it.product(np.linspace(0, 1, n_gran),
+                                       repeat=dim)))
+    guesses = _min_guess(func, reps, guesses, **kwargs)
+
+    def _f_surrogate(x):
+        x_inp = np.reshape(x, guesses.shape)
+        out = func(x_inp)
+        return np.sum((reps - out)**2)
+    
+    bounds = ((0, 1),)*np.product(guesses.shape)
+    flat_guesses = np.reshape(guesses, np.product(guesses.shape))
+    print(guesses)
+    out = sopt.minimize(_f_surrogate, flat_guesses, bounds=bounds)
+    x = np.reshape(out.x, guesses.shape)
+    print(out)
+    print(x)
+    return x
+
 @ft.lru_cache(maxsize=None)
 def _thresh_integrate(mu_p, std_p, sigma_n=1):
     def integ_func(d):
@@ -1181,7 +1200,7 @@ def get_output_func_distribution_shapes(n_units_pd, input_distributions,
         dm_p1[-half:] = dm[-half:]
         if n_units_pd % 2 == 1:
             dm_p1[half] = dm[half]
-        wids[j] = dm_p1
+        wids[j] = dm_p1**2
     means_all = np.array(list(it.product(*means)))
     wids_all = np.array(list(it.product(*wids)))
     return means_all, wids_all
