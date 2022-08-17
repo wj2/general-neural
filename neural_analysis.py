@@ -9,15 +9,18 @@ from sklearn.decomposition import PCA
 import sklearn.decomposition as skd
 import sklearn.exceptions as ske
 import sklearn.model_selection as skms
+import sklearn.metrics as skm
 import sklearn.impute as skimp
 import sklearn.naive_bayes as sknb
 import arviz as az
 from dPCA.dPCA import dPCA
 import warnings
 import itertools as it
+import functools as ft
 import string
 import os
 import pickle
+
 
 # import general.decoders as gd
 import general.utility as u
@@ -34,9 +37,25 @@ def make_model_pipeline(model=None, norm=True, pca=None, **kwargs):
     pipe = sklpipe.make_pipeline(*pipe_steps)
     return pipe
 
+def confusion_scorer(clf, X, y, additional_scores=None, n_classes=None):
+    if n_classes is None:
+        n_classes = len(np.unique(y))
+    if additional_scores is None:
+        additional_scores = {'accuracy':skm.accuracy_score}
+    y_pred = clf.predict(X)
+    out = skm.confusion_matrix(y, y_pred, labels=np.arange(n_classes))
+    out_dict = {}
+    for ind in u.make_array_ind_iterator(out.shape):
+        out_dict[str(ind)] = out[ind]
+    for (key, scorer) in additional_scores.items():
+        out_dict[key] = scorer(y, y_pred)
+    return out_dict
+
 def nearest_decoder(*cats, cv_runs=20, cv_prop=.1, pre_pca=None, norm=True,
                     cv_type=skms.ShuffleSplit, model=sknb.GaussianNB,
-                    accumulate_time=True, **kwargs):
+                    accumulate_time=True, scoring=None,
+                    generate_confusion=False,
+                    **kwargs):
     pipe = make_model_pipeline(model, norm=norm, pca=pre_pca)
     labels = np.concatenate(list((i,)*cat_i.shape[-2]
                                  for i, cat_i in enumerate(cats)))
@@ -45,6 +64,14 @@ def nearest_decoder(*cats, cv_runs=20, cv_prop=.1, pre_pca=None, norm=True,
 
     out = np.zeros((cv_runs, cats_all.shape[-1]))
     out_info = np.zeros(cats_all.shape[-1], dtype=object)
+    if generate_confusion:
+        out_confusion = np.zeros((cv_runs, cats_all.shape[-1],
+                                  len(cats), len(cats)))
+        orig_scoring = scoring
+        scoring = ft.partial(confusion_scorer, additional_scores=scoring,
+                             n_classes=len(cats))
+    else:
+        out_confusion = None
     for i in range(cats_all.shape[-1]):
         if accumulate_time:
             dec_pop = list(cats_all[..., j] for j in range(i + 1))
@@ -52,10 +79,23 @@ def nearest_decoder(*cats, cv_runs=20, cv_prop=.1, pre_pca=None, norm=True,
         else:
             dec_pop = cats_all[..., i].T
         res = skms.cross_validate(pipe, dec_pop, labels,
-                                  cv=cv, return_estimator=True)
-        out[:, i] = res['test_score']
+                                  cv=cv, return_estimator=True,
+                                  scoring=scoring)
+        if generate_confusion:
+            if orig_scoring is None:
+                out[:, i] = res['test_accuracy']
+            else:
+                out[:, i] = res['test_{}'.format(list(scoring.keys())[0])]
+            for (j, k) in it.product(range(len(cats)), repeat=2):
+                out_confusion[:, i, j, k] = res['test_({}, {})'.format(j, k)]
+        else:
+            out[:, i] = res['test_score']
         out_info[i] = res
-    return out, out_info
+    if generate_confusion:
+        out_all = (out, out_info, out_confusion)
+    else:
+        out_all = (out, out_info)
+    return out_all
 
 def apply_transform_tc(tc, trs):
     out = np.zeros_like(tc)

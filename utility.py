@@ -375,7 +375,7 @@ def pr_only(pvs):
     pr = np.sum(pvs)**2/np.sum(pvs**2)
     return pr
 
-def make_unit_vector(v):
+def make_unit_vector(v, squeeze=True):
     v = np.array(v)
     if len(v.shape) == 1:
         v = np.expand_dims(v, 0)
@@ -388,7 +388,9 @@ def make_unit_vector(v):
     #     v_norm = v/v_len
     # else:
     #     v_norm = v
-    return np.squeeze(v_norm)
+    if squeeze:
+        v_norm = np.squeeze(v_norm)
+    return v_norm
 
 def make_param_sweep_dicts(file_template, default_range_func=np.linspace,
                            **kwargs):

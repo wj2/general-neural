@@ -239,15 +239,23 @@ def get_pwr_fi_by_param(n_units, wid, dims, scale=1):
     return out_pwr, out_fi
 
 def get_lattice_uniform_pop(total_pwr, n_units, dims, w_use=None,
-                            scale_use=None, sigma_n=1, **kwargs):
+                            scale_use=None, sigma_n=1, ret_params=False,
+                            **kwargs):
     distrs = (sts.uniform(0, 1),)*dims
     stim_distr = u.MultivariateUniform(dims, (0, 1))
 
     n_units_pd = int(np.round(n_units**(1/dims)))
     ms, ws = get_output_func_distribution_shapes(n_units_pd, distrs,
                                                  wid_scaling=1)
-    scale = total_pwr
-    titrate_pwr = stim_distr
+
+    if w_use is not None:
+        ws = np.ones_like(ws)*w_use
+    if scale_use is not None:
+        scale = scale_use
+        titrate_pwr = None
+    else:
+        scale = total_pwr
+        titrate_pwr = stim_distr
     
     rf, drf = make_gaussian_vector_rf(ms, ws**2, scale, 0,
                                       titrate_pwr=titrate_pwr,
@@ -255,7 +263,10 @@ def get_lattice_uniform_pop(total_pwr, n_units, dims, w_use=None,
     noise_distr = sts.multivariate_normal(np.zeros(n_units_pd**dims),
                                           sigma_n, allow_singular=True)
     
-    return stim_distr, rf, drf, noise_distr
+    out = (stim_distr, rf, drf, noise_distr)
+    if ret_params:
+        out = out + (ms, ws)
+    return out
 
 def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
                            scale_use=None, sigma_n=1, ret_params=False,
@@ -281,6 +292,40 @@ def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
     if ret_params:
         out = out + (ms, ws)
     return out
+
+def visualize_random_rf_responses(resp, cents, vis_dims=(0, 1), cmap='Blues',
+                                  ax=None, normalize_resp=True,
+                                  plot_stim=None, ms=5, stim_color='r'):
+    cmap = plt.get_cmap(cmap)
+    vis_dims = np.array(vis_dims)
+    if ax is None:
+        f = plt.figure()
+        if len(vis_dims) == 3:
+            ax = f.add_subplot(1, 1, 1, projection='3d')
+        else:
+            ax = f.add_subplot(1, 1, 1, aspect='equal')
+    if normalize_resp:
+        r_ = resp - np.min(resp)
+        resp = r_/np.max(r_)
+    for i, r in enumerate(resp):
+        pt = cents[i, vis_dims]
+        if r > 0:
+            ax.plot(*pt,
+                    'o',
+                    color=cmap(r),
+                    alpha=.5)
+    if plot_stim is not None:
+        for i, ps in enumerate(plot_stim):
+            pt = ps[vis_dims]
+            ax.plot(*pt,
+                    'o',
+                    color=stim_color,
+                    markersize=ms)
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
+    if len(vis_dims) == 3:
+        ax.set_zlim([0, 1])
+    return ax
 
 def ml_decode_rf(reps, func, dim, init_guess=None):
     if init_guess is None:
