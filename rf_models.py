@@ -313,7 +313,7 @@ def visualize_random_rf_responses(resp, cents, vis_dims=(0, 1), cmap='Blues',
             ax.plot(*pt,
                     'o',
                     color=cmap(r),
-                    alpha=.5)
+                    alpha=r)
     if plot_stim is not None:
         for i, ps in enumerate(plot_stim):
             pt = ps[vis_dims]
@@ -378,11 +378,8 @@ def refine_decode_rf(reps, func, dim, n_gran=10, **kwargs):
     
     bounds = ((0, 1),)*np.product(guesses.shape)
     flat_guesses = np.reshape(guesses, np.product(guesses.shape))
-    print(guesses)
     out = sopt.minimize(_f_surrogate, flat_guesses, bounds=bounds)
     x = np.reshape(out.x, guesses.shape)
-    print(out)
-    print(x)
     return x
 
 @ft.lru_cache(maxsize=None)
