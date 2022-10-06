@@ -59,22 +59,41 @@ class Figure:
     def make_gss(self):
         pass
 
-    def get_axs(self, grids, sharex=False, sharey=False, plot_3ds=None,
-                all_3d=False, squeeze=False, **all_ax_kwargs):
+    def get_axs(self, grids, sharex=None, sharey=None, plot_3ds=None,
+                all_3d=False, squeeze=False, exp_dim=0, share_ax_x=None,
+                share_ax_y=None, **all_ax_kwargs):
         grid_arr = np.array(grids)
+        if len(grid_arr.shape) == 1:
+            grid_arr = np.expand_dims(grid_arr, exp_dim)
         ax_arr = np.zeros_like(grid_arr, dtype=object)
+        share_ax = None
         for i, ind in enumerate(u.make_array_ind_iterator(grid_arr.shape)):
             ax_kwarg = dict()
             ax_kwarg.update(all_ax_kwargs)
             if plot_3ds is not None and plot_3ds[ind] or all_3d:
                 ax_kwarg['projection'] = '3d'
-            if i > 0 and sharex:
+            if share_ax_x is not None:
+                ax_kwarg['sharex'] = share_ax_x
+            if share_ax_y is not None:
+                ax_kwarg['sharey'] = share_ax_y
+            if i > 0 and sharex is not None:
                 ax_kwarg['sharex'] = share_ax
-            if i > 0 and sharey:
+            if i > 0 and sharey is not None:
                 ax_kwarg['sharey'] = share_ax
             ax_arr[ind] = self.f.add_subplot(grid_arr[ind], **ax_kwarg)
-            if i == 0:
-                share_ax = ax_arr[ind]
+            if i == 0 and sharex == 'all':
+                share_ax_x = ax_arr[ind]
+            if i == 0 and sharey == 'all':
+                share_ax_y = ax_arr[ind]
+            if ind[0] == 0 and sharex == 'horizontal':
+                share_ax_x = ax_arr[ind]
+            if ind[0] == 0 and sharey == 'horizontal':
+                share_ax_y = ax_arr[ind]
+            if ind[1] == 0 and sharex == 'vertical':
+                share_ax_x = ax_arr[ind]
+            if ind[1] == 0 and sharey == 'vertical':
+                share_ax_y = ax_arr[ind]
+                
         if squeeze:
             ax_arr = np.squeeze(ax_arr)
         return ax_arr

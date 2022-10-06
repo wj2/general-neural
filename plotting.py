@@ -2,6 +2,7 @@
 import numpy as np
 import scipy.stats as sts
 import itertools as it
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import general.utility as u
 import general.neural_analysis as na
@@ -31,7 +32,6 @@ def plot_colored_line(xs, ys, zs=None, col_inds=None, cmap='Blues',
         col_inds = np.linspace(0, 1, len(xs))
     if norm is not None:
         norm.autoscale(col_inds)
-        print('norm')
     else:
         norm = plt.Normalize(0, 1)
     if zs is None:
@@ -275,6 +275,10 @@ def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, equal_bins=False,
     else:
         xs_bins = xs
         ys_bins = ys
+    if len(data.shape) == 1:
+        lens = [len(xs), len(ys)]
+        dim = np.argmin(lens)
+        data = np.repeat(np.expand_dims(data, dim), lens[dim], axis=dim).T
     xs_ax = pcolormesh_axes(xs_bins, len(xs_bins), diff_ind=diff_ind,
                             append=append)
     ys_ax = pcolormesh_axes(ys_bins, len(ys_bins), diff_ind=diff_ind,
@@ -386,7 +390,20 @@ def plot_trace_wpts(x, data, ax=None, color=None, **kwargs):
                         errorbar=False, color=color)
     for i, data_i in enumerate(data):
         ax.plot(x, data_i, 'o', color=l[0].get_color(), **kwargs)
-    
+
+def make_linear_cmap(b1, b2=None, name=''):
+    if b2 is None:
+        b_start = (1,)*len(b1)
+        b_end = b1
+    else:
+        b_start = b1
+        b_end = b2
+    cmap = mpl.colors.LinearSegmentedColormap.from_list(
+        name,
+        [b_start, b_end]
+    )
+    return cmap
+        
 def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
@@ -684,6 +701,34 @@ def clean_plot(ax, i, max_i=None, ticks=True, spines=True, horiz=True):
                 plt.setp(ax.get_xticklabels(), visible=False)
                 ax.xaxis.set_tick_params(size=0)
 
+def digitize_vars(xs, ys, n_bins=10, cent_func=np.mean, eps=1e-10,
+                  use_max=None, use_min=None):
+    if use_max is None:
+        use_max = np.nanmax(xs)
+    if use_min is None:
+        use_min = np.nanmin(xs)
+    bins = np.linspace(use_min, use_max + eps, n_bins + 1)
+    bs = np.digitize(xs, bins)
+    u_bs = np.unique(bs)
+    u_bs = u_bs[:n_bins]
+    u_bs = u_bs[u_bs > 0]
+    y_cents = np.zeros(len(u_bs))
+    x_cents = np.zeros(len(u_bs))
+    for i, b in enumerate(u_bs):
+        mask = bs == b
+        x_cents[i] = cent_func(xs[mask])
+        y_cents[i] = cent_func(ys[mask])
+    return x_cents, y_cents
+                
+def plot_scatter_average(xs, ys, *args, ax=None, n_bins=10, cent_func=np.mean,
+                         eps=1e-10, use_max=None, use_min=None, **kwargs):
+    if ax is None:
+        f, ax = plt.subplots(1, 1)
+    x_cs, y_cs = digitize_vars(xs, ys, n_bins=n_bins, cent_func=cent_func,
+                               eps=eps, use_max=use_max, use_min=use_min)
+    out = ax.plot(x_cs, y_cs, *args, **kwargs)
+    return out    
+                
 def make_xaxis_scale_bar(ax, magnitude=None, double=True, anchor=0, bottom=True,
                          true_scale=False, label='', text_buff=.22):
     xl = ax.get_xlim()

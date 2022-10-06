@@ -1047,11 +1047,11 @@ def make_ratio_function(func1, func2):
         return norm
     return _ratio_func
 
-def normalize_periodic_range(diff, cent=0, radians=True):
+def normalize_periodic_range(diff, cent=0, radians=True, const=None):
     diff = np.array(diff)
-    if radians:
+    if radians and const is None:
         const = np.pi
-    else:
+    elif const is None:
         const = 180
     m = np.mod(diff + const, 2*const)
     m = np.mod(m + 2*const, 2*const) - const
