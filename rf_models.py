@@ -894,7 +894,7 @@ def random_uniform_fi_vec(pwr, n_units, wid, dims, sigma_n=1):
     b_pre = np.sqrt(np.pi)*wid*ss.erf(1/wid) - (wid**2)*(1 - np.exp(-1/(wid**2)))
     b = b_pre**(dims - 1)
     
-    a = n_units*(scale**2)/(sigma_n*wid_i2)**2
+    a = n_units*(scale**2)/((sigma_n**2)*wid_i2)**2
     c = .5*wid_i2*(np.sqrt(np.pi)*wid_i*ss.erf(1/wid_i)
                    - 2*np.exp(-1/wid_i2))
     d = wid_i2*(wid_i2 - (wid_i2 + 1)*np.exp(-1/wid_i2))
