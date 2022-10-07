@@ -481,6 +481,14 @@ def mse_w_range(pwr, n_units, dims, sigma_n=1, lam=2, w_factor=2, wid=None,
         out = (out, l_mse, nl_mse, nl_prob, wid)
     return out
 
+def random_uniform_pwr_var_scale(pwr, n_units, wid, dim):
+    scale = random_uniform_scale_vec(pwr, n_units, wid, dim)
+
+    out = random_uniform_pwr_var(n_units, wid, dim,
+                                 scale=scale, vec=True)
+    return out
+    
+
 def compute_threshold_vec(pwr, n_units, dim, wid, sigma_n=1, lam=2,
                           stim_scale=1):
     scale = random_uniform_scale_vec(pwr, n_units, wid, dim)
