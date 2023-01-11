@@ -101,11 +101,13 @@ class Figure:
     def generate(self, panels=None):
         pass
 
-    def save(self, file_=None, bbox_inches='tight', transparent=True):
+    def save(self, file_=None, bbox_inches='tight', transparent=True,
+             dpi=300):
         if file_ is None:
             file_ = self.fig_key
         fname = os.path.join(self.bf, file_)
-        self.f.savefig(fname, bbox_inches=bbox_inches, transparent=transparent)
+        self.f.savefig(fname, bbox_inches=bbox_inches, transparent=transparent,
+                       dpi=dpi)
         
     def get_data(self):
         return self.data

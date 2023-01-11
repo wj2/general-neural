@@ -21,17 +21,23 @@ import string
 import os
 import pickle
 
+import sklearn.base as skb
+import sklearn.utils as sku
+import joblib as jl
 
 # import general.decoders as gd
 import general.utility as u
 import general.nested_cv as ncv
 
-def make_model_pipeline(model=None, norm=True, pca=None, **kwargs):
+def make_model_pipeline(model=None, norm=True, pca=None, post_norm=False,
+                        **kwargs):
     pipe_steps = []
     if norm:
         pipe_steps.append(skp.StandardScaler())
     if pca is not None:
         pipe_steps.append(skd.PCA(pca))
+    if post_norm:
+        pipe_steps.append(skp.StandardScaler())
     if model is not None:
         pipe_steps.append(model(**kwargs))
     pipe = sklpipe.make_pipeline(*pipe_steps)
@@ -1232,33 +1238,49 @@ def _eval_fit_models(data, labels, estimators):
         out[i] = est.score(data, labels)
     return out
 
-rand_splitter = skms.ShuffleSplit
+def _cv_wrapper(model, X, y, cv=None, extra_splitter=None, **kwargs):
+    if cv is None:
+        rng = np.random.default_rng()
+        rand_state = rng.integers(2**32)
+        cv = skms.KFolds(cv)
+        extra_splitter = skms.KFolds(cv)
+        
+    keep_ests = kwargs.pop('return_estimator')    
+    out = skms.cross_validate(model, X, y, cv=cv, return_estimator=True, **kwargs)
+    predictions = []
+    targets = []
+    for i, (_, te_inds) in enumerate(extra_splitter.split(X, y)):
+        est = out['estimator'][i]
+        pred = est.predict(X[te_inds])
+        targ = y[te_inds]
+        predictions.append(pred)
+        targets.append(targ)
+    out['predictions'] = np.array(predictions)
+    out['targets'] = np.array(targets)
+    if not keep_ests:
+        out.pop('estimator')
+    return out
+    
 
+rand_splitter = skms.ShuffleSplit
 def fold_skl_multi(*cs, folds_n=20, model=svm.SVC, params=None, norm=True,
                    shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
                    impute_missing=False, verbose=False,
                    rand_splitter=rand_splitter,
                    time_accumulate=False, gen_cs=None,
                    test_prop=None,
+                   use_single_splitter_int=True,
                    **model_kwargs):
-    print(cs[0].shape)
     if test_prop is None:
         test_prop = 1/folds_n
+        
     if params is None:
         params = model_kwargs
     else:
         model_kwargs.update(params)
         params = model_kwargs
-    steps = []
-    if norm:
-        steps.append(skp.StandardScaler())
-    if impute_missing:
-        steps.append(skimp.SimpleImputer())
-    if pre_pca is not None:
-        steps.append(skd.PCA(n_components=pre_pca))
-    clf = model(**params)
-    steps.append(clf)
-    pipe = sklpipe.make_pipeline(*steps)
+
+    pipe = make_model_pipeline(model, pca=pre_pca, norm=norm, **params)
 
     # c1 is shape (neurs, inner_conds, trials, time_points)
     c_flat, labels = _combine_samples(*cs, norm_labels=True)
@@ -1272,11 +1294,60 @@ def fold_skl_multi(*cs, folds_n=20, model=svm.SVC, params=None, norm=True,
     if rand_splitter is None:
         splitter = folds_n
     else:
-        splitter = rand_splitter(folds_n, test_size=test_prop)
+        if use_single_splitter_int:
+            rng = np.random.default_rng()
+            rand_state = rng.integers(2**32 - 1)
+        else:
+            rand_state = None
+        splitter = rand_splitter(folds_n, test_size=test_prop,
+                                 random_state=rand_state)
+        extra_splitter = rand_splitter(folds_n, test_size=test_prop,
+                                       random_state=rand_state)
     if verbose:
         print('--')
         print(c_flat.shape)
         print(splitter)
+    for j in range(x_len):
+        sk_cv = skms.cross_validate
+        if time_accumulate:
+            in_list = list(c_flat[..., k] for k in range(j + 1))
+            in_data = np.concatenate(in_list, axis=0).T
+        else:
+            in_data = c_flat[..., j].T
+        out = _cv_wrapper(pipe, in_data, labels,
+                          cv=splitter, n_jobs=n_jobs,
+                          return_estimator=True,
+                          return_train_score=True,
+                          extra_splitter=extra_splitter)
+        # out = sk_cv(pipe, in_data, labels,
+        #             cv=splitter, n_jobs=n_jobs,
+        #             return_estimator=True,
+        #             return_train_score=True)
+        tcs[:, j] = out['test_score']
+        if gen_cs is not None:
+            if time_accumulate:
+                gen_list = list(c_gen[..., k] for k in range(j + 1))
+                gen_data = np.concatenate(gen_list, axis=0).T
+            else:
+                gen_data = c_gen[..., j].T
+            tcs_gen[:, j] = _eval_fit_models(gen_data,
+                                             l_gen,
+                                             out['estimator'])
+    if mean:
+        tcs = np.mean(tcs, axis=0)
+        tcs_gen = np.mean(tcs_gen, axis=0)
+    if gen_cs is not None:
+        out = (tcs, tcs_gen)
+    else:
+        out = tcs
+    return out    
+
+def _nominal_fold(c_flat, labels, pipe, splitter, folds_n,
+                  time_accumulate=False, n_jobs=-1, gen_c1=None,
+                  c_gen=None, l_gen=None, mean=False):
+    x_len = c_flat.shape[-1]
+    tcs = np.zeros((folds_n, x_len))
+    tcs_gen = np.zeros_like(tcs)
     for j in range(x_len):
         sk_cv = skms.cross_validate
         if time_accumulate:
@@ -1289,7 +1360,7 @@ def fold_skl_multi(*cs, folds_n=20, model=svm.SVC, params=None, norm=True,
                     return_estimator=True)
         tcs[:, j] = out['test_score']
         # print('tcs', np.mean(tcs[:, j]), tcs[:, j])
-        if gen_cs is not None:
+        if c_gen is not None:
             if time_accumulate:
                 gen_list = list(c_gen[..., k] for k in range(j + 1))
                 gen_data = np.concatenate(gen_list, axis=0).T
@@ -1301,17 +1372,157 @@ def fold_skl_multi(*cs, folds_n=20, model=svm.SVC, params=None, norm=True,
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
-    if gen_cs is not None:
+    if c_gen is not None:
         out = (tcs, tcs_gen)
     else:
         out = tcs
-    return out    
+    return out
+
+def _fit_and_score_collapse_tc(est, X_tc, y, tr_inds, te_inds, time_mask=None,
+                               return_estimator=True, **kwargs):
+    X_tr = X_tc[tr_inds]
+    y_tr = y[tr_inds]
+    X_te = X_tc[te_inds]
+    y_te = y[te_inds]
+    x_len = X_tc.shape[-1]
+    if time_mask is None:
+        time_mask = np.ones(x_len, dtype=bool)
+    x_tr_len = sum(time_mask)
+        
+    X_tr_time = X_tr[..., time_mask]
+    X_tr_flat = np.concatenate(list(X_tr_time[..., j]
+                                    for j in range(x_tr_len)),
+                               axis=0)
+    y_tr_flat = np.tile(y_tr, x_tr_len)
+    est.fit(X_tr_flat, y_tr_flat)
+    
+    test_scores = np.array(list(est.score(X_te[..., j], y_te)
+                                for j in range(x_len)))
+    train_scores = np.array(list(est.score(X_tr[..., j], y_tr)
+                                 for j in range(x_len)))
+    out_dict = {'test_score':test_scores,
+                'train_score':train_scores}
+    if return_estimator:
+        out_dict['estimator'] = est
+    return out_dict
+
+def _fit_and_score_pred(est, X, y, tr_inds, te_inds,
+                        return_estimator=True, **kwargs):
+    X_tr = X[tr_inds]
+    y_tr = y[tr_inds]
+    X_te = X[te_inds]
+    y_te = y[te_inds]
+        
+    est.fit(X_tr, y_tr)
+
+    test_score = est.score(X_te, y_te)
+    train_score = est.score(X_tr, y_tr)
+    test_pred = est.predict(X_te)
+    out_dict = {'test_score':test_score,
+                'train_score':train_score,
+                'test_pred':test_pred,
+                'test_targ':y_te}
+    if return_estimator:
+        out_dict['estimator'] = est
+    return out_dict
+
+
+def _aggregate_dicts(dicts, num_fields=()):
+    return {
+        key: np.asarray([prop[key] for prop in dicts])
+        if key in num_fields
+        else [prop[key] for prop in dicts]
+        for key in dicts[0].keys()
+    }
+
+def cross_validate_collapse_tc(est, X_tc, y, time_mask=None, n_folds=10,
+                               n_jobs=-1, verbose=False, cv=None,
+                               num_fields=('train_score', 'test_score'),
+                               **kwargs):
+    """
+    est  : implements the fit method
+    X_tc : an array with N x F x T where N is the number of trials, F is the
+           number of features and T is the number of timepoints
+    y    : a vector of length N giving the category
+    """
+    if cv is None:
+        cv = skms.ShuffleSplit(n_folds, test_size=.1)
+    X_tc, y = sku.indexable(X_tc, y)
+    parallel = jl.Parallel(n_jobs=n_jobs, verbose=verbose)
+    results = parallel(
+        jl.delayed(_fit_and_score_collapse_tc)(
+            skb.clone(est),
+            X_tc,
+            y,
+            train,
+            test,
+            time_mask,
+            **kwargs)
+        for train, test in cv.split(X_tc, y)
+    )
+    results = _aggregate_dicts(results, num_fields=num_fields)
+    return results
+
+
+def cross_validate_wrapper(est, X, y, n_folds=10,
+                           n_jobs=-1, verbose=False, cv=None,
+                           num_fields=('train_score', 'test_score',
+                                       'test_targ', 'test_pred'),
+                           **kwargs):
+    """
+    est  : implements the fit method
+    X : an array with N x F where N is the number of trials, F is the
+        number of features 
+    y    : a vector of length N giving the category
+    """
+    if cv is None:
+        cv = skms.ShuffleSplit(n_folds, test_size=.1)
+    X, y = sku.indexable(X, y)
+    parallel = jl.Parallel(n_jobs=n_jobs, verbose=verbose)
+    results = parallel(
+        jl.delayed(_fit_and_score_pred)(
+            skb.clone(est),
+            X,
+            y,
+            train,
+            test,
+            **kwargs)
+        for train, test in cv.split(X, y)
+    )
+    results = _aggregate_dicts(results, num_fields=num_fields)
+    return results
+
+    
+def _time_collapsed_fold(c_flat, labels, pipe, splitter, folds_n,
+                         n_jobs=-1, c_gen=None, l_gen=None, mean=False,
+                         time_mask=None):
+    x_len = c_flat.shape[-1]
+    tcs = np.zeros((folds_n, x_len))
+    tcs_gen = np.zeros_like(tcs)
+    c_flat = np.swapaxes(c_flat, 0, 1)
+    out = cross_validate_collapse_tc(pipe, c_flat, labels, time_mask=time_mask,
+                                     cv=splitter)
+    tcs = out['test_score']
+    ests = out['estimator']
+    if c_gen is not None:
+        for j in range(x_len):
+            gen_data = c_gen[..., j].T
+            tcs_gen[:, j] = _eval_fit_models(gen_data,
+                                             l_gen, out['estimator'])
+    if mean:
+        tcs = np.mean(tcs, axis=0)
+        tcs_gen = np.mean(tcs_gen, axis=0)
+    if c_gen is not None:
+        out = (tcs, tcs_gen)
+    else:
+        out = tcs
+    return out   
 
 def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
              shuffle=False, pre_pca=.99, n_jobs=-1, mean=True,
              impute_missing=False, verbose=False, rand_splitter=rand_splitter,
              time_accumulate=False, gen_c1=None, gen_c2=None, test_prop=None,
-             **model_kwargs):
+             time_mask=None, collapse_time=False, **model_kwargs):
     if test_prop is None:
         test_prop = 1/folds_n
     if params is None:
@@ -1336,6 +1547,9 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
     if gen_c1 is not None or gen_c2 is not None:
         c_gen, l_gen = _combine_samples(*list(c for c in (gen_c1, gen_c2)
                                               if c is not None))
+    else:
+        c_gen = None
+        l_gen = None
     if shuffle:
         np.random.shuffle(labels)
     if rand_splitter is None:
@@ -1348,34 +1562,17 @@ def fold_skl(c1, c2, folds_n, model=svm.SVC, params=None, norm=True,
         print(c2_flat.shape)
         print(c_flat.shape)
         print(splitter)
-    for j in range(x_len):
-        sk_cv = skms.cross_validate
-        if time_accumulate:
-            in_list = list(c_flat[..., k] for k in range(j + 1))
-            in_data = np.concatenate(in_list, axis=0).T
-        else:
-            in_data = c_flat[..., j].T
-        out = sk_cv(pipe, in_data, labels,
-                    cv=splitter, n_jobs=n_jobs,
-                    return_estimator=True)
-        tcs[:, j] = out['test_score']
-        # print('tcs', np.mean(tcs[:, j]), tcs[:, j])
-        if gen_c1 is not None or gen_c2 is not None:
-            if time_accumulate:
-                gen_list = list(c_gen[..., k] for k in range(j + 1))
-                gen_data = np.concatenate(gen_list, axis=0).T
-            else:
-                gen_data = c_gen[..., j].T
-            tcs_gen[:, j] = _eval_fit_models(gen_data,
-                                             l_gen, out['estimator'])
-            # print('gen', np.mean(tcs_gen[:, j]), tcs_gen[:, j])
-    if mean:
-        tcs = np.mean(tcs, axis=0)
-        tcs_gen = np.mean(tcs_gen, axis=0)
-    if gen_c1 is not None or gen_c2 is not None:
-        out = (tcs, tcs_gen)
+
+    if collapse_time:
+        out = _time_collapsed_fold(c_flat, labels, pipe, splitter,
+                                   folds_n, n_jobs=n_jobs, c_gen=c_gen,
+                                   l_gen=l_gen, mean=mean,
+                                   time_mask=time_mask)
     else:
-        out = tcs
+        out = _nominal_fold(c_flat, labels, pipe, splitter, folds_n,
+                            time_accumulate=time_accumulate,
+                            n_jobs=n_jobs, c_gen=c_gen, l_gen=l_gen,
+                            mean=mean)
     return out
 
 def neural_format(c, pop=False):

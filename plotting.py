@@ -19,6 +19,20 @@ def line_speed_func(*args):
     speeds = np.concatenate((speeds[:1], speeds), axis=0)
     return speeds
 
+def plot_colored_pts(xs, ys, colors=None, ax=None, line_col=(.9, .9, .9),
+                     linewidth=1,
+                     **kwargs):
+    if ax is None:
+        f, ax = plt.subplots(1, 1)
+    if colors is None:
+        colors = (None,)*len(xs)
+    ax.plot(xs, np.mean(ys, axis=0), color=line_col, lw=linewidth)
+    for i, (x, y) in enumerate(zip(xs, ys.T)):
+        y = np.expand_dims(y, 1)
+        plot_trace_werr([x], y, points=True, fill=False,
+                        color=colors[i], ax=ax, **kwargs)
+    return ax        
+
 def plot_colored_line(xs, ys, zs=None, col_inds=None, cmap='Blues',
                       norm=plt.Normalize(0., 1.), func=None, ax=None,
                       **kwargs):
@@ -403,7 +417,21 @@ def make_linear_cmap(b1, b2=None, name=''):
         [b_start, b_end]
     )
     return cmap
-        
+
+def set_ylim(ax, low=None, up=None):
+    return _set_lim(ax.get_ylim, ax.set_ylim, low=low, up=up)
+
+def set_xlim(ax, low=None, up=None):
+    return _set_lim(ax.get_xlim, ax.set_xlim, low=low, up=up)
+
+def _set_lim(getter, setter, low=None, up=None):
+    o_low, o_up = getter()
+    if low is None:
+        low = o_low
+    if up is None:
+        up = o_up
+    return setter([low, up])
+
 def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
@@ -631,6 +659,7 @@ def set_violin_color(vp, color):
     for b in vp['bodies']:
         b.set_facecolor(color)
         b.set_edgecolor(color)
+    vp['cmedians'].set_color(color)
 
 def violinplot(vp_seq, positions, ax=None, color=None, **kwargs):
     if ax is None:
@@ -638,7 +667,8 @@ def violinplot(vp_seq, positions, ax=None, color=None, **kwargs):
     if color is None:
         color = (None,)*len(vp_seq)
     for i, vps in enumerate(vp_seq):
-        p = ax.violinplot(vps, positions=[positions[i]], **kwargs)
+        p = ax.violinplot(vps, positions=[positions[i]],
+                          **kwargs)
         set_violin_color(p, color[i])
         
 def clean_plot_bottom(ax, keeplabels=False):

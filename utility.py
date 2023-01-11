@@ -20,6 +20,11 @@ monthdict = {'01':'Jan', '02':'Feb', '03':'Mar', '04':'Apr', '05':'May',
              '06':'Jun', '07':'Jul', '08':'Aug', '09':'Sep', '10':'Oct',
              '11':'Nov', '12':'Dec'}
 
+def ind_complement(inds, total):
+    comp_dim = np.array(list(set(np.arange(total)) - set(inds)))
+    return comp_dim
+
+
 def arg_list_decorator(func, squeeze=False):
     def arg_list_func(*args, force=False, **kwargs):
         new_args = []
@@ -357,12 +362,16 @@ def vector_angle(v1, v2, degrees=True):
         theta = theta*(180/np.pi)
     return theta
 
-def participation_ratio(samps):
+def participation_ratio(samps, ret_pv=False):
     p = skd.PCA()
     p.fit(samps)
     pv = p.explained_variance_ratio_
     pr = pr_only(pv)
-    return pr
+    if ret_pv:
+        out = (pr, pv)
+    else:
+        out = pr
+    return out
 
 def strict_dim(samps, eps=1e-10):
     p = skd.PCA()
@@ -1047,8 +1056,10 @@ def make_ratio_function(func1, func2):
         return norm
     return _ratio_func
 
-def normalize_periodic_range(diff, cent=0, radians=True, const=None):
-    diff = np.array(diff)
+def normalize_periodic_range(diff, cent=0, radians=True, const=None,
+                             convert_array=True):
+    if convert_array:
+        diff = np.array(diff)
     if radians and const is None:
         const = np.pi
     elif const is None:

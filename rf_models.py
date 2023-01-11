@@ -139,14 +139,14 @@ def eval_gaussian_rf(coords, cent, sizes, scale, baseline, sub_dim=None):
     r = ((scale - baseline)*r + baseline)
     return r
 
-def eval_vector_rf(coords, rf_func, *rf_params, sub_dim=None):
+def eval_vector_rf(coords, rf_func, *rf_params, sub_dim=None, **kwargs):
     coords = np.array(coords)
     if len(coords.shape) == 1:
         coords = np.reshape(coords, (1, -1))
     if sub_dim is not None:
         coords = coords[:, sub_dim]
     coords = np.expand_dims(coords, axis=1)
-    r = rf_func(coords, *rf_params)
+    r = rf_func(coords, *rf_params, **kwargs)
     return r
 
 def gaussian_func(coords, cents, sizes, scale, baseline):
@@ -160,6 +160,50 @@ def gaussian_deriv_func(coords, cents, sizes, scale, baseline):
     out = -(scale - baseline)*np.exp(inner)*(coords - cents)/sizes
     return out
 
+def gaussian_ramp_func(coords, cents, sizes, scale, baseline, ramp_dim=None,
+                       uv=None, max_r=1):
+    n_dims = cents.shape[2] + uv.shape[2]
+    gauss_dim = u.ind_complement(ramp_dim, n_dims)
+    cents_g = cents
+    coords_g = coords[..., gauss_dim]
+    sizes_g = sizes
+    
+    coords_r = coords[..., ramp_dim]
+    r = np.exp(-np.sum(((coords_g - cents_g)**2)/(2*sizes_g), axis=2))
+
+    m = (np.sum((coords_r - max_r/2)*uv, axis=2)/(np.sqrt(len(ramp_dim))*max_r)
+         + max_r/2)
+
+    r = 2*(scale - baseline)*m*r + baseline
+    return r
+
+def gaussian_ramp_deriv_func(coords, cents, sizes, scale, baseline,
+                             ramp_dim=None, uv=None, max_r=1):
+    n_dims = cents.shape[2] + uv.shape[2]
+    gauss_dim = u.ind_complement(ramp_dim, n_dims)
+    cents_g = cents 
+    coords_g = coords[..., gauss_dim]
+    sizes_g = sizes
+
+    coords_r = coords[..., ramp_dim]
+    
+    inner = -np.sum(((coords_g - cents_g)**2)/(2*sizes_g), axis=2)
+    mult = (np.sum((coords - max_r/2)*uv, axis=2)/np.sqrt(len(ramp_dim))*max_r
+            + max_r/2)
+    outs = []
+    for i in range(n_dims):
+        if i in gauss_dim:
+            o = -gaussian_ramp_func(coords, cents, sizes, scale, baseline,
+                                    ramp_dim=ramp_dim, uv=uv, max_r=max_r)
+            o = np.expand_dims(o, 2)*(coords_g - cents_g)/sizes_g
+            o = o[..., 0]
+        else:
+            o = np.exp(inner)/(np.sqrt(len(ramp_dim))*max_r)
+            o = 2*(scale - baseline)*o
+        outs.append(o)
+    out = np.stack(outs, axis=2)
+    return out
+    
 def ramp_func(coords, extent, scale, baseline):
     slope = (scale - baseline)/extent
     r = slope*coords + baseline
@@ -174,7 +218,13 @@ def eval_ramp_vector_rf(coords, extent, scale, baseline, sub_dim=None):
     r = eval_vector_rf(coords, ramp_func, extent, scale, baseline,
                        sub_dim=sub_dim)
     return r
-    
+
+def eval_gaussian_ramp_vector_rf(coords, cents, sizes, scale, baseline,
+                                 ramp_dim=None, uv=None, max_r=1):
+    r = eval_vector_rf(coords, gaussian_ramp_func, cents, sizes, scale, baseline,
+                       ramp_dim=ramp_dim, uv=uv, max_r=max_r)
+    return r
+
 def eval_gaussian_vector_rf(coords, cents, sizes, scale, baseline,
                             sub_dim=None):
     r = eval_vector_rf(coords, gaussian_func, cents, sizes, scale, baseline,
@@ -185,6 +235,12 @@ def eval_gaussian_vector_deriv(coords, cents, sizes, scale, baseline,
                                sub_dim=None):
     r = eval_vector_rf(coords, gaussian_deriv_func, cents, sizes, scale, baseline,
                        sub_dim=sub_dim)
+    return r
+
+def eval_gaussian_ramp_vector_deriv(coords, cents, sizes, scale, baseline,
+                                    ramp_dim=None, uv=None, max_r=1):
+    r = eval_vector_rf(coords, gaussian_ramp_deriv_func, cents, sizes, scale,
+                       baseline, ramp_dim=ramp_dim, uv=uv, max_r=max_r)
     return r
 
 def eval_ramp_vector_deriv(coords, extent, scale, baseline, sub_dim=None):
@@ -270,9 +326,14 @@ def get_lattice_uniform_pop(total_pwr, n_units, dims, w_use=None,
 
 def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
                            scale_use=None, sigma_n=1, ret_params=False,
-                           **kwargs):
+                           use_ramp=None, **kwargs):
     dims = int(dims)
-    distrs = (sts.uniform(0, 1),)*dims
+    if use_ramp is not None:
+        n_r = len(use_ramp)
+        n_g = dims - n_r
+    else:
+        n_g = dims
+    distrs = (sts.uniform(0, 1),)*n_g
     stim_distr = u.MultivariateUniform(dims, (0, 1))
 
     ms, ws = get_random_uniform_fill(n_units, distrs, wid=w_use)
@@ -282,11 +343,23 @@ def get_random_uniform_pop(total_pwr, n_units, dims, w_use=None,
     else:
         scale = total_pwr
         titrate_pwr = stim_distr
-    rf, drf = make_gaussian_vector_rf(ms, ws, scale, 0,
-                                      titrate_pwr=titrate_pwr,
-                                      **kwargs)
-    noise_distr = sts.multivariate_normal(np.zeros(n_units), sigma_n,
-                                          allow_singular=True)
+    if use_ramp is not None:
+        uvs = u.make_unit_vector(sts.norm(0, 1).rvs((len(ws), n_r)))
+        
+        rf, drf = make_gaussian_ramp_vector_rf(ms, uvs, use_ramp,
+                                               ws, scale, 0,
+                                               titrate_pwr=titrate_pwr,
+                                               max_r=1,
+                                               **kwargs)
+    else:
+        rf, drf = make_gaussian_vector_rf(ms, ws,
+                                          scale, 0,
+                                          titrate_pwr=titrate_pwr,
+                                          **kwargs)
+        
+    # noise_distr = sts.multivariate_normal(np.zeros(n_units), sigma_n,
+    #                                       allow_singular=True)
+    noise_distr = sts.norm(0, sigma_n)
     
     out = (stim_distr, rf, drf, noise_distr)
     if ret_params:
@@ -487,7 +560,28 @@ def random_uniform_pwr_var_scale(pwr, n_units, wid, dim):
     out = random_uniform_pwr_var(n_units, wid, dim,
                                  scale=scale, vec=True)
     return out
-    
+
+def ru_var_approx(pwr, n_units, wid, dim):
+    a = pwr**2/(n_units*(wid**dim)*(np.pi*2)**(dim/2))
+    b_num = (pwr**2)*(np.pi/2)**dim
+    b_denom = (np.sqrt(np.pi) - wid)**(2*dim)
+    b_prod = (2 - (np.sqrt(2) + 2)*wid/np.sqrt(np.pi))**dim
+    out = a + (b_num/b_denom)*b_prod - pwr**2
+    return out
+
+def opt_w_approx(pwr, nu, dim, sigma_n=1, def_w=.01, lam=2):
+    sn2 = sigma_n**2
+    spi = np.sqrt(np.pi)
+
+    b_num = 3*(2**(dim + 3))*(np.pi**(dim/2))*sigma_n
+    inner_denom = 8*sn2*(def_w**(dim/2))*np.sqrt(nu)*((np.pi*2)**dim/4)
+    b_denom = dim*ss.gamma(dim/2 + 1)*((1/np.sqrt(pwr))
+                                       + lam*np.sqrt(pwr)/inner_denom)
+    beta = np.log(b_num/b_denom)
+    pre = np.sqrt(nu)*((2*np.pi)**(dim/4))*4*sn2/(pwr*lam)
+    inner = beta + pwr/(4*sn2) + (dim + 2)*np.log(def_w)
+    w_approx = (pre*inner)**(-2/dim)
+    return w_approx    
 
 def compute_threshold_vec(pwr, n_units, dim, wid, sigma_n=1, lam=2,
                           stim_scale=1):
@@ -1271,6 +1365,50 @@ def get_distribution_gaussian_resp_func(n_units_pd, input_distributions, scale=1
     resp_func, d_resp_func = make_gaussian_vector_rf(ms, ws, scale,
                                                      baseline)
     return resp_func, d_resp_func, ms, ws
+
+def make_gaussian_ramp_vector_rf(cents, uvs, ramp_dim, sizes, scale,
+                                 baseline,
+                                 sub_dim=None,
+                                 titrate_pwr=None, n_samps=10000, cost_func=None,
+                                 titrate_func=None,
+                                 max_r=1):
+    cents = np.array(cents)
+    uvs = np.array(uvs)
+    sizes = np.array(sizes)
+    if len(cents.shape) <= 1:
+        cents = np.reshape(cents, (-1, 1))
+    if len(sizes.shape) <= 1:
+        sizes = np.reshape(sizes, (-1, 1))
+    if len(uvs.shape) <= 1:
+        uvs = np.reshape(uvs, (-1, 1))
+    cents = np.expand_dims(cents, axis=0)
+    sizes = np.expand_dims(sizes, axis=0)
+    uvs = np.expand_dims(uvs, axis=0)
+    
+    if titrate_pwr is not None:
+        rfs = ft.partial(eval_gaussian_ramp_vector_rf, cents=cents, sizes=sizes,
+                         scale=1, baseline=baseline, ramp_dim=ramp_dim,
+                         uv=uvs, max_r=max_r)
+        if cost_func is None:
+            pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps))**2, axis=1))
+        else:
+            pwr = cost_func(rfs(titrate_pwr.rvs(n_samps)))
+        if titrate_func is None:
+            new_scale = np.sqrt(scale/pwr)
+        else:
+            new_scale = titrate_func(scale, pwr)
+    else:
+        new_scale = scale
+    rfs = ft.partial(eval_gaussian_ramp_vector_rf, cents=cents, sizes=sizes,
+                     scale=new_scale, baseline=baseline, ramp_dim=ramp_dim,
+                     uv=uvs, max_r=max_r)
+    drfs = ft.partial(eval_gaussian_ramp_vector_deriv, cents=cents, sizes=sizes,
+                      scale=new_scale, baseline=baseline, ramp_dim=ramp_dim,
+                      uv=uvs, max_r=max_r)
+    if titrate_pwr is not None:
+        pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps))**2, axis=1))
+    return rfs, drfs
+    
 
 def make_gaussian_vector_rf(cents, sizes, scale, baseline, sub_dim=None,
                             titrate_pwr=None, n_samps=10000, cost_func=None,

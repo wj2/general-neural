@@ -40,9 +40,12 @@ def get_stan_params_ind(mf, param_name, ind_set, mask=None, skip_end=1,
 generic_manifest = {'observed_data':'y',
                     'log_likelihood':{'y':'log_lik'},
                     'posterior_predictive':'err_hat'}
-manifest_dict = {'general/stan_models/logit.pkl':generic_manifest,
-                 'general/stan_models/unif_resp.pkl':generic_manifest,
-                 'r1r2r3/stan_models/sum_od.pkl':generic_manifest}
+manifest_dict = {
+    'general/stan_models/logit.pkl':generic_manifest,
+    'general/stan_models/unif_resp.pkl':generic_manifest,
+    'r1r2r3/stan_models/sum_od.pkl':generic_manifest,
+    'general/stan_models/lm.pkl':generic_manifest,
+}
 
 def fit_model(data_dict, model_path, max_treedepth=10, adapt_delta=.8,
               manifest=None, default_manifest=generic_manifest,

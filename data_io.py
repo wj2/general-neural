@@ -83,6 +83,9 @@ class ResultSequence(object):
     def rs_or(self, x):
         return self._op_dispatcher(x, np.logical_or)
 
+    def rs_xor(self, x):
+        return self._op_dispatcher(x, np.logical_xor)
+
     def rs_not(self):
         return ResultSequence(np.logical_not(v) for v in self.val)
 
@@ -208,7 +211,7 @@ class Dataset(object):
         xs = na.compute_xs(binsize, bounds[0], bounds[1], binstep)
         if len(spk.shape) > 2:
             spk = np.squeeze(spk)
-        no_spks = np.zeros_like(spk)
+        no_spks = np.zeros_like(spk, dtype=bool)
         for i, spk_i in enumerate(spk):
             for j, spk_ij in enumerate(spk_i):
                 
@@ -232,7 +235,7 @@ class Dataset(object):
             n_trls = list(len(o) for o in outs)
         if n_trls_mask is None:
             n_trls = np.array(n_trls)
-            n_trls_mask = n_trls >= min_trials_pseudo
+            n_trls_mask = n_trls >= min_trials_pseudo            
         outs_mask = np.array(outs, dtype=object)[n_trls_mask]
         if skl_axs:
             trl_ax = 2
@@ -243,7 +246,7 @@ class Dataset(object):
         if same_n_trls:
             min_trls = np.min(n_trls[n_trls_mask])
         else:
-            n_trls_actual = np.array(list(o.shape[trl_ax] for o in outs))
+            n_trls_actual = np.array(list(o.shape[trl_ax] for o in outs_mask))
             min_trls = np.min(n_trls_actual[n_trls_mask])
             
         for i in range(resample_pseudos):
@@ -464,7 +467,7 @@ class Dataset(object):
                                impute_missing=False, ret_pops=False,
                                shuffle_trials=False, decode_masks=None,
                                decode_tzf=None, regions=None, combine=False,
-                               **kwargs):
+                               time_accumulate=False, **kwargs):
         if params is None:
             # params = {'class_weight':'balanced'}
             params = {}
@@ -473,7 +476,7 @@ class Dataset(object):
         if decode_tzf is None:
             decode_tzf = time_zero_field
         if decode_masks is not None:
-            dec_data = (self.mask(mask_i) for mask_i in decode_masks)
+            dec_data = list(self.mask(mask_i) for mask_i in decode_masks)
         else:
             decs = (None,)*len(cats)
         outs = list(cat_i.get_neural_activity(winsize, begin, end, stepsize,
@@ -490,20 +493,24 @@ class Dataset(object):
                         for cat_i in dec_data)
         xs = outs[0][1]
         if pseudo:
-            trls_list = list(cat_i.get_ntrls() for cat_i in cats)
+            trls_list = tuple(cat_i.get_ntrls() for cat_i in cats)
             if decode_masks is not None:
-                trls_list = trls_list + list(cat_i.get_ntrls()
-                                             for cat_i in dec_data)
+                trls_list = trls_list + tuple(cat_i.get_ntrls()
+                                              for cat_i in dec_data)
             comb_n = combine_ntrls(*trls_list)
-            pops = list(self.make_pseudopop(pop_i, comb_n, min_trials_pseudo,
-                                            resample_pseudo, skl_axs=True,
+            pops = list(self.make_pseudopop(pop_i, comb_n,
+                                            min_trials_pseudo=min_trials_pseudo,
+                                            resample_pseudos=resample_pseudo,
+                                            skl_axs=True,
                                             same_n_trls=True)
                         for pop_i, xs in outs)
             if decode_masks is not None:
-                decs = list(self.make_pseudopop(dec_i, comb_n, min_trials_pseudo,
-                                                resample_pseudo, skl_axs=True,
+                decs = list(self.make_pseudopop(dec_i, comb_n,
+                                                min_trials_pseudo=min_trials_pseudo,
+                                                resample_pseudos=resample_pseudo,
+                                                skl_axs=True,
                                                 same_n_trls=True)
-                            for dec_i, xs in outs)
+                            for dec_i, xs in decs)
             else:
                 decs = (None,)*resample_pseudo
         outs = np.zeros((len(pops[0]), n_folds, len(xs)))
@@ -522,7 +529,7 @@ class Dataset(object):
             out = na.fold_skl_multi(*ps, folds_n=n_folds, model=model, params=params, 
                                     mean=mean, pre_pca=pre_pca, shuffle=shuffle,
                                     impute_missing=(repl_nan or impute_missing),
-                                    gen_cs=ds)
+                                    gen_cs=ds, time_accumulate=time_accumulate)
             if not combine and (decode_masks is not None):
                 outs[i] = out[0]
                 outs_gen[i] = out[1]
@@ -532,7 +539,7 @@ class Dataset(object):
             out = (outs, xs, pops)
             add = tuple(di for di in decs
                         if di[0] is not None and not combine)
-            out = out + add
+            out = out + (add,)
         else:
             out = (outs, xs)
         if decode_masks is not None:
@@ -693,15 +700,24 @@ class Dataset(object):
                      ret_pops=False, shuffle_trials=False,
                      decode_m1=None, decode_m2=None, decode_tzf=None,
                      regions=None, combine=False, max_iter=10000,
-                     dec_less=True, **kwargs):
+                     dec_less=True, time_mask=None, dec_beg=None,
+                     dec_end=None, collapse_time=False, **kwargs):
         out = self._get_dec_pops(winsize, begin, end, stepsize,
                                  m1, m2, decode_m1, decode_m2, 
                                  tzfs=(time_zero_field, time_zero_field,
                                        decode_tzf, decode_tzf),
                                  repl_nan=repl_nan, regions=regions,
                                  shuffle_trials=shuffle_trials)
-        print(regions)
         xs, pops = out
+        one_of_dec = (dec_beg is not None or dec_end is not None)
+        if collapse_time and time_mask is None and one_of_dec:
+            if dec_beg is None:
+                dec_beg = xs[0]
+            if dec_end is None:
+                dec_end = xs[-1]
+            beg_mask = dec_beg <= (xs - winsize/2)
+            end_mask = dec_end >= (xs + winsize/2)
+            time_mask = np.logical_and(beg_mask, end_mask)
         pop1, pop2, dec1, dec2 = pops
         if params is None:
             params = {'class_weight':'balanced', 'max_iter':max_iter}
@@ -778,7 +794,10 @@ class Dataset(object):
                 out = na.fold_skl(p1, p2, n_folds, model=model, params=params, 
                                   mean=mean, pre_pca=pre_pca, shuffle=shuffle,
                                   impute_missing=(repl_nan or impute_missing),
-                                  gen_c1=d1, gen_c2=d2, **kwargs)
+                                  gen_c1=d1, gen_c2=d2,
+                                  collapse_time=collapse_time,
+                                  time_mask=time_mask,
+                                  **kwargs)
             if not combine and (decode_m1 is not None or decode_m2 is not None):
                 outs[i] = out[0]
                 outs_gen[i] = out[1]
