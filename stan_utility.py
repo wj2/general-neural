@@ -45,6 +45,7 @@ manifest_dict = {
     'general/stan_models/unif_resp.pkl':generic_manifest,
     'r1r2r3/stan_models/sum_od.pkl':generic_manifest,
     'general/stan_models/lm.pkl':generic_manifest,
+    'general/stan_models/noise.pkl':generic_manifest,
 }
 
 def fit_model(data_dict, model_path, max_treedepth=10, adapt_delta=.8,

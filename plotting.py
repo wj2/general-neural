@@ -1,6 +1,7 @@
 
 import numpy as np
 import scipy.stats as sts
+import sklearn.decomposition as skd
 import itertools as it
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -280,6 +281,25 @@ def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
         if append:
             axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
     return axvals
+
+def plot_highdim_trace(xs, *args, plot_points=False, plot_line=True,
+                       ax=None, ms=2, **kwargs):
+    if len(args) == 0:
+        ys = xs
+        xs = np.arange(len(ys))
+    ys = np.array(ys)
+    xs = np.array(xs)
+    if ax is None:
+        f = plt.figure()
+        ax = f.add_subplot(1, 1, 1, projection='3d')
+    p = skd.PCA(3)
+    ys_red = p.fit_transform(ys)
+    if plot_line:
+        ax.plot(*ys_red.T, **kwargs)
+    if plot_points:
+        ax.plot(*ys_red.T, 'o', ms=ms, **kwargs)
+    return ax        
+    
 
 def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, equal_bins=False,
                **kwargs):
