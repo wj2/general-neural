@@ -8,7 +8,10 @@ import matplotlib.pyplot as plt
 import general.utility as u
 import general.neural_analysis as na
 from matplotlib.collections import LineCollection
+import matplotlib.colors as mplcolor
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
+import matplotlib.patches as patches
+import colorsys
 
 def set_ax_color(ax, color, sides=('bottom', 'top', 'left', 'right')):
     for s in sides:
@@ -282,23 +285,37 @@ def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
             axvals = np.append(axvals_shift, (axvals_shift[-1] + diff))
     return axvals
 
-def plot_highdim_trace(xs, *args, plot_points=False, plot_line=True,
-                       ax=None, ms=2, **kwargs):
-    if len(args) == 0:
-        ys = xs
-        xs = np.arange(len(ys))
-    ys = np.array(ys)
-    xs = np.array(xs)
+def plot_highdim_trace(*args, plot_points=False, plot_line=True,
+                       ax=None, ms=2, p=None, central_tendence=np.mean,
+                       dim_red_mean=True, **kwargs):
     if ax is None:
         f = plt.figure()
         ax = f.add_subplot(1, 1, 1, projection='3d')
-    p = skd.PCA(3)
-    ys_red = p.fit_transform(ys)
-    if plot_line:
-        ax.plot(*ys_red.T, **kwargs)
-    if plot_points:
-        ax.plot(*ys_red.T, 'o', ms=ms, **kwargs)
-    return ax        
+    if len(args[0].shape) == 2:
+        args = list(np.expand_dims(arg, 0) for arg in args)
+    if p is None:
+        all_samps = np.concatenate(args, axis=1)
+        if dim_red_mean:
+            all_samps = np.mean(all_samps, axis=0)
+        else:
+            all_samps = np.concatenate(all_samps, axis=0)
+        p = skd.PCA(3)
+        p.fit(all_samps)
+    for i, y in enumerate(args):
+        colors = kwargs.get('color')
+        if colors is None:
+            color = None
+        else:
+            color = colors[i]
+        y_mu = p.transform(np.mean(y, axis=0))
+        y_pts = p.transform(np.concatenate(y, axis=0))
+        if plot_line:
+            l = ax.plot(*y_mu.T, color=color, **kwargs)
+            color = l[0].get_color()
+        if plot_points:
+            ax.plot(*y_pts.T, 'o', ms=ms, color=color,
+                    **kwargs)
+    return ax, p
     
 
 def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, equal_bins=False,
@@ -452,12 +469,42 @@ def _set_lim(getter, setter, low=None, up=None):
         up = o_up
     return setter([low, up])
 
+def _cs_convert(color, conv_func):
+    if len(color.shape) == 1:
+        color = np.expand_dims(color, 0)
+    color = color
+    new_color = np.zeros_like(color)
+    for i, col in enumerate(color):
+        new_color[i] = conv_func(*col)
+    return np.squeeze(new_color)
+
+def rgb_to_hls(color):
+    return _cs_convert(color, colorsys.rgb_to_hls)
+
+def hls_to_rgb(color):
+    return _cs_convert(color, colorsys.hls_to_rgb)
+
+def get_next_n_colors(n):
+    cycler = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    return cycler[:n]
+
+def add_color_value(color, amt):
+    hsv = rgb_to_hls(color)
+    hsv[..., -2] = hsv[..., -2] + amt
+    hsv[..., -2] = np.min(np.stack((np.ones_like(hsv[..., -2]),
+                                    hsv[..., -2]), axis=0),
+                          axis=0)
+    hsv[..., -2] = np.max(np.stack((np.zeros_like(hsv[..., -2]),
+                                    hsv[..., -2]), axis=0),
+                          axis=0)
+    return hls_to_rgb(hsv)
+
 def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='', 
                     errorbar=True, alpha=.5, ax=None, error_func=sem,
                     style=(), central_tendency=np.nanmean, legend=True,
                     fill=True, log_x=False, log_y=False, line_alpha=1,
                     jagged=False, points=False, elinewidth=1, conf95=False,
-                    err=None, err_x=None, **kwargs):
+                    err=None, err_x=None, polar=False, **kwargs):
     if conf95:
         error_func = conf95_interval
     with plt.style.context(style):
@@ -469,7 +516,10 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
         if log_y:
             ax.set_yscale('log')
         xs_orig = np.array(xs_orig)
-        dat = np.array(dat)
+        if jagged:
+            dat = np.array(dat, dtype=object)
+        else:
+            dat = np.array(dat)
         if jagged:
             tr = np.array(list(central_tendency(d) for d in dat))
             er = np.array(list(error_func(d)[:, 0] for d in dat)).T
@@ -488,6 +538,11 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
             xs = xs_orig
         if err_x is not None:
             xs_er = err_x
+        if polar:
+            xs = np.concatenate((xs, xs[..., 0:1]), axis=-1)
+            tr = np.concatenate((tr, tr[..., 0:1]), axis=-1)
+            er = np.concatenate((er, er[..., 0:1]), axis=-1)
+            
         trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha,
                       **kwargs)
         if color is None:
@@ -511,8 +566,9 @@ def plot_trace_werr(xs_orig, dat, color=None, label='', show=False, title='',
                             color=color, elinewidth=elinewidth, alpha=alpha,
                             **kwargs)
         ax.set_title(title)
-        ax.spines['right'].set_visible(False)
-        ax.spines['top'].set_visible(False)
+        if not polar:
+            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False)
         if len(label) > 0 and legend:
             ax.legend(frameon=False)
     if show:
@@ -679,9 +735,65 @@ def set_violin_color(vp, color):
     for b in vp['bodies']:
         b.set_facecolor(color)
         b.set_edgecolor(color)
-    vp['cmedians'].set_color(color)
+    cm = vp.get('cmedians')
+    if cm is not None:
+        cm.set_color(color)
 
-def violinplot(vp_seq, positions, ax=None, color=None, **kwargs):
+def visualize_simplex_2d(pts, ax=None, ax_labels=None, thr=1,
+                         pt_col=(.7, .7, .7),
+                         line_grey_col=(.6, .6, .6),
+                         colors=None, bottom_x=.8,
+                         bottom_y=-1.1, top_x=.35, top_y=1,
+                         legend=False, plot_mean=False,
+                         plot_bounds=True,
+                         plot_outline=False,
+                         ms=2,
+                         outline_factor=1.5,
+                         **kwargs):
+    if ax is None:
+        f, ax = plt.subplots(1, 1)
+        # ax.set_aspect('equal')
+    if colors is None:
+        colors = (None,)*pts.shape[1]
+    if ax_labels is None:
+        ax_labels = ('',)*pts.shape[1]
+    if plot_bounds:
+        ax.plot([-1, 0], [-1, 1], color=line_grey_col)
+        ax.plot([0, 1], [1, -1], color=line_grey_col)
+        ax.plot([-1, 1], [-1, -1], color=line_grey_col)
+    
+    pts_x = pts[:, 1] - pts[:, 0]
+    pts_y = pts[:, 2] - (pts[:, 0] + pts[:, 1])
+    if plot_outline:
+        ax.plot(pts_x, pts_y, 'o', color='k', ms=outline_factor*ms,
+                **kwargs)
+    ax.plot(pts_x, pts_y, 'o', color=pt_col, ms=ms, **kwargs)
+    if plot_mean:
+        pt_mu = np.mean(pts, axis=0, keepdims=True)
+        pt_mu_x = pt_mu[:, 1] - pt_mu[:, 0]
+        pt_mu_y = pt_mu[:, 2] - (pt_mu[:, 0] + pt_mu[:, 1])
+        ax.plot(pt_mu_x, pt_mu_y, 'o', color=pt_col, ms=2*ms, **kwargs)
+        
+    
+    for i in range(pts.shape[1]):
+        mask = pts[:, i] > thr
+        ax.plot(pts_x[mask], pts_y[mask], 'o', color=colors[i],
+                label=ax_labels[i], **kwargs)
+    if legend:
+        ax.legend(frameon=False)
+    clean_plot(ax, 1)
+    clean_plot_bottom(ax, 0)
+    ax.text(bottom_x, bottom_y, ax_labels[1], verticalalignment='top',
+            horizontalalignment='center')
+    ax.text(-bottom_x, bottom_y, ax_labels[0], verticalalignment='top',
+            horizontalalignment='center')
+    ax.text(top_x, top_y, ax_labels[2], verticalalignment='top',
+            horizontalalignment='center', rotation=-60)
+    ax.set_aspect('equal')
+    return ax
+        
+def violinplot(vp_seq, positions, ax=None, color=None, label=[''],
+               markerstyles=None, markersize=5, **kwargs):
     if ax is None:
         f, ax = plt.subplots(1, 1)
     if color is None:
@@ -689,6 +801,11 @@ def violinplot(vp_seq, positions, ax=None, color=None, **kwargs):
     for i, vps in enumerate(vp_seq):
         p = ax.violinplot(vps, positions=[positions[i]],
                           **kwargs)
+        if markerstyles is not None:
+            ax.plot([positions[i]], [np.median(vps)],
+                    marker=markerstyles[i],
+                    markersize=markersize,
+                    color=color[i])
         set_violin_color(p, color[i])
         
 def clean_plot_bottom(ax, keeplabels=False):
@@ -702,7 +819,15 @@ def remove_ticks_3d(ax):
     ax.set_yticklabels([])
     ax.set_zticklabels([])
     return ax
-        
+
+def add_x_background(beg, end, ax, color=(.1, .1, .1), alpha=.1, zorder=-1,
+                     **kwargs):
+    y_low, y_high = ax.get_ylim()
+    rect = patches.Rectangle((beg, y_low), end - beg, (y_high - y_low),
+                             facecolor=color, alpha=alpha,
+                             zorder=zorder, **kwargs)
+    ax.add_patch(rect)
+
 def set_3d_background(ax, background_color=(1, 1, 1, 1), line_color=None):
     ax.w_xaxis.set_pane_color(background_color)
     ax.w_yaxis.set_pane_color(background_color)
@@ -752,7 +877,7 @@ def clean_plot(ax, i, max_i=None, ticks=True, spines=True, horiz=True):
                 ax.xaxis.set_tick_params(size=0)
 
 def digitize_vars(xs, ys, n_bins=10, cent_func=np.mean, eps=1e-10,
-                  use_max=None, use_min=None):
+                  use_max=None, use_min=None, ret_all_y=True):
     if use_max is None:
         use_max = np.nanmax(xs)
     if use_min is None:
@@ -762,12 +887,18 @@ def digitize_vars(xs, ys, n_bins=10, cent_func=np.mean, eps=1e-10,
     u_bs = np.unique(bs)
     u_bs = u_bs[:n_bins]
     u_bs = u_bs[u_bs > 0]
-    y_cents = np.zeros(len(u_bs))
+    if ret_all_y:
+        y_cents = np.zeros(len(u_bs), dtype=object)
+    else:
+        y_cents = np.zeros(len(u_bs))
     x_cents = np.zeros(len(u_bs))
     for i, b in enumerate(u_bs):
         mask = bs == b
         x_cents[i] = cent_func(xs[mask])
-        y_cents[i] = cent_func(ys[mask])
+        if ret_all_y:
+            y_cents[i] = ys[mask]
+        else:
+            y_cents[i] = cent_func(ys[mask])
     return x_cents, y_cents
                 
 def plot_scatter_average(xs, ys, *args, ax=None, n_bins=10, cent_func=np.mean,
@@ -775,8 +906,9 @@ def plot_scatter_average(xs, ys, *args, ax=None, n_bins=10, cent_func=np.mean,
     if ax is None:
         f, ax = plt.subplots(1, 1)
     x_cs, y_cs = digitize_vars(xs, ys, n_bins=n_bins, cent_func=cent_func,
-                               eps=eps, use_max=use_max, use_min=use_min)
-    out = ax.plot(x_cs, y_cs, *args, **kwargs)
+                               eps=eps, use_max=use_max, use_min=use_min,
+                               ret_all_y=True)
+    out = plot_trace_werr(x_cs, y_cs, *args, jagged=True, ax=ax, **kwargs)
     return out    
                 
 def make_xaxis_scale_bar(ax, magnitude=None, double=True, anchor=0, bottom=True,
