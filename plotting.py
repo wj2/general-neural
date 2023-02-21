@@ -11,6 +11,8 @@ from matplotlib.collections import LineCollection
 import matplotlib.colors as mplcolor
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import matplotlib.patches as patches
+import matplotlib.tri as tri
+import scipy.stats as sts
 import colorsys
 
 def set_ax_color(ax, color, sides=('bottom', 'top', 'left', 'right')):
@@ -22,6 +24,72 @@ def line_speed_func(*args):
     speeds = np.sqrt(np.sum(diffs**2, axis=1))
     speeds = np.concatenate((speeds[:1], speeds), axis=0)
     return speeds
+
+def simplefy(p, how='heatmap', ax=None, cmap=None, border='k', **kwargs):
+    """
+    Plot a heatmap or contour of 3-simplex. Indices of rows of p are:
+        
+             2
+            /\
+           /  \ 
+         1 --- 3 
+           
+    p: (3, N) probabilities
+    how: 'heatmap' (default) or 'contour'
+    cmap: colormap for heatmap
+    border: color of triangle border (string)
+
+    "code from the collection MATTEO by matteo"
+    """
+    
+    if ax is None:
+        ax = plt.gca()
+    if cmap is None:
+        cmap = 'binary'
+    
+    simplx_basis = np.array([[1,0,-1],[-0.5,1,-0.5]])
+    simplx_basis /= la.norm(simplx_basis,axis=1,keepdims=True)
+    
+    simp = simplx_basis@p
+    
+    kd_pdf = sts.gaussian_kde(simp) # estimate density
+    
+    ## plotting
+    xmin = -0.5*np.sqrt(2)
+    xmax = 0.5*np.sqrt(2)
+    ymin = np.sqrt(6)/3 - np.sqrt(1.5)
+    ymax = np.sqrt(6)/3
+    
+    if how=='contours':
+        xx, yy = np.meshgrid(np.linspace(xmin,xmax,100),np.linspace(ymin,ymax,100))
+        foo = (np.stack([xx.flatten(),yy.flatten()]).T@simplx_basis) + [1/3,1/3,1/3]
+        
+        support = la.norm(foo,1, axis=-1)<1.001
+        
+        zz = np.where(support, kd_pdf(np.stack([xx.flatten(),yy.flatten()])), np.nan)
+
+        ax.contour(xx,yy,zz.reshape(100,100,order='A'), 2,
+                          colors=clr.to_hex(cols[idx]),
+                          linestyles=['solid','dotted'])
+        
+    elif how == 'heatmap':
+        
+        grid = tri.Triangulation(simplx_basis[0,:], simplx_basis[1,:])
+        grid = tri.UniformTriRefiner(grid).refine_triangulation(subdiv=6)
+        foo = np.stack([grid.x,grid.y])[:,grid.triangles]
+        foo = foo.mean(-1).T@simplx_basis + [1/3,1/3,1/3]
+        msk = la.norm(foo,1, axis=-1)>=1.001
+        grid.set_mask(msk)
+        
+        zz = kd_pdf(np.stack([grid.x,grid.y]))
+        
+        ax.tripcolor(grid, zz, rasterized=True, cmap=cmap, **kwargs)
+
+    ax.plot([xmin,xmax,0,xmin], [ymin, ymin, ymax, ymin], color=border)        
+    ax.set_ylim([ymin*1.1,ymax*1.1])
+    ax.set_xlim([xmin*1.1,xmax*1.1])
+    ax.set_aspect('equal')
+    ax.set_axis_off()
 
 def plot_colored_pts(xs, ys, colors=None, ax=None, line_col=(.9, .9, .9),
                      linewidth=1,
