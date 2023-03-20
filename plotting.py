@@ -14,6 +14,7 @@ import matplotlib.patches as patches
 import matplotlib.tri as tri
 import scipy.stats as sts
 import colorsys
+import ternary
 
 def set_ax_color(ax, color, sides=('bottom', 'top', 'left', 'right')):
     for s in sides:
@@ -25,30 +26,34 @@ def line_speed_func(*args):
     speeds = np.concatenate((speeds[:1], speeds), axis=0)
     return speeds
 
-def simplefy(p, how='heatmap', ax=None, cmap=None, border='k', **kwargs):
+def simplefy(p, how='heatmap', ax=None, cmap=None, border='k', color=None,
+             lw=2, **kwargs):
     """
     Plot a heatmap or contour of 3-simplex. Indices of rows of p are:
         
-             2
+             3
             /\
            /  \ 
-         1 --- 3 
+         1 --- 2 
            
-    p: (3, N) probabilities
+    p: (N, 3) probabilities
     how: 'heatmap' (default) or 'contour'
     cmap: colormap for heatmap
     border: color of triangle border (string)
 
     "code from the collection MATTEO by matteo"
     """
-    
+    p = p.T
     if ax is None:
         ax = plt.gca()
-    if cmap is None:
-        cmap = 'binary'
+    if cmap is None and color is not None:
+        cmap = make_linear_cmap(color)
+    elif cmap is None:
+        cmap = 'Greys'
+
     
-    simplx_basis = np.array([[1,0,-1],[-0.5,1,-0.5]])
-    simplx_basis /= la.norm(simplx_basis,axis=1,keepdims=True)
+    simplx_basis = np.array([[-1,1, 0],[-0.5,-0.5, 1]])
+    simplx_basis /= np.linalg.norm(simplx_basis,axis=1,keepdims=True)
     
     simp = simplx_basis@p
     
@@ -63,14 +68,17 @@ def simplefy(p, how='heatmap', ax=None, cmap=None, border='k', **kwargs):
     if how=='contours':
         xx, yy = np.meshgrid(np.linspace(xmin,xmax,100),np.linspace(ymin,ymax,100))
         foo = (np.stack([xx.flatten(),yy.flatten()]).T@simplx_basis) + [1/3,1/3,1/3]
+        if color is None:
+            color = 'k'
         
-        support = la.norm(foo,1, axis=-1)<1.001
+        support = np.linalg.norm(foo,1, axis=-1)<1.001
         
         zz = np.where(support, kd_pdf(np.stack([xx.flatten(),yy.flatten()])), np.nan)
 
-        ax.contour(xx,yy,zz.reshape(100,100,order='A'), 2,
-                          colors=clr.to_hex(cols[idx]),
-                          linestyles=['solid','dotted'])
+        ax.contour(xx,yy,zz.reshape(100,100,order='A'), [.95],
+                   colors=(color,),
+                   linestyles=['solid','dotted'],
+                   linewidths=(lw,))
         
     elif how == 'heatmap':
         
@@ -78,7 +86,7 @@ def simplefy(p, how='heatmap', ax=None, cmap=None, border='k', **kwargs):
         grid = tri.UniformTriRefiner(grid).refine_triangulation(subdiv=6)
         foo = np.stack([grid.x,grid.y])[:,grid.triangles]
         foo = foo.mean(-1).T@simplx_basis + [1/3,1/3,1/3]
-        msk = la.norm(foo,1, axis=-1)>=1.001
+        msk = np.linalg.norm(foo,1, axis=-1)>=1.001
         grid.set_mask(msk)
         
         zz = kd_pdf(np.stack([grid.x,grid.y]))

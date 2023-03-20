@@ -29,6 +29,44 @@ import joblib as jl
 import general.utility as u
 import general.nested_cv as ncv
 
+class BalancedShuffleSplit:
+    def __init__(self, n_splits=10, test_size=None, train_size=None,
+                 random_state=None):
+        if test_size is None and train_size is None:
+            test_size = .1
+        elif train_size is not None:
+            test_size = 1 - train_size
+        self.test_size = test_size
+        self.rng = np.random.default_rng(random_state)
+        self.n_splits = n_splits
+
+    def get_n_splits(self, *args, **kwargs):
+        return self.n_splits
+
+    def split(self, X, y, groups=None):
+        cats, inv, counts = np.unique(y, return_counts=True,
+                                      return_inverse=True)
+        lim_samps = min(counts)
+
+        if self.test_size < 1:
+            test_size = int(np.round(lim_samps*self.test_size))
+        train_size = lim_samps - test_size
+        for i in range(self.n_splits):
+            tr_inds = []
+            for cat in cats:
+                c_inds = np.where(y == cat)[0]
+                c_choice = self.rng.choice(c_inds, size=(train_size,),
+                                           replace=False)
+                tr_inds.extend(c_choice)
+            te_inds = list(set(range(len(X))).difference(tr_inds))
+            yield np.array(tr_inds), np.array(te_inds)
+
+def make_data_labels(*data):
+    data_all = np.concatenate(data, axis=0)
+    labels_all = np.concatenate(list(np.ones(d_i.shape[0], dtype=int)*i
+                                     for i, d_i in enumerate(data)))
+    return data_all, labels_all
+
 def make_model_pipeline(model=None, norm=True, pca=None, post_norm=False,
                         **kwargs):
     pipe_steps = []
