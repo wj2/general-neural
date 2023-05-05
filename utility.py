@@ -12,6 +12,7 @@ import itertools as it
 import configparser
 import sklearn.decomposition as skd
 import sklearn.preprocessing as skp
+import sklearn.utils as sku
 from pref_looking.eyes import analyze_eyemove
 from pref_looking.bias import get_look_img
 
@@ -30,6 +31,13 @@ monthdict = {
     "12": "Dec",
 }
 
+
+def bootstrap_array(arr, func, n=1000, **kwargs):
+    out = np.zeros((n,) + arr.shape[1:])
+    for i in range(n):
+        samp = sku.resample(arr)
+        out[i] = func(samp, axis=0)
+    return out
 
 def ind_complement(inds, total):
     comp_dim = np.array(list(set(np.arange(total)) - set(inds)))
