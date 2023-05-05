@@ -28,8 +28,9 @@ def line_speed_func(*args):
     return speeds
 
 
-def simplefy(p, how='heatmap', ax=None, cmap=None, border='k', color=None,
-             lw=2, **kwargs):
+def simplefy(
+    p, how="heatmap", ax=None, cmap=None, border="k", color=None, lw=2, **kwargs
+):
     """
     Plot a heatmap or contour of 3-simplex. Indices of rows of p are:
         
@@ -51,43 +52,51 @@ def simplefy(p, how='heatmap', ax=None, cmap=None, border='k', color=None,
     if cmap is None and color is not None:
         cmap = make_linear_cmap(color)
     elif cmap is None:
-        cmap = 'Greys'
-    
-    simplx_basis = np.array([[-1,1, 0],[-0.5,-0.5, 1]])
-    simplx_basis /= np.linalg.norm(simplx_basis,axis=1,keepdims=True)
-    
-    simp = simplx_basis@p
-    
-    kd_pdf = sts.gaussian_kde(simp) # estimate density
-    
-    ## plotting
-    xmin = -0.5*np.sqrt(2)
-    xmax = 0.5*np.sqrt(2)
-    ymin = np.sqrt(6)/3 - np.sqrt(1.5)
-    ymax = np.sqrt(6)/3
-    
-    if how=='contours':
-        xx, yy = np.meshgrid(np.linspace(xmin,xmax,100),np.linspace(ymin,ymax,100))
-        foo = (np.stack([xx.flatten(),yy.flatten()]).T@simplx_basis) + [1/3,1/3,1/3]
-        if color is None:
-            color = 'k'
-        
-        support = np.linalg.norm(foo,1, axis=-1)<1.001
-        
-        zz = np.where(support, kd_pdf(np.stack([xx.flatten(),yy.flatten()])), np.nan)
+        cmap = "Greys"
 
-        ax.contour(xx,yy,zz.reshape(100,100,order='A'), [.95],
-                   colors=(color,),
-                   linestyles=['solid','dotted'],
-                   linewidths=(lw,))
-        
-    elif how == 'heatmap':
-        
-        grid = tri.Triangulation(simplx_basis[0,:], simplx_basis[1,:])
+    simplx_basis = np.array([[-1, 1, 0], [-0.5, -0.5, 1]])
+    simplx_basis /= np.linalg.norm(simplx_basis, axis=1, keepdims=True)
+
+    simp = simplx_basis @ p
+
+    kd_pdf = sts.gaussian_kde(simp)  # estimate density
+
+    ## plotting
+    xmin = -0.5 * np.sqrt(2)
+    xmax = 0.5 * np.sqrt(2)
+    ymin = np.sqrt(6) / 3 - np.sqrt(1.5)
+    ymax = np.sqrt(6) / 3
+
+    if how == "contours":
+        xx, yy = np.meshgrid(np.linspace(xmin, xmax, 100), np.linspace(ymin, ymax, 100))
+        foo = (np.stack([xx.flatten(), yy.flatten()]).T @ simplx_basis) + [
+            1 / 3,
+            1 / 3,
+            1 / 3,
+        ]
+        if color is None:
+            color = "k"
+
+        support = np.linalg.norm(foo, 1, axis=-1) < 1.001
+
+        zz = np.where(support, kd_pdf(np.stack([xx.flatten(), yy.flatten()])), np.nan)
+
+        ax.contour(
+            xx,
+            yy,
+            zz.reshape(100, 100, order="A"),
+            [0.95],
+            colors=(color,),
+            linestyles=["solid", "dotted"],
+            linewidths=(lw,),
+        )
+
+    elif how == "heatmap":
+        grid = tri.Triangulation(simplx_basis[0, :], simplx_basis[1, :])
         grid = tri.UniformTriRefiner(grid).refine_triangulation(subdiv=6)
-        foo = np.stack([grid.x,grid.y])[:,grid.triangles]
-        foo = foo.mean(-1).T@simplx_basis + [1/3,1/3,1/3]
-        msk = np.linalg.norm(foo,1, axis=-1)>=1.001
+        foo = np.stack([grid.x, grid.y])[:, grid.triangles]
+        foo = foo.mean(-1).T @ simplx_basis + [1 / 3, 1 / 3, 1 / 3]
+        msk = np.linalg.norm(foo, 1, axis=-1) >= 1.001
         grid.set_mask(msk)
 
         zz = kd_pdf(np.stack([grid.x, grid.y]))
