@@ -68,13 +68,21 @@ class Figure:
             grid_arr = np.expand_dims(grid_arr, exp_dim)
         ax_arr = np.zeros_like(grid_arr, dtype=object)
         share_ax = None
+        share_x_cols = {}
+        share_y_cols = {}
+        share_x_rows = {}
+        share_y_rows = {}
         for i, ind in enumerate(u.make_array_ind_iterator(grid_arr.shape)):
             ax_kwarg = dict()
-            ax_kwarg.update(all_ax_kwargs)
-            if sharex == 'horizontal' and ind[1] == 0:
-                share_ax_x = None
-            if sharey == 'horizontal' and ind[1] == 0:
-                share_ax_y = None
+            ax_kwarg.update(all_ax_kwargs)            
+            if sharex == 'horizontal':
+                share_ax_x = share_x_rows.get(ind[0])
+            if sharey == 'horizontal':
+                share_ax_y = share_y_rows.get(ind[0])
+            if sharex == 'vertical':
+                share_ax_x = share_x_cols.get(ind[1])
+            if sharey == 'vertical':
+                share_ax_y = share_y_cols.get(ind[1])
                 
             if plot_3ds is not None and plot_3ds[ind] or all_3d:
                 ax_kwarg['projection'] = '3d'
@@ -94,13 +102,13 @@ class Figure:
             if i == 0 and sharey == 'all':
                 share_ax_y = ax_arr[ind]
             if ind[1] == 0 and sharex == 'horizontal':
-                share_ax_x = ax_arr[ind]
+                share_x_rows[ind[0]] = ax_arr[ind]
             if ind[1] == 0 and sharey == 'horizontal':
-                share_ax_y = ax_arr[ind]
+                share_y_rows[ind[0]] = ax_arr[ind]
             if ind[0] == 0 and sharex == 'vertical':
-                share_ax_x = ax_arr[ind]
+                share_x_cols[ind[1]] = ax_arr[ind]
             if ind[0] == 0 and sharey == 'vertical':
-                share_ax_y = ax_arr[ind]
+                share_y_cols[ind[1]] = ax_arr[ind]
                 
         if squeeze:
             ax_arr = np.squeeze(ax_arr)
