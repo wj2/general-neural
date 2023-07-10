@@ -675,7 +675,7 @@ class Dataset(object):
                                               skl_axs=skl_axs,
                                               same_n_trls=same_n_trls)
         return xs, pops_pseudo
-    
+
     def sample_pseudo_pops(self, *pops, min_trials=10, resamples=10,
                            skl_axs=True, same_n_trls=True):
         trls_list = []
@@ -690,8 +690,8 @@ class Dataset(object):
                                         skl_axs=skl_axs,
                                         same_n_trls=same_n_trls)
             pops_pseudo.append(pop_i)
-        return pops_pseudo        
-    
+        return pops_pseudo
+
     def decode_masks(self, m1, m2, winsize, begin, end, stepsize, n_folds=20,
                      model=svm.LinearSVC, params=None, pre_pca=None,
                      mean=False, shuffle=False, time_zero_field=None,
@@ -703,12 +703,13 @@ class Dataset(object):
                      dec_less=True, time_mask=None, dec_beg=None,
                      dec_end=None, collapse_time=False, **kwargs):
         out = self._get_dec_pops(winsize, begin, end, stepsize,
-                                 m1, m2, decode_m1, decode_m2, 
+                                 m1, m2, decode_m1, decode_m2,
                                  tzfs=(time_zero_field, time_zero_field,
                                        decode_tzf, decode_tzf),
                                  repl_nan=repl_nan, regions=regions,
                                  shuffle_trials=shuffle_trials)
         xs, pops = out
+
         one_of_dec = (dec_beg is not None or dec_end is not None)
         if collapse_time and time_mask is None and one_of_dec:
             if dec_beg is None:
@@ -720,9 +721,9 @@ class Dataset(object):
             time_mask = np.logical_and(beg_mask, end_mask)
         pop1, pop2, dec1, dec2 = pops
         if params is None:
-            params = {'class_weight':'balanced', 'max_iter':max_iter}
-            # params.update(kwargs)            
-            
+            params = {'class_weight': 'balanced', 'max_iter': max_iter}
+            # params.update(kwargs)
+
         if pseudo:
             c1_n = list(pop_i.shape[2] for pop_i in pop1)
             c2_n = list(pop_i.shape[2] for pop_i in pop2)
@@ -768,7 +769,7 @@ class Dataset(object):
                                            skl_axs=True, same_n_trls=True)
             else:
                 dec2 = (None,)*resample_pseudo
-        print(pop1.shape, pop2.shape, dec1.shape, dec2.shape)
+        # print(pop1.shape, pop2.shape, dec1.shape, dec2.shape)
         outs = np.zeros((len(pop2), n_folds, len(xs)))
         outs_gen = np.zeros_like(outs)
         multi_out_flag = not combine and (decode_m1 is not None
@@ -778,12 +779,14 @@ class Dataset(object):
                 p1 = np.concatenate((p1, dec1[i]), axis=2)
                 p2 = np.concatenate((pop2[i], dec2[i]), axis=2)
                 d1 = None
-                d2 = None 
+                d2 = None
             else:
                 p2 = pop2[i]
                 d1 = dec1[i]
                 d2 = dec2[i]
-            if p1.shape[0] == 0:
+            cond1 = p1.shape[2] < min_trials_pseudo or p2.shape[2] < min_trials_pseudo
+            cond2 = d1.shape[2] == 0 and d2.shape[2] == 0
+            if p1.shape[0] == 0 or cond1 or cond2:
                 shape = (n_folds, len(xs))
                 if multi_out_flag:
                     out = (np.zeros(shape)*np.nan,
@@ -791,7 +794,12 @@ class Dataset(object):
                 else:
                     out = np.zeros(shape)*np.nan
             else:
-                out = na.fold_skl(p1, p2, n_folds, model=model, params=params, 
+                if d1.shape[2] == 0:
+                    d1 = np.zeros((d2.shape[0],) + d1.shape[1:])
+                if d2.shape[2] == 0:
+                    d2 = np.zeros((d1.shape[0],) + d2.shape[1:])
+                print(p1.shape, p2.shape, d1.shape, d2.shape)
+                out = na.fold_skl(p1, p2, n_folds, model=model, params=params,
                                   mean=mean, pre_pca=pre_pca, shuffle=shuffle,
                                   impute_missing=(repl_nan or impute_missing),
                                   gen_c1=d1, gen_c2=d2,

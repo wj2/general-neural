@@ -59,6 +59,16 @@ class Figure:
     def make_gss(self):
         pass
 
+    def save_stats_string(self, s, fn, print_=True):
+        s = s.strip('\n')
+        if print_:
+            print(s)
+        folder = self.params.get("stats_folder", ".")
+        fp = os.path.join(folder, self.fig_key + "_" + fn + ".tex")
+        with open(fp, "w") as f:
+            f.write(s)
+        return fp
+    
     def get_axs(self, grids, sharex=None, sharey=None, plot_3ds=None,
                 all_3d=False, squeeze=False, exp_dim=0, share_ax_x=None,
                 plot_polars=None, all_polar=False,

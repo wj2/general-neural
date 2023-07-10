@@ -11,6 +11,7 @@ import matplotlib.colors as mplcolor
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import matplotlib.patches as patches
 import matplotlib.tri as tri
+import matplotlib.patheffects as mpe
 import scipy.stats as sts
 import colorsys
 import ternary
@@ -445,15 +446,26 @@ def plot_trial_structure(
     return ax
 
 
-def add_vlines(pos, ax, color=(0.8, 0.8, 0.8), alpha=1, **kwargs):
+def _add_lines(pos, func, lim, ax, color=(0.8, 0.8, 0.8), alpha=1, plot_outline=False,
+               outline_mult_width=1.5, **kwargs):
+    if plot_outline:
+        default_lw = plt.rcParams["lines.linewidth"]
+        lw = kwargs.get('lw', kwargs.get('linewidth', default_lw))
+        new_lw = outline_mult_width*lw
+        use_pe = [mpe.Stroke(foreground='k', linewidth=new_lw), mpe.Normal()]
+        kwargs['path_effects'] = use_pe
+    func(pos, lim[0], lim[1], color=color, alpha=alpha, **kwargs)
+
+
+def add_vlines(pos, ax, **kwargs):
     yl = ax.get_ylim()
-    ax.vlines(pos, yl[0], yl[1], color=color, alpha=alpha, **kwargs)
+    _add_lines(pos, ax.vlines, yl, ax, **kwargs)
     ax.set_ylim(yl)
 
 
-def add_hlines(pos, ax, color=(0.8, 0.8, 0.8), alpha=1, **kwargs):
+def add_hlines(pos, ax, **kwargs):
     xl = ax.get_xlim()
-    ax.hlines(pos, xl[0], xl[1], color=color, alpha=alpha, **kwargs)
+    _add_lines(pos, ax.hlines, xl, ax, **kwargs)
     ax.set_xlim(xl)
 
 
@@ -500,21 +512,21 @@ def plot_highdim_trace(
             all_samps = np.concatenate(all_samps, axis=0)
         p = skd.PCA(3)
         p.fit(all_samps)
+    colors = kwargs.get("colors")
+    if colors is None:
+        colors = (None,)*len(args)
+    else:
+        colors = kwargs.pop("colors")
     for i, y in enumerate(args):
-        colors = kwargs.get("colors")
-        if colors is None:
-            color = None
-        else:
-            color = colors[i]
-        if "color" in kwargs.keys():
-            color = kwargs.pop("color")
+        if colors[i] is not None:
+            kwargs["color"] = colors[i]
         y_mu = p.transform(np.mean(y, axis=0))
         y_pts = p.transform(np.concatenate(y, axis=0))
         if plot_line:
-            l = ax.plot(*y_mu.T, color=color, **kwargs)
-            color = l[0].get_color()
+            l = ax.plot(*y_mu.T, **kwargs)
+            kwargs["color"] = l[0].get_color()
         if plot_points:
-            ax.plot(*y_pts.T, "o", ms=ms, color=color, **kwargs)
+            ax.plot(*y_pts.T, "o", ms=ms, **kwargs)
     return ax, p
 
 
@@ -733,6 +745,7 @@ def get_next_n_colors(n):
 
 
 def add_color_value(color, amt):
+    color = np.array(color)
     hsv = rgb_to_hls(color)
     hsv[..., -2] = hsv[..., -2] + amt
     hsv[..., -2] = np.min(
@@ -769,6 +782,10 @@ def plot_trace_werr(
     err=None,
     err_x=None,
     polar=False,
+    plot_outline=False,
+    outline_color="k",
+    outline_mult_width=1.5,
+    marker_type='o',
     **kwargs
 ):
     if conf95:
@@ -809,11 +826,18 @@ def plot_trace_werr(
             tr = np.concatenate((tr, tr[..., 0:1]), axis=-1)
             er = np.concatenate((er, er[..., 0:1]), axis=-1)
 
+        if plot_outline:
+            default_lw = plt.rcParams["lines.linewidth"]
+            lw = kwargs.get('lw', kwargs.get('linewidth', default_lw))
+            new_lw = outline_mult_width*lw
+            use_pe = [mpe.Stroke(foreground='k', linewidth=new_lw), mpe.Normal()]
+            kwargs['path_effects'] = use_pe
         trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha, **kwargs)
+        
         if color is None:
             color = trl[0].get_color()
         if points:
-            ax.plot(xs, tr, "o", color=color, alpha=line_alpha, **kwargs)
+            ax.plot(xs, tr, marker_type, color=color, alpha=line_alpha, **kwargs)
         alpha = min(line_alpha, alpha)
         if len(dat.shape) > 1 or jagged or err is not None:
             if fill:
@@ -1606,7 +1630,8 @@ def print_diff_conf95(
 
 
 def make_yaxis_scale_bar(
-    ax, magnitude=None, double=True, anchor=0, left=True, label="", text_buff=0.15
+    ax, magnitude=None, double=True, anchor=0, left=True, label="", text_buff=0.15,
+    fontsize="medium", **kwargs,
 ):
     xl = ax.get_xlim()
     yl = ax.get_ylim()
@@ -1622,7 +1647,8 @@ def make_yaxis_scale_bar(
         new_ticks = [anchor, anchor + magnitude]
     ax.set_yticks(new_ticks)
     if left:
-        ax.vlines(xl[0], new_ticks[0], new_ticks[-1], color="k")
+        kwargs["color"] = kwargs.get("color", "k")
+        ax.vlines(xl[0], new_ticks[0], new_ticks[-1], **kwargs)
         ax.spines["left"].set_visible(False)
         x_pt = xl[0]
     else:
@@ -1641,6 +1667,8 @@ def make_yaxis_scale_bar(
             horizontalalignment="center",
             verticalalignment="center",
             rotation=90,
+            color=kwargs.get("color"),
+            fontsize=fontsize,
         )
     ax.set_xlim(xl)
 
