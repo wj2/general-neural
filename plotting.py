@@ -886,8 +886,8 @@ def violinplot(vp_seq, positions, ax=None, color=None, label=[''],
         
 def clean_plot_bottom(ax, keeplabels=False):
     ax.spines['bottom'].set_visible(False)
-    ax.xaxis.set_tick_params(size=0)
     if not keeplabels:
+        ax.xaxis.set_tick_params(size=0)
         plt.setp(ax.get_xticklabels(), visible=False)
 
 def remove_ticks_3d(ax):
