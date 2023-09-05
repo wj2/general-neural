@@ -457,15 +457,19 @@ def _add_lines(pos, func, lim, ax, color=(0.8, 0.8, 0.8), alpha=1, plot_outline=
     func(pos, lim[0], lim[1], color=color, alpha=alpha, **kwargs)
 
 
-def add_vlines(pos, ax, **kwargs):
+def add_vlines(pos, ax, use_lim=None, **kwargs):
     yl = ax.get_ylim()
-    _add_lines(pos, ax.vlines, yl, ax, **kwargs)
+    if use_lim is None:
+        use_lim = yl
+    _add_lines(pos, ax.vlines, use_lim, ax, **kwargs)
     ax.set_ylim(yl)
 
 
-def add_hlines(pos, ax, **kwargs):
+def add_hlines(pos, ax, use_lim=None, **kwargs):
     xl = ax.get_xlim()
-    _add_lines(pos, ax.hlines, xl, ax, **kwargs)
+    if use_lim is None:
+        use_lim = xl
+    _add_lines(pos, ax.hlines, use_lim, ax, **kwargs)
     ax.set_xlim(xl)
 
 
@@ -497,6 +501,7 @@ def plot_highdim_trace(
     p=None,
     central_tendence=np.mean,
     dim_red_mean=True,
+    n_dim=3,
     **kwargs
 ):
     if ax is None:
@@ -510,7 +515,7 @@ def plot_highdim_trace(
             all_samps = np.mean(all_samps, axis=0)
         else:
             all_samps = np.concatenate(all_samps, axis=0)
-        p = skd.PCA(3)
+        p = skd.PCA(n_dim)
         p.fit(all_samps)
     colors = kwargs.get("colors")
     if colors is None:
@@ -1216,7 +1221,7 @@ def violinplot(
     positions,
     ax=None,
     color=None,
-    label=[""],
+    labels=None,
     markerstyles=None,
     markersize=5,
     showmedians=True,
@@ -1227,6 +1232,9 @@ def violinplot(
         f, ax = plt.subplots(1, 1)
     if color is None:
         color = (None,) * len(vp_seq)
+    if labels is None:
+        labels = ("",)*len(vp_seq)
+    handles = []
     for i, vps in enumerate(vp_seq):
         p = ax.violinplot(
             vps,
@@ -1244,8 +1252,7 @@ def violinplot(
                 color=color[i],
             )
         set_violin_color(p, color[i])
-
-
+    return p
 def clean_plot_bottom(ax, keeplabels=False):
     ax.spines["bottom"].set_visible(False)
     if not keeplabels:

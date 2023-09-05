@@ -67,12 +67,24 @@ def make_data_labels(*data):
     return data_all, labels_all
 
 
-def make_model_pipeline(model=None, norm=True, pca=None, post_norm=False, **kwargs):
+def make_model_pipeline(
+    model=None,
+    norm=True,
+    pca=None,
+    post_norm=False,
+    use_ica=False,
+    ica_iter=2000,
+    **kwargs,
+):
+    if use_ica:
+        decomp = ft.partial(skd.FastICA, max_iter=ica_iter)
+    else:
+        decomp = skd.PCA
     pipe_steps = []
     if norm:
         pipe_steps.append(skp.StandardScaler())
     if pca is not None:
-        pipe_steps.append(skd.PCA(pca))
+        pipe_steps.append(decomp(pca))
     if post_norm:
         pipe_steps.append(skp.StandardScaler())
     if model is not None:
@@ -1621,10 +1633,14 @@ def _combine_samples(*c_is, norm_labels=False):
     return data_full, labels_full
 
 
-def _eval_fit_models(data, labels, estimators):
+def _eval_fit_models(data, labels, estimators, scoring=None):
     out = np.zeros(len(estimators))
     for i, est in enumerate(estimators):
-        out[i] = est.score(data, labels)
+        if scoring is not None:
+            scores = scoring(est, data, labels)
+        else:
+            scores = est.score(data, labels)
+        out[i] = scores
     return out
 
 
@@ -1749,6 +1765,12 @@ def fold_skl_multi(
     return out
 
 
+def _distance_scorer(est, X, y):
+    dists = est.decision_function(X)
+    flips = np.sign(y - np.mean(y))
+    return np.mean(dists*flips)
+
+
 def _nominal_fold(
     c_flat,
     labels,
@@ -1761,10 +1783,15 @@ def _nominal_fold(
     c_gen=None,
     l_gen=None,
     mean=False,
+    ret_projections=False,
 ):
     x_len = c_flat.shape[-1]
     tcs = np.zeros((folds_n, x_len))
     tcs_gen = np.zeros_like(tcs)
+    if ret_projections:
+        scoring = _distance_scorer
+    else:
+        scoring = None
     for j in range(x_len):
         sk_cv = skms.cross_validate
         if time_accumulate:
@@ -1773,18 +1800,24 @@ def _nominal_fold(
         else:
             in_data = c_flat[..., j].T
         out = sk_cv(
-            pipe, in_data, labels, cv=splitter, n_jobs=n_jobs, return_estimator=True
+            pipe,
+            in_data,
+            labels,
+            cv=splitter,
+            n_jobs=n_jobs,
+            return_estimator=True,
+            scoring=scoring,
         )
         tcs[:, j] = out["test_score"]
-        # print('tcs', np.mean(tcs[:, j]), tcs[:, j])
         if c_gen is not None:
             if time_accumulate:
                 gen_list = list(c_gen[..., k] for k in range(j + 1))
                 gen_data = np.concatenate(gen_list, axis=0).T
             else:
                 gen_data = c_gen[..., j].T
-            tcs_gen[:, j] = _eval_fit_models(gen_data, l_gen, out["estimator"])
-            # print('gen', np.mean(tcs_gen[:, j]), tcs_gen[:, j])
+            tcs_gen[:, j] = _eval_fit_models(
+                gen_data, l_gen, out["estimator"], scoring=scoring,
+            )
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
@@ -1967,6 +2000,7 @@ def fold_skl(
     test_prop=None,
     time_mask=None,
     collapse_time=False,
+    ret_projections=False,
     **model_kwargs
 ):
     if test_prop is None:
@@ -2035,6 +2069,7 @@ def fold_skl(
             c_gen=c_gen,
             l_gen=l_gen,
             mean=mean,
+            ret_projections=ret_projections,
         )
     return out
 

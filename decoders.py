@@ -2,7 +2,7 @@
 import numpy as np
 import pickle
 import sklearn.kernel_approximation as skka
-import pystan as ps
+import stan as ps
 import arviz as az
 import functools as ft
 import sklearn.pipeline as sklpipe

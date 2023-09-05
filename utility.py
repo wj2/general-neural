@@ -6,8 +6,9 @@ import shutil
 import scipy.io as sio
 import scipy.linalg as spla
 import scipy.stats as sts
-import pystan as ps
+import stan as ps
 import pickle
+import pandas as pd
 import itertools as it
 import configparser
 import sklearn.decomposition as skd
@@ -37,12 +38,50 @@ def format_sirange(high, low, form=":.2f"):
     return s.format(high=high, low=low)
 
 
+def load_folder_regex_generator(
+        folder, pattern, file_target=None, load_func=pickle.load, open_str="rb",
+):
+    fls = os.listdir(folder)
+    for fl in fls:
+        m = re.match(pattern, fl)
+        if m is not None:
+            gd = m.groupdict()
+            if file_target:
+                load_path = os.path.join(folder, fl, file_target)
+            else:
+                load_path = os.path.join(folder, fl)
+            out = load_func(open(load_path, open_str))
+            yield load_path, gd, out
+
+
+def load_cluster_runs(
+    folder,
+    pattern,
+    merge_keys=(),
+    format_keys=(),
+):
+    record_list = []
+    for path, gd, run_data in load_folder_regex_generator(folder, pattern):
+        run_data["path"] = path
+        run_data.update(gd)
+        for mk in merge_keys:
+            run_data.update(run_data.pop(mk))
+        for fk in format_keys:
+            fk_d = run_data.pop(fk)
+            new_dict = {"_".join((fk, k)): v for k, v in fk_d.items()}
+            run_data.update(new_dict)
+        record_list.append(run_data)
+    df = pd.DataFrame.from_records(record_list)
+    return df
+
+
 def bootstrap_array(arr, func, n=1000, **kwargs):
     out = np.zeros((n,) + arr.shape[1:])
     for i in range(n):
         samp = sku.resample(arr)
         out[i] = func(samp, axis=0)
     return out
+
 
 def ind_complement(inds, total):
     comp_dim = np.array(list(set(np.arange(total)) - set(inds)))
@@ -418,9 +457,13 @@ def quantify_sparseness(reps, axis=0):
 
 def participation_ratio(samps, ret_pv=False):
     p = skd.PCA()
-    p.fit(samps)
-    pv = p.explained_variance_ratio_
-    pr = pr_only(pv)
+    try:
+        p.fit(samps)
+        pv = p.explained_variance_ratio_
+        pr = pr_only(pv)
+    except np.linalg.LinAlgError:
+        pv = np.ones_like(p.explained_variance_ratio_)*np.nan
+        pr = np.nan
     if ret_pv:
         out = (pr, pv)
     else:
