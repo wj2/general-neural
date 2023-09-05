@@ -32,6 +32,11 @@ monthdict = {
 }
 
 
+def format_sirange(high, low, form=":.2f"):
+    s = "\SIrange{{{low" + form + "}}}{{{high" + form + "}}}{{}}"
+    return s.format(high=high, low=low)
+
+
 def bootstrap_array(arr, func, n=1000, **kwargs):
     out = np.zeros((n,) + arr.shape[1:])
     for i in range(n):
