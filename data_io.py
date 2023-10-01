@@ -22,7 +22,11 @@ class ResultSequence(object):
         return hash(hashable)
 
     def _op(self, x, operator):
-        out = ResultSequence(operator(v, x) for v in self.val)
+        out = ResultSequence(pd.Series(operator(v, x)) for v in self.val)
+        return out
+
+    def _unary_op(self, operator):
+        out = ResultSequence(operator(v) for v in self.val)
         return out
 
     def _op_rs(self, x, operator):
@@ -62,18 +66,22 @@ class ResultSequence(object):
     def __ne__(self, x):
         return self._op_dispatcher(x, np.not_equal)
 
-    def _op_dispatcher(self, x, op):
+    def _op_dispatcher(self, x, op, use_rs=True):
         try:
+            assert use_rs
             len(x)
             if type(x) == str:
                 raise TypeError()
             out = self._op_rs(x, op)
-        except TypeError:
+        except (TypeError, AssertionError):
             out = self._op(x, op)
         return out
 
     def one_of(self, x):
-        return self._op(x, np.isin)
+        return self._op_dispatcher(x, np.isin, use_rs=False)
+
+    def rs_isnan(self):
+        return self._unary_op(np.isnan)
 
     def rs_and(self, x):
         return self._op_dispatcher(x, np.logical_and)
@@ -149,14 +157,17 @@ class Dataset(object):
         self.mask_pop_cache = {}
 
     @classmethod
-    def from_dict(cls, seconds=False, **inputs):
+    def from_dict(cls, sort_by=None, seconds=False, **inputs):
         df = pd.DataFrame(data=inputs)
+        if sort_by is not None:
+            df.sort_values(by=sort_by, inplace=True)
+            df.reset_index(drop=True, inplace=True)
         return cls(df, seconds=seconds)
 
     @classmethod
-    def from_readfunc(cls, read_func, *args, seconds=False, **kwargs):
+    def from_readfunc(cls, read_func, *args, seconds=False, sort_by=None, **kwargs):
         super_df = read_func(*args, **kwargs)
-        return cls.from_dict(seconds=seconds, **super_df)
+        return cls.from_dict(seconds=seconds, sort_by=sort_by, **super_df)
 
     def __getitem__(self, key):
         try:
@@ -223,8 +234,9 @@ class Dataset(object):
         for i, spk_i in enumerate(spk):
             for j, spk_ij in enumerate(spk_i):
                 spk_sq = np.squeeze(spk_ij)
-                if convert_seconds:
-                    spk_sq = spk_sq * 1000
+                # UNCOMMENT IF SOMETHING BREAKS IN BUSCHMAN
+                # if convert_seconds:
+                #     spk_sq = spk_sq * 1000
                 no_spks[i, j] = len(spk_sq.shape) == 0 or len(spk_sq) == 0
                 resp_arr = na.bin_spiketimes(
                     spk_sq,

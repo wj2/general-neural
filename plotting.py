@@ -539,7 +539,11 @@ def plot_highdim_points(*args, ms=5, **kwargs):
     return plot_highdim_trace(*args, **kwargs, plot_line=False, plot_points=True, ms=ms)
 
 
-def pcolormesh(xs, ys, data, ax, diff_ind=0, append=True, equal_bins=False, **kwargs):
+def pcolormesh(
+        xs, ys, data, ax=None, diff_ind=0, append=True, equal_bins=False, **kwargs
+):
+    if ax is None:
+        f, ax = plt.subplots(1, 1)
     if equal_bins:
         xs_bins = np.arange(len(xs))
         ys_bins = np.arange(len(ys))
@@ -784,6 +788,7 @@ def plot_trace_werr(
     points=False,
     elinewidth=1,
     conf95=False,
+    confstd=False,
     err=None,
     err_x=None,
     polar=False,
@@ -795,6 +800,8 @@ def plot_trace_werr(
 ):
     if conf95:
         error_func = conf95_interval
+    elif confstd:
+        error_func = std
     with plt.style.context(style):
         if ax is None:
             f = plt.figure()
@@ -1363,6 +1370,7 @@ def digitize_vars(
         use_min = np.nanmin(xs)
     bins = np.linspace(use_min, use_max + eps, n_bins + 1)
     bs = np.digitize(xs, bins)
+
     u_bs = np.unique(bs)
     u_bs = u_bs[:n_bins]
     u_bs = u_bs[u_bs > 0]
