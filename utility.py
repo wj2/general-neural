@@ -462,7 +462,7 @@ def participation_ratio(samps, ret_pv=False):
         pv = p.explained_variance_ratio_
         pr = pr_only(pv)
     except np.linalg.LinAlgError:
-        pv = np.ones_like(p.explained_variance_ratio_)*np.nan
+        pv = np.ones(samps.shape[1])*np.nan
         pr = np.nan
     if ret_pv:
         out = (pr, pv)

@@ -22,7 +22,11 @@ class ResultSequence(object):
         return hash(hashable)
 
     def _op(self, x, operator):
-        out = ResultSequence(operator(v, x) for v in self.val)
+        out = ResultSequence(pd.Series(operator(v, x)) for v in self.val)
+        return out
+
+    def _unary_op(self, operator):
+        out = ResultSequence(operator(v) for v in self.val)
         return out
 
     def _op_rs(self, x, operator):
@@ -62,18 +66,22 @@ class ResultSequence(object):
     def __ne__(self, x):
         return self._op_dispatcher(x, np.not_equal)
 
-    def _op_dispatcher(self, x, op):
+    def _op_dispatcher(self, x, op, use_rs=True):
         try:
+            assert use_rs
             len(x)
             if type(x) == str:
                 raise TypeError()
             out = self._op_rs(x, op)
-        except TypeError:
+        except (TypeError, AssertionError):
             out = self._op(x, op)
         return out
 
     def one_of(self, x):
-        return self._op(x, np.isin)
+        return self._op_dispatcher(x, np.isin, use_rs=False)
+
+    def rs_isnan(self):
+        return self._unary_op(np.isnan)
 
     def rs_and(self, x):
         return self._op_dispatcher(x, np.logical_and)
@@ -149,14 +157,17 @@ class Dataset(object):
         self.mask_pop_cache = {}
 
     @classmethod
-    def from_dict(cls, seconds=False, **inputs):
+    def from_dict(cls, sort_by=None, seconds=False, **inputs):
         df = pd.DataFrame(data=inputs)
+        if sort_by is not None:
+            df.sort_values(by=sort_by, inplace=True)
+            df.reset_index(drop=True, inplace=True)
         return cls(df, seconds=seconds)
 
     @classmethod
-    def from_readfunc(cls, read_func, *args, seconds=False, **kwargs):
+    def from_readfunc(cls, read_func, *args, seconds=False, sort_by=None, **kwargs):
         super_df = read_func(*args, **kwargs)
-        return cls.from_dict(seconds=seconds, **super_df)
+        return cls.from_dict(seconds=seconds, sort_by=sort_by, **super_df)
 
     def __getitem__(self, key):
         try:
@@ -215,29 +226,45 @@ class Dataset(object):
         convert_seconds=True,
         pre_bound=-2,
         post_bound=2,
+        use_new=True,
     ):
         xs = na.compute_xs(binsize, bounds[0], bounds[1], binstep)
         if len(spk.shape) > 2:
             spk = np.squeeze(spk)
         no_spks = np.zeros_like(spk, dtype=bool)
-        for i, spk_i in enumerate(spk):
-            for j, spk_ij in enumerate(spk_i):
-                spk_sq = np.squeeze(spk_ij)
-                if convert_seconds:
-                    spk_sq = spk_sq * 1000
-                no_spks[i, j] = len(spk_sq.shape) == 0 or len(spk_sq) == 0
-                resp_arr = na.bin_spiketimes(
-                    spk_sq,
-                    binsize,
-                    bounds,
-                    binstep,
-                    accumulate=accumulate,
-                    spks_per_sec=not self.seconds,
-                )
-                if i == 0 and j == 0:
-                    tlen = len(resp_arr)
-                    out_arr = np.zeros(spk.shape + (tlen,))
-                out_arr[i, j] = resp_arr
+        # make 3D histogram by trial, units, time
+        if spk.shape[1] == 0:
+            out_arr = np.zeros((len(spk), 0, len(xs)))
+        if use_new:
+            out_arr = na.bin_spiketimes_3d(
+                spk,
+                binsize,
+                bounds,
+                binstep,
+                accumulate=accumulate,
+                spks_per_sec=not self.seconds
+            )
+            no_spks = np.sum(out_arr, axis=2) == 0
+        else:
+            for i, spk_i in enumerate(spk):
+                for j, spk_ij in enumerate(spk_i):
+                    spk_sq = np.squeeze(spk_ij)
+                    # UNCOMMENT IF SOMETHING BREAKS IN BUSCHMAN
+                    # if convert_seconds:
+                    #     spk_sq = spk_sq * 1000
+                    no_spks[i, j] = len(spk_sq.shape) == 0 or len(spk_sq) == 0
+                    resp_arr = na.bin_spiketimes(
+                        spk_sq,
+                        binsize,
+                        bounds,
+                        binstep,
+                        accumulate=accumulate,
+                        spks_per_sec=not self.seconds,
+                    )
+                    if i == 0 and j == 0:
+                        tlen = len(resp_arr)
+                        out_arr = np.zeros(spk.shape + (tlen,))
+                    out_arr[i, j] = resp_arr
         return out_arr, xs, no_spks
 
     def make_pseudopop(
@@ -472,6 +499,7 @@ class Dataset(object):
         regions=None,
         ret_no_spk=False,
         shuffle_trials=False,
+        use_new=False,
     ):
         spks = self["spikeTimes"]
         spks = self._center_spks(spks, time_zero, time_zero_field)
@@ -487,6 +515,10 @@ class Dataset(object):
                 out = (resp_arr, xs, np.ones_like(resp_arr, dtype=bool))
             else:
                 spk_stack = np.stack(spk, axis=0)
+                if regions is not None:
+                    regs = regions_all[i].iloc[0]
+                    mask = np.isin(regs, regions)
+                    spk_stack = spk_stack[:, mask]
                 out = self._get_spikerates(
                     spk_stack,
                     binsize,
@@ -494,12 +526,13 @@ class Dataset(object):
                     binstep,
                     accumulate,
                     convert_seconds=not self.seconds,
+                    use_new=use_new,
                 )
             resp_arr, xs, no_spk_mask = out
-            if regions is not None and len(resp_arr) > 0:
-                regs = regions_all[i].iloc[0]
-                mask = np.isin(regs, regions)
-                resp_arr = resp_arr[:, mask]
+            # if regions is not None and len(resp_arr) > 0:
+            #     regs = regions_all[i].iloc[0]
+            #     mask = np.isin(regs, regions)
+            #     resp_arr = resp_arr[:, mask]
             if repl_nan:
                 resp_arr[no_spk_mask] = np.nan
             n_trls.append(resp_arr.shape[0])

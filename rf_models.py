@@ -346,6 +346,25 @@ def get_random_uniform_fill(n_units, input_distributions, volume_factor=3, wid=N
     return means_all, wids_all
 
 
+def get_random_uniform_w_distrib_pop(
+    total_pwr,
+    n_units,
+    dims,
+    w_distrib,
+    scale_change=True,
+    **kwargs,
+):
+    w_use = w_distrib.rvs((n_units, dims))
+    if scale_change:
+        scale_use = np.swapaxes(1 / w_use, 0, 1)
+    else:
+        scale_use = None
+    out = get_random_uniform_pop(
+        total_pwr, n_units, dims, w_use=w_use, scale_use=scale_use, **kwargs,
+    )
+    return out
+
+
 @u.arg_list_decorator
 def get_fi_thresh(n_units, pwrs, dims, wid, lam=2, approx_w=False):
     out_fi = np.zeros((len(n_units), len(pwrs), len(dims), len(wid)))
@@ -1806,7 +1825,7 @@ def make_gaussian_ramp_vector_rf(
 def make_gaussian_vector_rf(
     cents,
     sizes,
-    scale,
+    scales,
     baseline,
     sub_dim=None,
     titrate_pwr=None,
@@ -1816,12 +1835,15 @@ def make_gaussian_vector_rf(
 ):
     cents = np.array(cents)
     sizes = np.array(sizes)
+    scales = np.array(scales)
     if len(cents.shape) <= 1:
         cents = np.reshape(cents, (-1, 1))
     if len(sizes.shape) <= 1:
         sizes = np.reshape(sizes, (-1, 1))
     cents = np.expand_dims(cents, axis=0)
     sizes = np.expand_dims(sizes, axis=0)
+    if len(scales.shape) == 1:
+        scales = np.expand_dims(scales, axis=0)
     if titrate_pwr is not None:
         rfs = ft.partial(
             eval_gaussian_vector_rf,
@@ -1835,11 +1857,11 @@ def make_gaussian_vector_rf(
         else:
             pwr = cost_func(rfs(titrate_pwr.rvs(n_samps)))
         if titrate_func is None:
-            new_scale = np.sqrt(scale / pwr)
+            new_scale = np.sqrt(scales / pwr)
         else:
-            new_scale = titrate_func(scale, pwr)
+            new_scale = titrate_func(scales, pwr)
     else:
-        new_scale = scale
+        new_scale = scales
     rfs = ft.partial(
         eval_gaussian_vector_rf,
         cents=cents,
