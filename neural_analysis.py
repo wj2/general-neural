@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.stats as sts
+import scipy.signal as sig
 import sklearn.preprocessing as skp
 from sklearn import svm, linear_model
 from sklearn import discriminant_analysis as da
@@ -290,6 +291,54 @@ def format_raw_glm(
     )
     dat_full, conds_full, labels_full = out
     return dat_full, conds_full, labels_full, xs
+
+
+def bin_spiketimes_3d(
+    spts, binsize, bounds, binstep=None, accumulate=False, spks_per_sec=True
+):
+    binedges = make_binedges(binsize, bounds, binstep)
+    spk_times = []
+    neur_inds = []
+    trl_inds = []
+    ch_edges = np.arange(spts.shape[1] + 1) - .5
+    trl_edges = np.arange(spts.shape[0] + 1) - .5
+    trl_inds = np.repeat(
+        np.expand_dims(np.arange(spts.shape[0]), 1), spts.shape[1], axis=1
+    )
+    neur_inds = np.repeat(
+        np.expand_dims(np.arange(spts.shape[1]), 0), spts.shape[0], axis=0
+    )
+    nums = np.zeros(spts.shape, dtype=int)
+    for i, trl in enumerate(spts):
+        for j, ch in enumerate(trl):
+            try:
+                nums[i, j] = len(ch)
+            except TypeError:
+                print(ch)
+                nums[i, j] = 0
+    nums_flat = nums.flatten()
+    trl_inds = np.repeat(trl_inds.flatten(), nums_flat)
+    neur_inds = np.repeat(neur_inds.flatten(), nums_flat)
+    spk_times = np.concatenate(spts.flatten())
+
+    data = np.stack((trl_inds, neur_inds, spk_times), axis=1)
+    bspks, _ = np.histogramdd(data, bins=(trl_edges, ch_edges, binedges))
+    if accumulate:
+        aspks = np.zeros_like(bspks)
+        for i in range(bspks.shape[-1]):
+            aspks[i] = np.sum(bspks[..., : i + 1])
+        bspks = aspks
+    if binstep is not None and binstep < binsize and not accumulate:
+        filt = np.ones((1, 1, int(np.round(binsize / binstep))))
+        bspks = sig.convolve(bspks, filt, mode="valid")
+    if spks_per_sec:
+        factor = 1000.0
+    else:
+        factor = 1.0
+    if accumulate:
+        factor = binsize
+    bspks = bspks * (factor / binsize)
+    return bspks
 
 
 def bin_spiketimes(

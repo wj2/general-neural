@@ -1260,10 +1260,13 @@ def violinplot(
             )
         set_violin_color(p, color[i])
     return p
-def clean_plot_bottom(ax, keeplabels=False):
+
+
+def clean_plot_bottom(ax, keeplabels=False, keepticks=False):
     ax.spines["bottom"].set_visible(False)
     if not keeplabels:
-        ax.xaxis.set_tick_params(size=0)
+        if not keepticks:
+            ax.xaxis.set_tick_params(size=0)
         plt.setp(ax.get_xticklabels(), visible=False)
 
 
