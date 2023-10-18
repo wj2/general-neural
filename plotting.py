@@ -389,24 +389,26 @@ def plot_collection_views(
     return fs
 
 
-def sem(dat, axis=0, sub=1):
-    err_1d = np.nanstd(dat, axis=axis) / np.sqrt(dat.shape[axis] - sub)
+def sem(dat, axis=0, sub=1, n_obs=None):
+    if n_obs is None:
+        n_obs = dat.shape[axis]
+    err_1d = np.nanstd(dat, axis=axis) / np.sqrt(n_obs - sub)
     err = np.vstack((err_1d, -err_1d))
     return err
 
 
-def std(dat, axis=0):
+def std(dat, axis=0, **kwargs):
     err_1d = np.nanstd(dat, axis=axis)
     err = np.vstack((err_1d, -err_1d))
     return err
 
 
-def biased_sem(dat, axis=0):
-    err = sem(dat, axis=axis, sub=0)
+def biased_sem(dat, axis=0, **kwargs):
+    err = sem(dat, axis=axis, sub=0, **kwargs)
     return err
 
 
-def conf95_interval(dat, axis=0):
+def conf95_interval(dat, axis=0, **kwargs):
     return u.conf_interval(dat, axis=0, perc=95)
 
 
@@ -789,6 +791,7 @@ def plot_trace_werr(
     elinewidth=1,
     conf95=False,
     confstd=False,
+    sem_n=None,
     err=None,
     err_x=None,
     polar=False,
@@ -820,7 +823,7 @@ def plot_trace_werr(
             er = np.array(list(error_func(d)[:, 0] for d in dat)).T
         elif len(dat.shape) > 1:
             tr = central_tendency(dat, axis=0)
-            er = error_func(dat, axis=0)
+            er = error_func(dat, axis=0, n_obs=sem_n)
         elif err is not None:
             tr = dat
             er = err
