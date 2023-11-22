@@ -215,6 +215,27 @@ def get_stan_summary_col(summary, col):
     return targ
 
 
+def alignment_index(s1, s2, thresh=1e-10):
+    if len(s1.shape) == 2:
+        s1 = np.expand_dims(s1, 0)
+        s2 = np.expand_dims(s2, 0)
+    ais = np.zeros(len(s1))
+    for i, s1_i in enumerate(s1):
+        s2_i = s2[i]
+        p1 = skd.PCA()
+        p1.fit(s1_i)
+        p2 = skd.PCA()
+        p2.fit(s2_i)
+        mask1 = p1.explained_variance_ratio_ > thresh
+        u1 = p1.components_[mask1].T
+        mask2 = p2.explained_variance_ratio_ > thresh
+        u2 = p2.components_[mask2].T
+
+        norm = min(u1.shape[1], u2.shape[1])
+        ais[i] = np.trace(u1.T @ u2 @ u2.T @ u1)/norm
+    return ais
+
+
 def stan_model_valid(sm, rhat_range=(0.9, 1.1), min_n_eff=5000):
     if sm is not None:
         summary = sm.summary()

@@ -7,14 +7,11 @@ import matplotlib.pyplot as plt
 import general.utility as u
 import general.neural_analysis as na
 from matplotlib.collections import LineCollection
-import matplotlib.colors as mplcolor
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import matplotlib.patches as patches
 import matplotlib.tri as tri
 import matplotlib.patheffects as mpe
-import scipy.stats as sts
 import colorsys
-import ternary
 
 
 def set_ax_color(ax, color, sides=("bottom", "top", "left", "right")):
@@ -205,7 +202,7 @@ def plot_single_units(
         axs = list([f.add_subplot(*ax_spec) for f in fs])
         for j, k in enumerate(sus[0].keys()):
             for i, c in enumerate(sus):
-                ax = plot_trace_werr(
+                plot_trace_werr(
                     xs,
                     sus[i][k],
                     colors[i],
@@ -353,7 +350,6 @@ def plot_collection_views(
     add_expansion=True,
     plotter_func=None,
 ):
-    fig_list = []
     n_views = len(xs_l)
     if ax_gs is None:
         ax_gs = list((n_views, 1, i + 1) for i in range(n_views))
@@ -369,7 +365,6 @@ def plot_collection_views(
         xs = xs_l[i]
         labs = labels[i]
         cols = colors[i]
-        ts = trial_struct[i]
         if i == 0:
             fs = None
         fs = plotter_func(
@@ -430,7 +425,7 @@ def plot_trial_structure(
             ax = f.add_subplot(1, 1, 1)
         xmin, xmax = ax.get_xlim()
         ymin, ymax = ax.get_ylim()
-        lns = ax.vlines(
+        _ = ax.vlines(
             transition_times, ymin, ymax, linestyle=linestyle, color=color, alpha=alpha
         )
 
@@ -502,11 +497,17 @@ def plot_highdim_trace(
     central_tendence=np.mean,
     dim_red_mean=True,
     n_dim=3,
+    plot_outline=False,
+    outline_mult_width=1.5,
     **kwargs
 ):
     if ax is None:
         f = plt.figure()
-        ax = f.add_subplot(1, 1, 1, projection="3d")
+        if n_dim == 3:
+            skw = {"projection": "3d"}
+        else:
+            skw = {}
+        ax = f.add_subplot(1, 1, 1, **skw)
     if len(args[0].shape) == 2:
         args = list(np.expand_dims(arg, 0) for arg in args)
     if p is None:
@@ -522,14 +523,20 @@ def plot_highdim_trace(
         colors = (None,)*len(args)
     else:
         colors = kwargs.pop("colors")
+    if plot_outline:
+        default_lw = plt.rcParams["lines.linewidth"]
+        lw = kwargs.get('lw', kwargs.get('linewidth', default_lw))
+        new_lw = outline_mult_width*lw
+        use_pe = [mpe.Stroke(foreground='k', linewidth=new_lw), mpe.Normal()]
+        kwargs['path_effects'] = use_pe
     for i, y in enumerate(args):
         if colors[i] is not None:
             kwargs["color"] = colors[i]
         y_mu = p.transform(np.mean(y, axis=0))
         y_pts = p.transform(np.concatenate(y, axis=0))
         if plot_line:
-            l = ax.plot(*y_mu.T, **kwargs)
-            kwargs["color"] = l[0].get_color()
+            l_ = ax.plot(*y_mu.T, **kwargs)
+            kwargs["color"] = l_[0].get_color()
         if plot_points:
             ax.plot(*y_pts.T, "o", ms=ms, **kwargs)
     return ax, p
@@ -627,11 +634,11 @@ def plot_trajectories(
         if ax is None:
             f = plt.figure()
             ax = f.add_subplot(1, 1, 1)
-        l = ax.plot(
+        l_ = ax.plot(
             mean_traj[0, :], mean_traj[1, :], color=color, label=label, marker=marker
         )
         if color is None:
-            color = l[0].get_color()
+            color = l_[0].get_color()
         for i, t in enumerate(indiv_trajs):
             _ = ax.plot(t[0, :], t[1, :], color=color, alpha=alpha, marker=marker)
     if show:
@@ -689,17 +696,17 @@ def plot_pt_werr(x, data, central_tendency=np.nanmean, ax=None, **kwargs):
         ax = f.add_subplot(1, 1, 1)
     xs = np.expand_dims(x, 0)
     dats = np.expand_dims(data, 1)
-    l = plot_trace_werr(xs, dats, ax=ax, fill=False, **kwargs)
-    ax.plot(xs, central_tendency(dats, axis=0), "o", color=l[0].get_color())
+    l_ = plot_trace_werr(xs, dats, ax=ax, fill=False, **kwargs)
+    ax.plot(xs, central_tendency(dats, axis=0), "o", color=l_[0].get_color())
     return ax
 
 
 def plot_trace_wpts(x, data, ax=None, color=None, **kwargs):
-    l = plot_trace_werr(
+    l_ = plot_trace_werr(
         x, data, ax=ax, **kwargs, fill=False, errorbar=False, color=color
     )
     for i, data_i in enumerate(data):
-        ax.plot(x, data_i, "o", color=l[0].get_color(), **kwargs)
+        ax.plot(x, data_i, "o", color=l_[0].get_color(), **kwargs)
 
 
 def make_linear_cmap(b1, b2=None, name=""):
@@ -910,6 +917,7 @@ def plot_parameter_sweep_results(
     entries = len(res_dicts[0])
     if f is None:
         f = plt.figure(figsize=figsize)
+    ax_i = None
     for i, k in enumerate(res_dicts[0].keys()):
         if i > 0 and sharey:
             ax_i = f.add_subplot(1, entries, i + 1, sharey=ax_i)
@@ -968,7 +976,7 @@ def plot_distrib(
         if ax is None:
             f = plt.figure()
             ax = f.add_subplot(1, 1, 1)
-        hist = ax.hist(
+        _ = ax.hist(
             dat,
             bins=bins,
             color=color,
@@ -1241,7 +1249,11 @@ def violinplot(
         color = (None,) * len(vp_seq)
     if labels is None:
         labels = ("",)*len(vp_seq)
-    handles = []
+    
+    if markerstyles is not None:
+        showmedians = False
+        if not u.check_list(markerstyles):
+            markerstyles = (markerstyles,)*len(vp_seq)
     for i, vps in enumerate(vp_seq):
         p = ax.violinplot(
             vps,
@@ -1302,6 +1314,25 @@ def set_3d_background(ax, background_color=(1, 1, 1, 1), line_color=None):
         ax.yaxis.pane.set_edgecolor(line_color)
         ax.zaxis.pane.set_edgecolor(line_color)
     return ax
+
+
+def make_2d_bars(
+    ax, center=None, bar_len=None, bar_wid=1, bar_prop=.1, color="k", **kwargs
+):
+    xl = ax.get_xlim()
+    yl = ax.get_ylim()
+
+    if bar_len is None:
+        bar_len_x = np.round((xl[1] - xl[0])*bar_prop)
+        bar_len_y = np.round((yl[1] - yl[0])*bar_prop)
+        bar_len = (bar_len_x, bar_len_y)
+    
+    ax.plot(
+        [xl[0], xl[0] + bar_len[0]], [yl[0], yl[0]], lw=bar_wid, color=color, **kwargs
+    )
+    ax.plot(
+        [xl[0], xl[0]], [yl[0], yl[0] + bar_len[1]], lw=bar_wid, color=color, **kwargs
+    )
 
 
 def make_3d_bars(ax, center=(0, 0, 0), bar_len=0.1, bar_wid=0.7):
@@ -1429,6 +1460,8 @@ def make_xaxis_scale_bar(
     true_scale=False,
     label="",
     text_buff=0.22,
+    fontsize="medium",
+    **kwargs,
 ):
     xl = ax.get_xlim()
     yl = ax.get_ylim()
@@ -1444,7 +1477,8 @@ def make_xaxis_scale_bar(
         new_ticks = [anchor, anchor + magnitude]
     ax.set_xticks(new_ticks)
     if bottom:
-        ax.hlines(yl[0], new_ticks[0], new_ticks[-1], color="k")
+        kwargs["color"] = kwargs.get("color", "k")
+        ax.hlines(yl[0], new_ticks[0], new_ticks[-1], **kwargs)
         ax.spines["bottom"].set_visible(False)
         y_pt = yl[0]
     else:
@@ -1462,6 +1496,8 @@ def make_xaxis_scale_bar(
             transform=ax.transAxes,
             horizontalalignment="center",
             verticalalignment="top",
+            color=kwargs.get("color"),
+            fontsize=fontsize,
         )
     ax.set_ylim(yl)
 
@@ -1482,13 +1518,13 @@ def get_corr_conf95(
         bs_list = bs_list[mask]
         confounders = confounders[mask]
     if use_confounders:
-        f = lambda x: na.partial_correlation(x[:, 0], x[:, 1], x[:, 2:])
+        def f(x): return na.partial_correlation(x[:, 0], x[:, 1], x[:, 2:])
         inp = np.stack((as_list, bs_list), axis=1)
         if len(confounders.shape) == 1:
             confounders = np.expand_dims(confounders, 1)
         inp = np.concatenate((inp, confounders), axis=1)
     else:
-        f = lambda x: func(x[:, 0], x[:, 1])[1, 0]
+        def f(x): return func(x[:, 0], x[:, 1])[1, 0]
         inp = np.stack((as_list, bs_list), axis=1)
     cc = u.bootstrap_list(inp, f, n=n_boots)
     cent = f(inp)
@@ -1649,7 +1685,7 @@ def print_diff_conf95(
 
 def make_yaxis_scale_bar(
     ax, magnitude=None, double=True, anchor=0, left=True, label="", text_buff=0.15,
-    fontsize="medium", **kwargs,
+    fontsize="medium", **kwargs, 
 ):
     xl = ax.get_xlim()
     yl = ax.get_ylim()
@@ -1702,7 +1738,7 @@ def plot_horiz_conf_interval(
 ):
     if len(x_distr.shape) < 2:
         x_distr = x_distr.reshape((-1, 1))
-    l = plot_trace_werr(
+    l_ = plot_trace_werr(
         x_distr,
         np.array([y]),
         central_tendency=central_tend,
@@ -1712,9 +1748,9 @@ def plot_horiz_conf_interval(
         fill=False,
         **kwargs
     )
-    col = l[0].get_color()
-    l = ax.plot(central_tend(x_distr), [y], "|", color=col)
-    return l
+    col = l_[0].get_color()
+    l_ = ax.plot(central_tend(x_distr), [y], "|", color=col)
+    return l_
 
 
 def plot_conf_interval(
@@ -1728,7 +1764,7 @@ def plot_conf_interval(
 ):
     if len(y_distr.shape) < 2:
         y_distr = y_distr.reshape((-1, 1))
-    l = plot_trace_werr(
+    l_ = plot_trace_werr(
         np.array([x]),
         y_distr,
         central_tendency=central_tend,
@@ -1738,9 +1774,9 @@ def plot_conf_interval(
         fill=False,
         **kwargs
     )
-    col = l[0].get_color()
-    l = ax.plot([x], central_tend(y_distr), "_", color=col)
-    return l
+    col = l_[0].get_color()
+    l_ = ax.plot([x], central_tend(y_distr), "_", color=col)
+    return l_
 
 
 def _preprocess_glm(coeffs, ps, subgroups=None, p_thr=0.05, eps=None, repl_with=0):
@@ -1763,9 +1799,9 @@ def _preprocess_glm(coeffs, ps, subgroups=None, p_thr=0.05, eps=None, repl_with=
 
 def format_glm_labels(labels, label_dict, subgroups=None, separator="-"):
     new_labels = []
-    for l in labels:
-        nl = separator.join(("{}",) * len(l))
-        nl = nl.format(*list(label_dict[l_i] for l_i in l))
+    for l_ in labels:
+        nl = separator.join(("{}",) * len(l_))
+        nl = nl.format(*list(label_dict[l_i] for l_i in l_))
         new_labels.append(nl)
     if subgroups is not None:
         grouped_labels = []
@@ -1824,9 +1860,9 @@ def plot_stanglm_selectivity_scatter(
             else:
                 n_pairs[j] = np.nan
         all_pairs[i] = n_pairs
-        l = ax.plot(n_pairs[:, 0], n_pairs[:, 1], "o")
+        l_ = ax.plot(n_pairs[:, 0], n_pairs[:, 1], "o")
         if conn:
-            col = l[0].get_color()
+            col = l_[0].get_color()
             ax.plot(
                 n_pairs[:, 0], n_pairs[:, 1], alpha=conn_alpha, color=col, linewidth=3
             )
@@ -1854,10 +1890,10 @@ def format_lm_label(
         lg = []
         for l_groups in labels[p]:
             if second_only:
-                l = l_groups[1]
+                l_ = l_groups[1]
             else:
-                l = cat_l_joiner.join(l_groups)
-            lg.append(l)
+                l_ = cat_l_joiner.join(l_groups)
+            lg.append(l_)
         lg_l = interaction_joiner.join(lg)
         ls.append(lg_l)
     full_l = link_string.format(*ls)
@@ -1903,7 +1939,9 @@ def plot_glm_pop_selectivity_prop(
         for ind, j in enumerate(sg):
             sgm = use_pop[:, j]
             psm = ps[:, j]
-            distr_func = lambda x: np.mean(np.logical_and(sgm[x] > eps, psm[x] < p_thr))
+            def distr_func(x): return np.mean(
+                    np.logical_and(sgm[x] > eps, psm[x] < p_thr)
+            )
             inds = np.arange(len(sgm))
             prop_distr = u.bootstrap_list(inds, distr_func, n=boots)
             plot_conf_interval(j, prop_distr, ax, color=colors[i])
@@ -1939,7 +1977,7 @@ def plot_glm_coeff_tc(
     diff=False,
 ):
     coeff_arr = np.zeros((boots, len(xs), coeffs.shape[-1]))
-    nm_ax = lambda x: np.nanmean(x, axis=0)
+    def nm_ax(x): return np.nanmean(x, axis=0)
     for i, t in enumerate(xs):
         out = _preprocess_glm(
             coeffs[:, i],
@@ -2025,7 +2063,7 @@ def plot_glm_pop_selectivity_mag(
             if len(pop_mags) > 0:
                 sg_mags = sg_mags + (pop_mags,)
                 sg_violin = sg_violin + (j,)
-            distr_func = lambda x: _cent_selectivity(
+            def distr_func(x): return _cent_selectivity(
                 x, psm, sgm, p_thr, eps, np.nanmedian
             )
             inds = np.arange(len(sgm))

@@ -10,6 +10,8 @@ import scipy.integrate as sint
 import scipy.signal as sig
 import joblib as jl
 
+import sklearn.neighbors as skn
+
 import general.utility as u
 
 
@@ -557,12 +559,28 @@ def brute_decode_decouple(
     return mg
 
 
-def _min_guess(func, reps, guesses, add_dc=0, **kwargs):
+def _min_guess_non_skl(func, reps, guesses, add_dc=0, **kwargs):
     g_reps = func(guesses, **kwargs) + add_dc
+
     g_reps = np.expand_dims(g_reps, 1)
     reps = np.expand_dims(reps, 0)
     g_ind = np.argmin(np.nansum((g_reps - reps) ** 2, axis=-1), axis=0)
-    return guesses[g_ind]
+    
+    ests2 = guesses[g_ind]
+    return ests2
+
+def _min_guess(func, reps, guesses, add_dc=0, **kwargs):
+    g_reps = func(guesses, **kwargs) + add_dc
+    g_reps[np.isnan(g_reps)] = add_dc
+
+    knc = skn.KNeighborsRegressor(n_neighbors=1)
+    mask = ~np.all(np.isnan(guesses), axis=0)
+    
+    knc.fit(g_reps, guesses[:, mask])
+    ests = knc.predict(reps)
+
+    # ests2 = _min_guess_non_skl(func, reps, guesses, add_dc=add_dc, **kwargs)
+    return ests
 
 
 def brute_decode_rf(reps, func, dim, n_gran=200, init_guess=None, **kwargs):
@@ -733,16 +751,25 @@ def opt_w_approx(pwr, nu, dim, sigma_n=1, def_w=0.01, lam=2):
     return w_approx
 
 
-def compute_threshold_vec(pwr, n_units, dim, wid, sigma_n=1, lam=2, stim_scale=1):
+def compute_threshold_vec(pwr, n_units, dim, wid, sigma_n=1, lam=0, stim_scale=1):
     scale = random_uniform_scale_vec(pwr, n_units, wid, dim)
 
     v_std = np.sqrt(random_uniform_pwr_var(n_units, wid, dim, scale=scale, vec=True))
 
+    # WHY WAS / np.sqrt(2) THERE? 
     v_lam = pwr - (lam / np.sqrt(2)) * v_std
-    v_lam = np.max([v_lam, np.zeros(v_lam.shape)], axis=0)
-    p_pre = (sigma_n / np.sqrt(v_lam * np.pi)) * np.exp(-v_lam / (4 * sigma_n**2))
 
-    effective_dim = (stim_scale**dim) / rf_volume(wid, dim)
+    # THIS MAYBE WORKS BETTER?
+    v_lam = pwr - lam * v_std
+    
+    v_lam = np.max([v_lam, np.ones(v_lam.shape)*1e-32], axis=0)
+    p_pre = (sigma_n / np.sqrt(v_lam * np.pi)) * np.exp(-v_lam / (4 * sigma_n**2))
+    # print(v_lam, sigma_n)
+    # print("exp", p_pre)
+    p_pre = sts.norm(0, 1).cdf(-np.sqrt(v_lam) / (np.sqrt(2)*sigma_n))
+    # print("cdf", p_pre)
+
+    effective_dim = (stim_scale**dim) / rf_volume(wid, dim) 
 
     f = np.min([np.ones(effective_dim.shape) * n_units, effective_dim], axis=0)
     factor = np.max([f, np.zeros(f.shape)], axis=0)

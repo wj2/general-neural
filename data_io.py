@@ -1,11 +1,7 @@
 import numpy as np
-import scipy.io as sio
 import pandas as pd
-import os
-import re
 from sklearn import svm
 import sklearn.linear_model as sklm
-import functools as ft
 import quantities as pq
 import neo
 
@@ -70,7 +66,7 @@ class ResultSequence(object):
         try:
             assert use_rs
             len(x)
-            if type(x) == str:
+            if isinstance(x, str):
                 raise TypeError()
             out = self._op_rs(x, op)
         except (TypeError, AssertionError):
@@ -132,7 +128,6 @@ def _format_for_svm(pops):
     neur_mins = []
     for pop in pops:
         pop_format.extend(list(neur[0] for neur in pop))
-        cond_n = pop.shape[1]
         neur_mins.extend(np.ones(pop.shape[0]) * pop.shape[2])
     neur_pop = np.expand_dims(np.array(pop_format, dtype=object), 1)
     neur_mins = np.array(neur_mins).astype(int)
@@ -242,7 +237,7 @@ class Dataset(object):
                 bounds,
                 binstep,
                 accumulate=accumulate,
-                spks_per_sec=not self.seconds
+                spks_per_sec=not self.seconds,
             )
             no_spks = np.sum(out_arr, axis=2) == 0
         else:
@@ -441,7 +436,7 @@ class Dataset(object):
         no_spks = []
         for i, spk in enumerate(spks):
             if len(spk) == 0:
-                xs = na.compute_xs(binsize, begin, end, binstep)
+                xs = na.compute_xs(10, begin, end, 10)
                 resp_arr = np.zeros((0, self.get_nneurs()[i], len(xs)))
                 out = (resp_arr, xs, np.ones_like(resp_arr, dtype=bool))
             else:
@@ -703,7 +698,7 @@ class Dataset(object):
             raise TypeError("no neural data associated with this dataset")
         return out
 
-    def _get_dec_pops(
+    def get_dec_pops(
         self,
         winsize,
         begin,
@@ -717,7 +712,7 @@ class Dataset(object):
     ):
         try:
             assert len(tzfs) == len(masks)
-        except:
+        except AssertionError:
             tzfs = (tzfs,) * len(masks)
         out_pops = []
         for i, m in enumerate(masks):
@@ -804,7 +799,7 @@ class Dataset(object):
         n_pseudo=500,
         **kwargs
     ):
-        out = self._get_dec_pops(
+        out = self.get_dec_pops(
             winsize,
             begin,
             end,
@@ -872,7 +867,7 @@ class Dataset(object):
         skl_axs=True,
         same_n_trls=True
     ):
-        xs, pops = self._get_dec_pops(
+        xs, pops = self.get_dec_pops(
             winsize,
             begin,
             end,
@@ -949,7 +944,7 @@ class Dataset(object):
         ret_projections=False,
         **kwargs
     ):
-        out = self._get_dec_pops(
+        out = self.get_dec_pops(
             winsize,
             begin,
             end,
