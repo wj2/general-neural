@@ -6,7 +6,7 @@ import shutil
 import scipy.io as sio
 import scipy.linalg as spla
 import scipy.stats as sts
-import stan as ps
+import pystan as ps
 import pickle
 import pandas as pd
 import itertools as it
