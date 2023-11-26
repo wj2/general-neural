@@ -6,7 +6,6 @@ import shutil
 import scipy.io as sio
 import scipy.linalg as spla
 import scipy.stats as sts
-import pystan as ps
 import pickle
 import pandas as pd
 import itertools as it
@@ -215,13 +214,16 @@ def get_stan_summary_col(summary, col):
     return targ
 
 
-def alignment_index(s1, s2, thresh=1e-10):
+def alignment_index(s1, s2, thresh=1e-10, norm=True):
     if len(s1.shape) == 2:
         s1 = np.expand_dims(s1, 0)
         s2 = np.expand_dims(s2, 0)
     ais = np.zeros(len(s1))
     for i, s1_i in enumerate(s1):
         s2_i = s2[i]
+        if norm:
+            s1_i = skp.StandardScaler().fit_transform(s1_i)
+            s2_i = skp.StandardScaler().fit_transform(s2_i)
         p1 = skd.PCA()
         p1.fit(s1_i)
         p2 = skd.PCA()
