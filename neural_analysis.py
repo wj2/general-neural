@@ -30,6 +30,77 @@ import general.utility as u
 import general.nested_cv as ncv
 
 
+class JaggedArray:
+    def __init__(self, *args, concatenate_axis=1):
+        """
+        args : should be a list of lists, where each element of the list is a
+               n-element list of the different elements of the array
+        """
+        if len(args) == 0:
+            raise IOError("must supply more than one element")
+        self.args = args
+        self.concatenate_axis = concatenate_axis
+
+    @property
+    def lengths(self):
+        return list(len(group[0]) for group in self.args)
+        
+    @property
+    def minimum_length(self):
+        return np.min(self.lengths)
+
+    @property
+    def maximum_length(self):
+        return np.max(self.lengths)
+
+    @property
+    def group_length(self):
+        return len(self.args[0])
+
+    def _sample_array(self, n_concat=10, upsample=False):
+        if not upsample and n_concat > self.maximum_length:
+            e = "desired trials of {} would exclude all groups, with lengths {}"
+            raise IOError(e.format(n_concat, self.lengths))
+        samples = tuple([] for i in range(self.group_length))
+        for group in self.args:
+            if upsample or len(group[0]) >= n_concat:
+                group_rs = sku.resample(
+                    *group, replace=upsample, n_samples=n_concat
+                )
+                list(s.append(group_rs[i]) for i, s in enumerate(samples))
+        out = list(np.concatenate(s, axis=self.concatenate_axis) for s in samples)
+        return out
+
+    def sample_arrays(self, n_samples, **kwargs):
+        arrs = tuple([] for i in range(self.group_length))
+        for i in range(n_samples):
+            samp = self._sample_array(**kwargs)
+            list(arrs[j].append(s) for j, s in enumerate(samp))
+        out = list(np.stack(arr, axis=0) for arr in arrs)
+        return out
+
+    def split_on_element(self, el_ind, require_trials=10):
+        jas = []
+        conned_el = np.concatenate(list(arg[el_ind] for arg in self.args), axis=0)
+        conds = np.unique(conned_el, axis=0)
+        cond_dict = {tuple(cond): [] for cond in conds}
+        arg_masks = {i: [] for i in range(len(self.args))}
+        for cond in conds:
+            for i, arg in enumerate(self.args):
+                mask = np.all(arg[el_ind] == cond, axis=tuple(range(1, len(arg))))
+                arg_masks[i].append(np.sum(mask) >= require_trials)
+                cond_dict[tuple(cond)].append(list(el[mask] for el in arg))
+        include = {i: np.all(v) for i, v in arg_masks.items()}
+        
+        out_dict = {
+            k: JaggedArray(
+                *list(v for i, v in enumerate(vs) if include[i]),
+                concatenate_axis=self.concatenate_axis)
+            for k, vs in cond_dict.items()
+        }
+        return out_dict
+
+
 class BalancedShuffleSplit:
     def __init__(self, n_splits=10, test_size=None, train_size=None, random_state=None):
         if test_size is None and train_size is None:

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn import svm
 import sklearn.linear_model as sklm
+import sklearn.preprocessing as skp
 import quantities as pq
 import neo
 
@@ -271,7 +272,10 @@ class Dataset(object):
         resample_pseudos=10,
         skl_axs=False,
         same_n_trls=False,
+        subsample_neurons=None,
+        use_inds=None,
     ):
+        rng = np.random.default_rng()
         if n_trls is None:
             n_trls = list(len(o) for o in outs)
         if n_trls_mask is None:
@@ -290,6 +294,7 @@ class Dataset(object):
             n_trls_actual = np.array(list(o.shape[trl_ax] for o in outs_mask))
             min_trls = np.min(n_trls_actual[n_trls_mask])
 
+        save_inds = []
         fracs = np.zeros((len(outs_mask), 2))
         fracs[:, 0] = min_trls
         for i in range(resample_pseudos):
@@ -304,10 +309,28 @@ class Dataset(object):
                     ppop = ppop_j
                 else:
                     ppop = np.concatenate((ppop, ppop_j), axis=neur_ax)
+            if subsample_neurons is not None:
+                if ppop.shape[neur_ax] >= subsample_neurons:
+                    if use_inds is None:
+                        inds = rng.choice(
+                            ppop.shape[neur_ax], size=subsample_neurons, replace=False,
+                        )
+                    else:
+                        inds = use_inds[i]
+                    save_inds.append(inds)
+                    if neur_ax != 0:
+                        raise IOError(
+                            "neur_ax cannot be non-zero, it is {}".format(neur_ax)
+                        )
+                    ppop = ppop[inds]
             if i == 0:
                 out_pseudo = np.zeros((resample_pseudos,) + ppop.shape)
+            
             out_pseudo[i] = ppop
-        return out_pseudo, fracs
+        out = (out_pseudo, fracs)
+        if subsample_neurons is not None:
+            out = out + (save_inds,)
+        return out
 
     def get_nneurs(self):
         return self["n_neurs"]
@@ -698,6 +721,39 @@ class Dataset(object):
             raise TypeError("no neural data associated with this dataset")
         return out
 
+    def get_time_features(
+            self,
+            n_xs,
+            skl_axes=False,
+            trial_field=None,
+            model=skp.SplineTransformer,
+            knots_per_trial=.01,
+            degree=2,
+            use_trs=None
+    ):
+        if trial_field is None:
+            inds = list(row.data.index for _, row in self.data.iterrows())
+        else:
+            inds = self[trial_field]
+        feats = []
+        for ind_group in inds:
+            ind_group = np.expand_dims(ind_group, 1)
+            if use_trs is None:
+                n_knots = max(int(np.round(len(ind_group)*knots_per_trial)), 2)
+                m = model(n_knots, degree)
+                use_trs = m.fit(ind_group)
+            if ind_group.shape[0] == 0:
+                n_dim = use_trs.transform([[0]]).shape[1]
+                feat_ig = np.zeros((0, n_dim))
+            else:
+                feat_ig = use_trs.transform(ind_group)
+            feat_ig = np.expand_dims(feat_ig, 2)
+            feat_ig = np.repeat(feat_ig, n_xs, axis=2)
+            if skl_axes:
+                feat_ig = np.expand_dims(np.swapaxes(feat_ig, 0, 1), 1)
+            feats.append(feat_ig)
+        return feats, use_trs
+    
     def get_dec_pops(
         self,
         winsize,
@@ -708,13 +764,20 @@ class Dataset(object):
         tzfs=None,
         repl_nan=False,
         shuffle_trials=True,
-        regions=None
+        regions=None,
+        use_time=False,
+        combined_time=True,
+        time_field=None,
     ):
         try:
             assert len(tzfs) == len(masks)
         except AssertionError:
             tzfs = (tzfs,) * len(masks)
         out_pops = []
+        if use_time and combined_time:
+            _, trs = self.get_time_features(1)
+        else:
+            trs = None
         for i, m in enumerate(masks):
             if m is not None:
                 cat_m = self.mask(m)
@@ -730,6 +793,14 @@ class Dataset(object):
                     regions=regions,
                 )
                 pop_m, xs = out_m
+                if use_time and not shuffle_trials:
+                    t_feat, _ = cat_m.get_time_features(
+                        len(xs), skl_axes=True, use_trs=trs,
+                    )
+                    pops = []
+                    for i, pop in enumerate(pop_m):
+                        pops.append(np.concatenate((pop, t_feat[i]), axis=0))
+                    pop_m = pops
             else:
                 pop_m = (None,) * len(self.data)
             out_pops.append(pop_m)
@@ -942,6 +1013,8 @@ class Dataset(object):
         dec_end=None,
         collapse_time=False,
         ret_projections=False,
+        use_time=False,
+        subsample_neurons=None,
         **kwargs
     ):
         out = self.get_dec_pops(
@@ -957,6 +1030,7 @@ class Dataset(object):
             repl_nan=repl_nan,
             regions=regions,
             shuffle_trials=shuffle_trials,
+            use_time=use_time,
         )
         xs, pops = out
 
@@ -970,6 +1044,10 @@ class Dataset(object):
             end_mask = dec_end >= (xs + winsize / 2)
             time_mask = np.logical_and(beg_mask, end_mask)
         pop1, pop2, dec1, dec2 = pops
+        nz_pops = list(p for p in pop1 if p.shape[0] > 0)
+        nz_pops = list(p for p in pop2 if p.shape[0] > 0)
+
+        # print(pop1)
         if params is None:
             params = {"class_weight": "balanced", "max_iter": max_iter, "dual": "auto"}
             # params.update(kwargs)
@@ -998,14 +1076,20 @@ class Dataset(object):
             else:
                 comb_n_dec = comb_n
 
-            pop1, _ = self.make_pseudopop(
+            out = self.make_pseudopop(
                 pop1,
                 comb_n,
                 min_trials_pseudo,
                 resample_pseudos=resample_pseudo,
                 skl_axs=True,
                 same_n_trls=True,
+                subsample_neurons=subsample_neurons,
             )
+            pop1, _ = out[:2]
+            if subsample_neurons is not None:
+                use_inds = out[-1]
+            else:
+                use_inds = None
             pop2, _ = self.make_pseudopop(
                 pop2,
                 comb_n,
@@ -1013,7 +1097,9 @@ class Dataset(object):
                 resample_pseudos=resample_pseudo,
                 skl_axs=True,
                 same_n_trls=True,
-            )
+                subsample_neurons=subsample_neurons,
+                use_inds=use_inds,
+            )[:2]
             n_trls_mask = comb_n >= min_trials_pseudo
             if decode_m1 is not None:
                 dec1, _ = self.make_pseudopop(
@@ -1023,7 +1109,9 @@ class Dataset(object):
                     resample_pseudos=resample_pseudo,
                     skl_axs=True,
                     same_n_trls=True,
-                )
+                    subsample_neurons=subsample_neurons,
+                    use_inds=use_inds,
+                )[:2]
             else:
                 dec1 = (None,) * resample_pseudo
             if decode_m2 is not None:
@@ -1034,7 +1122,9 @@ class Dataset(object):
                     resample_pseudos=resample_pseudo,
                     skl_axs=True,
                     same_n_trls=True,
-                )
+                    subsample_neurons=subsample_neurons,
+                    use_inds=use_inds,
+                )[:2]
             else:
                 dec2 = (None,) * resample_pseudo
         print(pop1[0].shape, pop2[0].shape, dec1[0].shape, dec2[0].shape)
