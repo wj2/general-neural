@@ -1049,7 +1049,11 @@ class Dataset(object):
 
         # print(pop1)
         if params is None:
-            params = {"class_weight": "balanced", "max_iter": max_iter, "dual": "auto"}
+            params = {
+                "class_weight": "balanced",
+                "max_iter": max_iter,
+                # "dual": "auto",
+            }
             # params.update(kwargs)
 
         if pseudo:
