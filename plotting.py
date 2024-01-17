@@ -549,10 +549,16 @@ def plot_highdim_points(*args, ms=5, **kwargs):
 
 
 def pcolormesh(
-        xs, ys, data, ax=None, diff_ind=0, append=True, equal_bins=False, **kwargs
+        *args, ax=None, diff_ind=0, append=True, equal_bins=False, **kwargs
 ):
     if ax is None:
         f, ax = plt.subplots(1, 1)
+    if len(args) < 3:
+        data = args[-1]
+        xs = np.arange(data.shape[1])
+        ys = np.arange(data.shape[0])
+    else:
+        xs, ys, data = args
     if equal_bins:
         xs_bins = np.arange(len(xs))
         ys_bins = np.arange(len(ys))

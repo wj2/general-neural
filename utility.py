@@ -38,12 +38,14 @@ def format_sirange(high, low, form=":.2f"):
 
 
 def load_folder_regex_generator(
-        folder, pattern, file_target=None, load_func=pickle.load, open_str="rb",
+        folder, *patterns, file_target=None, load_func=pickle.load, open_str="rb",
 ):
     fls = os.listdir(folder)
     for fl in fls:
-        m = re.match(pattern, fl)
-        if m is not None:
+        ms = list(re.match(pattern, fl) for pattern in patterns
+                  if re.match(pattern, fl) is not None)
+        if len(ms) > 0:
+            m = ms[0]
             gd = m.groupdict()
             if file_target:
                 load_path = os.path.join(folder, fl, file_target)
@@ -52,7 +54,7 @@ def load_folder_regex_generator(
             out = load_func(open(load_path, open_str))
             yield load_path, gd, out
 
-
+            
 def load_cluster_runs(
     folder,
     pattern,
@@ -101,6 +103,21 @@ def arg_list_decorator(func, squeeze=False):
         return out
 
     return arg_list_func
+
+
+def merge_dict(dicts, stack_axis=0, sort_order=None):
+    out_dict = {}
+    for d in dicts:
+        for k, v in d.items():
+            l_ = out_dict.get(k, [])
+            l_.append(v)
+            out_dict[k] = l_
+    for k, v in out_dict.items():
+        arr = np.stack(v, axis=stack_axis)
+        if sort_order is not None:
+            arr = arr[sort_order]
+        out_dict[k] = arr
+    return out_dict
 
 
 def merge_params(args, conf):

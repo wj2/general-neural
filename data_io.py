@@ -571,6 +571,136 @@ class Dataset(object):
     def get_ntrls(self):
         return list(len(o) for o in self["data"])
 
+    def regress_target_field(
+            self,
+            target_field,
+            *args,
+            **kwargs
+    ):
+        target = self[target_field]
+        return self.regress_target(target, *args, **kwargs)
+
+    def regress_target(
+            self,
+            target,
+            winsize,
+            begin,
+            end,
+            stepsize,
+            n_folds=20,
+            model=sklm.Ridge,
+            params=None,
+            pre_pca=None,
+            mean=False,
+            shuffle=False,
+            time_zero_field=None,
+            gen_tzf=None,
+            pseudo=False,
+            repl_nan=False,
+            impute_missing=False,
+            ret_pops=False,
+            train_mask=None,
+            gen_mask=None,
+            regions=None,
+            time_accumulate=False,
+            min_trials=20,
+            ret_pred_targ=False,
+            **kwargs,
+    ):
+        if params is None:
+            # params = {'class_weight':'balanced'}
+            params = {}
+            params.update(kwargs)
+        if gen_tzf is None:
+            gen_tzf = time_zero_field
+        if train_mask is not None:
+            data_tr = self.mask(train_mask)
+            targs_tr = list(
+                target[i][mask_i].to_numpy() for i, mask_i in enumerate(train_mask)
+            )
+        else:
+            data_tr = self
+            targs_tr = list(
+                t.to_numpy() for t in target
+            )
+        pops_tr, xs = data_tr.get_neural_activity(
+            winsize,
+            begin,
+            end,
+            stepsize,
+            skl_axes=True,
+            repl_nan=repl_nan,
+            time_zero_field=time_zero_field,
+            regions=regions,
+        )
+        if gen_mask is not None:
+            data_te = self.mask(gen_mask)
+            targs_te = list(target[i][mask_i] for i, mask_i in enumerate(gen_mask))
+            pops_te, xs = data_te.get_neural_activity(
+                winsize,
+                begin,
+                end,
+                stepsize,
+                skl_axes=True,
+                repl_nan=repl_nan,
+                time_zero_field=time_zero_field,
+                regions=regions,
+            )
+        else:
+            pops_te = (None,)*len(pops_tr)
+            targs_te = (None,)*len(pops_tr)
+        outs = np.zeros((len(pops_tr), n_folds, len(xs)))
+        outs_gen = np.zeros_like(outs)
+        outs_pred = []
+        outs_targ = []
+        for i, pop_tr in enumerate(pops_tr):
+            labels_tr = targs_tr[i]
+            labels_te = targs_te[i]
+            if pops_te[i] is not None:
+                pop_te_i = np.squeeze(pops_te[i])
+            else:
+                pop_te_i = pops_te[i]
+            if pop_tr.shape[0] == 0 or pop_tr.shape[2] < min_trials:
+                out_i = {
+                    "score": np.zeros((n_folds, len(xs)))*np.nan,
+                    "score_gen": np.zeros((n_folds, len(xs)))*np.nan,
+                    "predictions": np.zeros((n_folds, 0, len(xs)))*np.nan,
+                    "targets": np.zeros((n_folds, 0, len(xs)))*np.nan,
+                }
+            else:
+                out_i = na.fold_skl_continuous(
+                    np.squeeze(pop_tr),
+                    labels_tr,
+                    folds_n=n_folds,
+                    model=model,
+                    params=params,
+                    mean=mean,
+                    pre_pca=pre_pca,
+                    shuffle=shuffle,
+                    gen_cs=(pop_te_i, labels_te),
+                    impute_missing=(repl_nan or impute_missing),
+                    time_accumulate=time_accumulate,
+                )
+            if labels_te is not None:
+                outs[i] = out_i["score"]
+                outs_gen[i] = out_i["score_gen"]
+            else:
+                outs[i] = out_i["score"]
+            outs_pred.append(out_i["predictions"])
+            outs_targ.append(out_i["targets"])
+        if ret_pops:
+            out = (outs, xs, pops_tr)
+            add = tuple(di for di in pops_te if di[0] is not None)
+            out = out + (add,)
+        else:
+            out = (outs, xs)
+        if gen_mask is not None:
+            out = out + (outs_gen,)
+        if ret_pred_targ:
+            out = out + (outs_pred, outs_targ)
+        return out
+
+    
     def regress_discrete_masks(
         self,
         masks,
@@ -698,10 +828,10 @@ class Dataset(object):
                 time_accumulate=time_accumulate
             )
             if not combine and (decode_masks is not None):
-                outs[i] = out[0]
-                outs_gen[i] = out[1]
+                outs[i] = out["score"]
+                outs_gen[i] = out["score_gen"]
             else:
-                outs[i] = out
+                outs[i] = out["score"]
         if ret_pops:
             out = (outs, xs, pops)
             add = tuple(di for di in decs if di[0] is not None and not combine)
@@ -1044,15 +1174,13 @@ class Dataset(object):
             end_mask = dec_end >= (xs + winsize / 2)
             time_mask = np.logical_and(beg_mask, end_mask)
         pop1, pop2, dec1, dec2 = pops
-        nz_pops = list(p for p in pop1 if p.shape[0] > 0)
-        nz_pops = list(p for p in pop2 if p.shape[0] > 0)
 
         # print(pop1)
         if params is None:
             params = {
                 "class_weight": "balanced",
                 "max_iter": max_iter,
-                # "dual": "auto",
+                "dual": "auto",
             }
             # params.update(kwargs)
 
@@ -1134,9 +1262,6 @@ class Dataset(object):
         print(pop1[0].shape, pop2[0].shape, dec1[0].shape, dec2[0].shape)
         outs = np.zeros((len(pop2), n_folds, len(xs)))
         outs_gen = np.zeros_like(outs)
-        multi_out_flag = not combine and (
-            decode_m1 is not None or decode_m2 is not None
-        )
         for i, p1 in enumerate(pop1):
             if combine:
                 p1 = np.concatenate((p1, dec1[i]), axis=2)
@@ -1150,11 +1275,12 @@ class Dataset(object):
             cond1 = p1.shape[2] < min_trials_pseudo or p2.shape[2] < min_trials_pseudo
             cond2 = d1.shape[2] == 0 and d2.shape[2] == 0
             if p1.shape[0] == 0 or cond1 or cond2:
-                shape = (n_folds, len(xs))
-                if multi_out_flag:
-                    out = (np.zeros(shape) * np.nan, np.zeros(shape) * np.nan)
-                else:
-                    out = np.zeros(shape) * np.nan
+                out = {
+                    "score": np.zeros((n_folds, len(xs)))*np.nan,
+                    "score_gen": np.zeros((n_folds, len(xs)))*np.nan,
+                    "predictions": np.zeros((n_folds, 0, len(xs)))*np.nan,
+                    "targets": np.zeros((n_folds, 0, len(xs)))*np.nan,
+                }
             else:
                 if d1.shape[2] == 0:
                     d1 = np.zeros((d2.shape[0],) + d1.shape[1:])
@@ -1178,10 +1304,10 @@ class Dataset(object):
                     **kwargs
                 )
             if not combine and (decode_m1 is not None or decode_m2 is not None):
-                outs[i] = out[0]
-                outs_gen[i] = out[1]
+                outs[i] = out["score"]
+                outs_gen[i] = out["score_gen"]
             else:
-                outs[i] = out
+                outs[i] = out["score"]
         if ret_pops:
             out = (outs, xs, pop1, pop2)
             add = tuple(di for di in (dec1, dec2) if di[0] is not None and not combine)
