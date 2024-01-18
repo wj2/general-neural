@@ -1180,7 +1180,7 @@ class Dataset(object):
             params = {
                 "class_weight": "balanced",
                 "max_iter": max_iter,
-                "dual": "auto",
+                # "dual": "auto",
             }
             # params.update(kwargs)
 
