@@ -24,8 +24,8 @@ def make_mxn_gridspec(gs, n_rows, n_cols, top, bottom, left, right, v_space, h_s
     gss = np.zeros((v_bounds.shape[0], h_bounds.shape[0]), dtype=object)
     for ind in u.make_array_ind_iterator(gss.shape):
         t, b = v_bounds[ind[0]]
-        l, r = h_bounds[ind[1]]
-        gss[ind] = gs[t:b, l:r]
+        l_, r = h_bounds[ind[1]]
+        gss[ind] = gs[t:b, l_:r]
     return gss
 
 
@@ -98,7 +98,6 @@ class Figure:
         if len(grid_arr.shape) == 1:
             grid_arr = np.expand_dims(grid_arr, exp_dim)
         ax_arr = np.zeros_like(grid_arr, dtype=object)
-        share_ax = None
         share_x_cols = {}
         share_y_cols = {}
         share_x_rows = {}
@@ -148,10 +147,19 @@ class Figure:
     def generate(self, panels=None):
         pass
 
-    def save(self, file_=None, bbox_inches="tight", transparent=True, dpi=300):
+    def save(
+            self,
+            file_=None,
+            bbox_inches="tight",
+            transparent=True,
+            dpi=300,
+            use_bf=None,
+    ):
         if file_ is None:
             file_ = self.fig_key
-        fname = os.path.join(self.bf, file_)
+        if use_bf is None:
+            use_bf = self.bf
+        fname = os.path.join(use_bf, file_)
         self.f.savefig(fname, bbox_inches=bbox_inches, transparent=transparent, dpi=dpi)
 
     def get_data(self):
