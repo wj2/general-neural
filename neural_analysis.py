@@ -2139,6 +2139,12 @@ def fold_skl(
     else:
         model_kwargs.update(params)
         params = model_kwargs
+    c_flat, labels = _combine_samples(c1, c2)
+    print(params)
+    if "dual" not in params.keys():
+        n_feats, n_samps = c_flat.shape[:2]
+        params["dual"] = n_feats >= n_samps
+    print(params)
     pipe = make_model_pipeline(
         model=model,
         norm=norm,
@@ -2146,7 +2152,6 @@ def fold_skl(
         pca=pre_pca,
         **params,
     )
-    c_flat, labels = _combine_samples(c1, c2)
     if rel_c1 is not None and rel_c2 is not None:
         rel_flat, _ = _combine_samples(rel_c1, rel_c2)
     else:
