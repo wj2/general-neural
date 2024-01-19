@@ -2140,11 +2140,9 @@ def fold_skl(
         model_kwargs.update(params)
         params = model_kwargs
     c_flat, labels = _combine_samples(c1, c2)
-    print(params)
     if "dual" not in params.keys():
         n_feats, n_samps = c_flat.shape[:2]
         params["dual"] = n_feats >= n_samps
-    print(params)
     pipe = make_model_pipeline(
         model=model,
         norm=norm,
