@@ -524,19 +524,16 @@ def pr_only(pvs):
     return pr
 
 
-def make_unit_vector(v, squeeze=True):
+def make_unit_vector(v, squeeze=True, dim=-1):
     v = np.array(v)
     if len(v.shape) == 1:
         v = np.expand_dims(v, 0)
-    v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
-    mask = np.squeeze(v_len > 0)
+    v_len = np.sqrt(np.sum(v**2, axis=dim, keepdims=True))
+    vl_full = np.repeat(v_len, v.shape[dim], axis=dim)
+    mask_full = vl_full > 0
     v_norm = np.zeros_like(v, dtype=float)
-    v_set = v[mask] / v_len[mask]
-    v_norm[mask] = v_set  # v[mask]/v_len[mask]
-    # if v_len > 0:
-    #     v_norm = v/v_len
-    # else:
-    #     v_norm = v
+    v_set = v[mask_full] / vl_full[mask_full]
+    v_norm[mask_full] = v_set  
     if squeeze:
         v_norm = np.squeeze(v_norm)
     return v_norm

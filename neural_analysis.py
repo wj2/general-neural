@@ -2021,7 +2021,6 @@ def cross_validate_collapse_tc(
     y    : a vector of length N giving the category
     """
     if cv is None:
-        print("new cv")
         cv = skms.ShuffleSplit(n_folds, test_size=0.1)
     X_tc, y = sku.indexable(X_tc, y)
     parallel = jl.Parallel(n_jobs=n_jobs, verbose=verbose)
@@ -2090,7 +2089,6 @@ def _time_collapsed_fold(
     tcs = np.zeros((n_folds, x_len))
     tcs_gen = np.zeros_like(tcs)
     c_flat = np.swapaxes(c_flat, 0, 1)
-    print(splitter)
     out = cross_validate_collapse_tc(
         pipe, c_flat, labels, time_mask=time_mask, cv=splitter, n_folds=n_folds,
     )

@@ -1109,6 +1109,44 @@ class Dataset(object):
             pops_pseudo.append(pop_i)
         return pops_pseudo
 
+
+    def neuron_trial_tradeoff(
+            self,
+            m1,
+            m2,
+            time_zero_field=None,
+            repl_nan=False,
+            regions=None,
+            **kwargs,
+    ):
+        out = self.get_dec_pops(
+            500,
+            0,
+            1000,
+            100,
+            m1,
+            m2,
+            tzfs=(time_zero_field, time_zero_field),
+            repl_nan=repl_nan,
+            regions=regions,
+        )
+        xs, pops = out
+        pop1, pop2 = pops
+
+        c1_n = list(pop_i.shape[2] for pop_i in pop1)
+        c2_n = list(pop_i.shape[2] for pop_i in pop2)
+        d_n = np.array(list(pop_i.shape[0] for pop_i in pop2))
+
+        upper_limit = np.min([np.max(c1_n), np.max(c2_n)])
+        trl_threshs = np.arange(1, upper_limit + 1)
+        n_dims = np.zeros(len(trl_threshs))
+        for i, thr in enumerate(trl_threshs):
+            m1 = c1_n >= thr
+            m2 = c2_n >= thr
+            mask = np.logical_and(m1, m2)
+            n_dims[i] = np.sum(d_n[mask])
+        return trl_threshs, n_dims
+    
     def decode_masks(
         self,
         m1,
