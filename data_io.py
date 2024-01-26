@@ -1066,7 +1066,8 @@ class Dataset(object):
         min_trials=10,
         resamples=10,
         skl_axs=True,
-        same_n_trls=True
+        same_n_trls=True,
+        subsample_neurons=None,
     ):
         xs, pops = self.get_dec_pops(
             winsize,
@@ -1084,12 +1085,19 @@ class Dataset(object):
             min_trials=min_trials,
             resamples=resamples,
             skl_axs=skl_axs,
-            same_n_trls=same_n_trls
+            same_n_trls=same_n_trls,
+            subsample_neurons=subsample_neurons,
         )
         return xs, pops_pseudo
 
     def sample_pseudo_pops(
-        self, *pops, min_trials=10, resamples=10, skl_axs=True, same_n_trls=True
+            self,
+            *pops,
+            min_trials=10,
+            resamples=10,
+            skl_axs=True,
+            same_n_trls=True,
+            subsample_neurons=None,
     ):
         trls_list = []
         for pop in pops:
@@ -1105,6 +1113,7 @@ class Dataset(object):
                 resample_pseudos=resamples,
                 skl_axs=skl_axs,
                 same_n_trls=same_n_trls,
+                subsample_neurons=subsample_neurons,
             )
             pops_pseudo.append(pop_i)
         return pops_pseudo
