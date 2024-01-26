@@ -967,6 +967,10 @@ def load_separate(paths, pattern=None, varname="x"):
     return alldata
 
 
+def make_stat_string(s, samps, perc=95):
+    high, low = conf_interval(samps, perc=perc, withmean=True)[:, 0]
+    return s.format(low, high)
+
 def load_bhvmat_imglog(
     path_bhv,
     path_log=None,
