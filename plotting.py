@@ -1250,6 +1250,7 @@ def violinplot(
     markersize=5,
     showmedians=True,
     showextrema=False,
+    plot_outline=False,
     **kwargs
 ):
     if ax is None:
@@ -1263,6 +1264,10 @@ def violinplot(
         showmedians = False
         if not u.check_list(markerstyles):
             markerstyles = (markerstyles,)*len(vp_seq)
+    elif plot_outline:
+        markerstyles = ("s",)*len(vp_seq)
+        showmedians = False
+            
     for i, vps in enumerate(vp_seq):
         p = ax.violinplot(
             vps,
@@ -1271,8 +1276,16 @@ def violinplot(
             showextrema=showextrema,
             **kwargs
         )
-        if markerstyles is not None:
+        if plot_outline:
             ax.plot(
+                [positions[i]],
+                [np.median(vps)],
+                marker=markerstyles[i],
+                markersize=markersize*1.2,
+                color="k",
+            )
+        if markerstyles is not None:
+            _ = ax.plot(
                 [positions[i]],
                 [np.median(vps)],
                 marker=markerstyles[i],
