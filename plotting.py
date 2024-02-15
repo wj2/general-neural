@@ -811,7 +811,7 @@ def plot_trace_werr(
     plot_outline=False,
     outline_color="k",
     outline_mult_width=1.5,
-    marker_type='o',
+    marker='o',
     **kwargs
 ):
     if conf95:
@@ -865,7 +865,7 @@ def plot_trace_werr(
         if color is None:
             color = trl[0].get_color()
         if points:
-            ax.plot(xs, tr, marker_type, color=color, alpha=line_alpha, **kwargs)
+            ax.plot(xs, tr, marker=marker, color=color, alpha=line_alpha, **kwargs)
         alpha = min(line_alpha, alpha)
         if len(dat.shape) > 1 or jagged or err is not None:
             if fill:

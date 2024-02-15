@@ -208,12 +208,14 @@ def gaussian_ramp_func(
     n_dims = cents.shape[2] + uv.shape[2]
     gauss_dim = u.ind_complement(ramp_dim, n_dims)
     cents_g = cents
-    coords_g = coords[..., gauss_dim]
-    sizes_g = sizes
+    if len(gauss_dim) == 0:
+        r = 1
+    else:
+        coords_g = coords[..., gauss_dim]
+        sizes_g = sizes
+        r = np.exp(-np.sum(((coords_g - cents_g) ** 2) / (2 * sizes_g), axis=2))
 
     coords_r = coords[..., ramp_dim]
-    r = np.exp(-np.sum(((coords_g - cents_g) ** 2) / (2 * sizes_g), axis=2))
-
     m = (
         np.sum((coords_r - max_r / 2) * uv, axis=2) / (np.sqrt(len(ramp_dim)) * max_r)
         + max_r / 2
