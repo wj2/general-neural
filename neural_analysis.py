@@ -12,6 +12,7 @@ import sklearn.metrics as skm
 import sklearn.impute as skimp
 import sklearn.naive_bayes as sknb
 import sklearn.linear_model as sklm
+import sklearn.svm as sksvm
 import arviz as az
 from dPCA.dPCA import dPCA
 import warnings
@@ -2143,7 +2144,7 @@ def fold_skl(
         model_kwargs.update(params)
         params = model_kwargs
     c_flat, labels = _combine_samples(c1, c2)
-    if "dual" not in params.keys():
+    if "dual" not in params.keys() and model == sksvm.LinearSVC:
         n_feats, n_samps = c_flat.shape[:2]
         params["dual"] = n_feats >= n_samps
     pipe = make_model_pipeline(

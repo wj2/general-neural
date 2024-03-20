@@ -231,12 +231,13 @@ def gaussian_ramp_deriv_func(
     n_dims = cents.shape[2] + uv.shape[2]
     gauss_dim = u.ind_complement(ramp_dim, n_dims)
     cents_g = cents
-    coords_g = coords[..., gauss_dim]
-    sizes_g = sizes
-
+    if len(gauss_dim) == 0:
+        inner = 1
+    else:
+        coords_g = coords[..., gauss_dim]
+        sizes_g = sizes
+        inner = np.exp(-np.sum(((coords_g - cents_g) ** 2) / (2 * sizes_g), axis=2))
     coords_r = coords[..., ramp_dim]
-
-    inner = -np.sum(((coords_g - cents_g) ** 2) / (2 * sizes_g), axis=2)
     mult = (
         np.sum((coords - max_r / 2) * uv, axis=2) / np.sqrt(len(ramp_dim)) * max_r
         + max_r / 2
@@ -257,7 +258,7 @@ def gaussian_ramp_deriv_func(
             o = np.expand_dims(o, 2) * (coords_g - cents_g) / sizes_g
             o = o[..., 0]
         else:
-            o = np.exp(inner) / (np.sqrt(len(ramp_dim)) * max_r)
+            o = np.ones_like(coords_r) * np.exp(inner) / (np.sqrt(len(ramp_dim)) * max_r)
             o = 2 * (scale - baseline) * o
         outs.append(o)
     out = np.stack(outs, axis=2)

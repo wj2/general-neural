@@ -13,6 +13,7 @@ import configparser
 import sklearn.decomposition as skd
 import sklearn.preprocessing as skp
 import sklearn.utils as sku
+import matplotlib.pyplot as plt
 from pref_looking.eyes import analyze_eyemove
 from pref_looking.bias import get_look_img
 
@@ -38,7 +39,12 @@ def format_sirange(high, low, form=":.2f"):
 
 
 def load_folder_regex_generator(
-        folder, *patterns, file_target=None, load_func=pickle.load, open_str="rb",
+        folder,
+        *patterns,
+        file_target=None,
+        load_func=pickle.load,
+        open_str="rb",
+        open_file=True,
 ):
     fls = os.listdir(folder)
     for fl in fls:
@@ -51,9 +57,35 @@ def load_folder_regex_generator(
                 load_path = os.path.join(folder, fl, file_target)
             else:
                 load_path = os.path.join(folder, fl)
-            out = load_func(open(load_path, open_str))
+            if open_file:
+                inp = open(load_path, open_str)
+            else:
+                inp = load_path
+            out = load_func(inp)
             yield load_path, gd, out
 
+
+def make_cluster_db(
+        folder, pattern,
+):
+    args_all = []
+    keys_all = []
+    for path, gd, run_data in load_folder_regex_generator(folder, pattern):
+        try:
+            args = run_data["args"]
+            args["path"] = path
+            args_all.append(args)
+            keys_all.append(list(args.keys()))
+        except TypeError as e:
+            pass
+    db = pd.DataFrame.from_records(args_all)
+    return db
+    # u_keys = np.unique(np.concatenate(keys_all))
+    # record_list = []
+    # for arg in args_all:
+    #     for key in keys_all:
+    #         arg.get(key)
+            
             
 def load_cluster_runs(
     folder,
@@ -172,6 +204,10 @@ class ConfigParserColor(configparser.ConfigParser):
         else:
             col = string
         return col
+
+    def getcmap(self, *args, **kwargs):
+        string = self.get(*args, **kwargs)
+        return plt.get_cmap(string)
 
     def getlist(self, *args, typefunc=None, **kwargs):
         if typefunc is None:

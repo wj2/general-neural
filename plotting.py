@@ -763,6 +763,11 @@ def hls_to_rgb(color):
     return _cs_convert(color, colorsys.hls_to_rgb)
 
 
+def get_prop_cycler():
+    cycler = plt.rcParams["axes.prop_cycle"]
+    return cycler
+
+
 def get_next_n_colors(n):
     cycler = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     return cycler[:n]

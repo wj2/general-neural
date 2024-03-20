@@ -136,7 +136,7 @@ def _format_for_svm(pops):
 
 
 class Dataset(object):
-    def __init__(self, dframe, seconds=False):
+    def __init__(self, dframe, seconds=False, sort=True):
         self.data = dframe
         try:
             self.session_fields = self.data["data"].iloc[0].columns
@@ -146,19 +146,24 @@ class Dataset(object):
             else:
                 raise e
         self.n_sessions = len(self.data)
-        self.data = self.data.sort_values("date", ignore_index=True)
-        self.data = self.data.sort_values("animal", ignore_index=True)
+        self.sort = sort
+        if sort:
+            self.data = self.data.sort_values("date", ignore_index=True)
+            self.data = self.data.sort_values("animal", ignore_index=True)
+        else:
+            self.data = self.data.reset_index(drop=True)
         self.seconds = seconds
         self.population_cache = {}
         self.mask_pop_cache = {}
 
     @classmethod
-    def from_dict(cls, sort_by=None, seconds=False, **inputs):
+    def from_dict(cls, sort_by=None, sort=True, seconds=False, **inputs):
         df = pd.DataFrame(data=inputs)
-        if sort_by is not None:
-            df.sort_values(by=sort_by, inplace=True)
-            df.reset_index(drop=True, inplace=True)
-        return cls(df, seconds=seconds)
+        already_sorted = sort_by is not None
+        if already_sorted:
+            df = df.sort_values(by=sort_by)
+            df = df.reset_index(drop=True)
+        return cls(df, seconds=seconds, sort=(not already_sorted and sort))
 
     @classmethod
     def from_readfunc(cls, read_func, *args, seconds=False, sort_by=None, **kwargs):
@@ -177,12 +182,15 @@ class Dataset(object):
         session_level = key in self.data["data"].iloc[0].columns
         return top_level or session_level
 
+    def __len__(self):
+        return len(self.data)
+
     @property
     def session_keys(self):
         return self.data["data"].iloc[0].columns
 
     def session_mask(self, mask):
-        return Dataset(self.data[mask], seconds=self.seconds)
+        return Dataset(self.data[mask], seconds=self.seconds, sort=self.sort)
 
     def mask(self, mask):
         df = {}
@@ -194,7 +202,7 @@ class Dataset(object):
             d = self.data["data"][i][m]
             dlist.append(d)
         df["data"] = dlist
-        return Dataset.from_dict(**df, seconds=self.seconds)
+        return Dataset.from_dict(**df, seconds=self.seconds, sort=self.sort)
 
     def _center_spks(self, spks, tz, tzf):
         if tz is not None:
@@ -243,8 +251,9 @@ class Dataset(object):
             no_spks = np.sum(out_arr, axis=2) == 0
         else:
             for i, spk_i in enumerate(spk):
-                for j, spk_ij in enumerate(spk_i):
-                    spk_sq = np.squeeze(spk_ij)
+                for j, spk_sq in enumerate(spk_i):
+                    if len(spk_sq.shape) > 1:
+                        spk_sq = np.squeeze(spk_ij)
                     # UNCOMMENT IF SOMETHING BREAKS IN BUSCHMAN
                     # if convert_seconds:
                     #     spk_sq = spk_sq * 1000
@@ -893,7 +902,7 @@ class Dataset(object):
         *masks,
         tzfs=None,
         repl_nan=False,
-        shuffle_trials=True,
+        shuffle_trials=False,
         regions=None,
         use_time=False,
         combined_time=True,
@@ -1306,7 +1315,6 @@ class Dataset(object):
                 )[:2]
             else:
                 dec2 = (None,) * resample_pseudo
-        print(pop1[0].shape, pop2[0].shape, dec1[0].shape, dec2[0].shape)
         outs = np.zeros((len(pop2), n_folds, len(xs)))
         outs_gen = np.zeros_like(outs)
         for i, p1 in enumerate(pop1):
@@ -1320,7 +1328,10 @@ class Dataset(object):
                 d1 = dec1[i]
                 d2 = dec2[i]
             cond1 = p1.shape[2] < min_trials_pseudo or p2.shape[2] < min_trials_pseudo
-            cond2 = d1.shape[2] == 0 and d2.shape[2] == 0
+            if d1 is not None:
+                cond2 = d1.shape[2] == 0 and d2.shape[2] == 0
+            else:
+                cond2 = False
             if p1.shape[0] == 0 or cond1 or cond2:
                 out = {
                     "score": np.zeros((n_folds, len(xs)))*np.nan,
@@ -1329,9 +1340,9 @@ class Dataset(object):
                     "targets": np.zeros((n_folds, 0, len(xs)))*np.nan,
                 }
             else:
-                if d1.shape[2] == 0:
+                if d1 is not None and d1.shape[2] == 0:
                     d1 = np.zeros((d2.shape[0],) + d1.shape[1:])
-                if d2.shape[2] == 0:
+                if d2 is not None and d2.shape[2] == 0:
                     d2 = np.zeros((d1.shape[0],) + d2.shape[1:])
                 out = na.fold_skl(
                     p1,
