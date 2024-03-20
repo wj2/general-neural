@@ -1911,8 +1911,8 @@ def _nominal_fold(
             **kwargs,
         )
         tcs[:, j] = out["test_score"]
-        pred = np.squeeze(out["predictions"])
-        targ = np.squeeze(out["targets"])
+        pred = out["predictions"]
+        targ = out["targets"]
         if j == 0:
             preds = np.zeros((folds_n, pred.shape[1], x_len))
             targs = np.zeros_like(preds)
@@ -2144,7 +2144,6 @@ def fold_skl(
         model_kwargs.update(params)
         params = model_kwargs
     c_flat, labels = _combine_samples(c1, c2)
-    print(params)
     if "dual" not in params.keys() and model == sksvm.LinearSVC:
         n_feats, n_samps = c_flat.shape[:2]
         params["dual"] = n_feats >= n_samps
