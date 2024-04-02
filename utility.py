@@ -38,6 +38,20 @@ def format_sirange(high, low, form=":.2f"):
     return s.format(high=high, low=low)
 
 
+def get_matching_files(
+    folder,
+    *patterns,
+):
+    fls = os.listdir(folder)
+    candidates = []
+    for fl in fls:
+        ms = list(re.match(pattern, fl) for pattern in patterns
+                  if re.match(pattern, fl) is not None)
+        if len(ms) > 0:
+            candidates.append(os.path.join(folder, fl))
+    return candidates
+
+
 def load_folder_regex_generator(
         folder,
         *patterns,
@@ -625,12 +639,6 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
         inds[col_dim] = i
         arrs.append(arr[tuple(inds)])
     return np.concatenate(arrs, axis=stack_dim)
-
-
-def get_matching_files(datadir, expr):
-    dirfiles = os.listdir(datadir)
-    matchfiles = filter(lambda x: re.match(expr, x) is not None, dirfiles)
-    return matchfiles
 
 
 def load_collection_bhvmats(

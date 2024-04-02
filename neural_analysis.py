@@ -1743,6 +1743,14 @@ def _combine_samples(*c_is, norm_labels=False):
     return data_full, labels_full
 
 
+def _fit_model_preds(data, labels, estimators):
+    out = np.zeros((len(estimators), data.shape[0]))
+    for i, est in enumerate(estimators):
+        scores = est.predict(data)
+        out[i] = scores
+    return out    
+
+
 def _eval_fit_models(data, labels, estimators, scoring=None):
     out = np.zeros(len(estimators))
     for i, est in enumerate(estimators):
@@ -1888,6 +1896,8 @@ def _nominal_fold(
     x_len = c_flat.shape[-1]
     tcs = np.zeros((folds_n, x_len))
     tcs_gen = np.zeros_like(tcs)
+    if c_gen is not None:
+        pred_gen = np.zeros((folds_n, c_gen.shape[1], x_len))
     if ret_projections:
         scoring = _distance_scorer
     else:
@@ -1921,7 +1931,7 @@ def _nominal_fold(
         if rel_var is not None:
             rv_j = out["rel_vars"]
             if j == 0:
-                rvs = np.zeros((folds_n, rv_j.shape[1], x_len))
+                rvs = np.zeros((folds_n,) + rv_j.shape[1:] + (x_len,), dtype=object)
             rvs[..., j] = rv_j
         
         if c_gen is not None:
@@ -1933,16 +1943,19 @@ def _nominal_fold(
             tcs_gen[:, j] = _eval_fit_models(
                 gen_data, l_gen, out["estimator"], scoring=scoring,
             )
+            pred_gen[..., j] = _fit_model_preds(gen_data, l_gen, out["estimator"])
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
     out = {"score": tcs, "predictions": preds, "targets": targs,}
     if c_gen is not None:
         out["score_gen"] = tcs_gen
+        out["predictions_gen"] = pred_gen
+        out["labels_gen"] = l_gen
     if gen_rel_var is not None:
         out["rel_var_gen"] = gen_rel_var
     if rel_var is not None:
-        out["rel_var"] = rel_var
+        out["rel_var"] = rvs
     
     return out
 
@@ -2156,6 +2169,7 @@ def fold_skl(
     )
     if rel_c1 is not None and rel_c2 is not None:
         rel_flat, _ = _combine_samples(rel_c1, rel_c2)
+        rel_flat = rel_flat.T
     else:
         rel_flat = None
     
@@ -2165,6 +2179,7 @@ def fold_skl(
         )
         if gen_rel_c1 is not None and gen_rel_c2 is not None:
             gen_rel, _ = _combine_samples(gen_rel_c1, gen_rel_c2)
+            gen_rel = gen_rel.T
         else:
             gen_rel = None
     else:

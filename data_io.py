@@ -907,12 +907,15 @@ class Dataset(object):
         use_time=False,
         combined_time=True,
         time_field=None,
+        rel_fields=None,
+        return_rel=False,
     ):
         try:
             assert len(tzfs) == len(masks)
         except AssertionError:
             tzfs = (tzfs,) * len(masks)
         out_pops = []
+        out_rvs = []
         if use_time and combined_time:
             _, trs = self.get_time_features(1)
         else:
@@ -932,6 +935,14 @@ class Dataset(object):
                     regions=regions,
                 )
                 pop_m, xs = out_m
+                if rel_fields is not None:
+                    rvs_m = list(x.to_numpy() for x in cat_m[list(rel_fields)])
+                    if len(rvs_m[0].shape) == 1:
+                        rvs_m = list(np.expand_dims(x, 1) for x in rvs_m)
+                    rvs_m = list(np.expand_dims(x.T, 1) for x in rvs_m)
+                else:
+                    rvs_m = (None,) * len(self.data)
+                    
                 if use_time and not shuffle_trials:
                     t_feat, _ = cat_m.get_time_features(
                         len(xs), skl_axes=True, use_trs=trs,
@@ -942,8 +953,15 @@ class Dataset(object):
                     pop_m = pops
             else:
                 pop_m = (None,) * len(self.data)
+                rvs_m = (None,) * len(self.data)
+            
             out_pops.append(pop_m)
-        return xs, out_pops
+            out_rvs.append(rvs_m)
+
+        out = (xs, out_pops)
+        if return_rel:
+            out = out + (out_rvs,)
+        return out
 
         # cat1 = self.mask(m1)
         # cat2 = self.mask(m2)
@@ -1201,8 +1219,16 @@ class Dataset(object):
         ret_projections=False,
         use_time=False,
         subsample_neurons=None,
+        ret_full_dict=False,
+        rel_fields=None,
         **kwargs
     ):
+        if rel_fields is not None and pseudo:
+            raise IOError(
+                ("pseudopopulation decoding does not support carrying relevant fields"
+                 "which are specified, {}").format(rel_fields)
+            )
+
         out = self.get_dec_pops(
             winsize,
             begin,
@@ -1217,8 +1243,10 @@ class Dataset(object):
             regions=regions,
             shuffle_trials=shuffle_trials,
             use_time=use_time,
+            rel_fields=rel_fields,
+            return_rel=True,
         )
-        xs, pops = out
+        xs, pops, rel_fields = out
 
         one_of_dec = dec_beg is not None or dec_end is not None
         if collapse_time and time_mask is None and one_of_dec:
@@ -1317,6 +1345,8 @@ class Dataset(object):
                 dec2 = (None,) * resample_pseudo
         outs = np.zeros((len(pop2), n_folds, len(xs)))
         outs_gen = np.zeros_like(outs)
+        pop_dicts = {}
+        rel_c1, rel_c2, rel_g_c1, rel_g_c2 = rel_fields
         for i, p1 in enumerate(pop1):
             if combine:
                 p1 = np.concatenate((p1, dec1[i]), axis=2)
@@ -1359,13 +1389,17 @@ class Dataset(object):
                     collapse_time=collapse_time,
                     time_mask=time_mask,
                     ret_projections=ret_projections,
+                    rel_c1=rel_c1[i],
+                    rel_c2=rel_c2[i],
+                    gen_rel_c1=rel_g_c1[i],
+                    gen_rel_c2=rel_g_c2[i],
                     **kwargs
                 )
+            outs[i] = out.pop("score")
             if not combine and (decode_m1 is not None or decode_m2 is not None):
-                outs[i] = out["score"]
-                outs_gen[i] = out["score_gen"]
-            else:
-                outs[i] = out["score"]
+                outs_gen[i] = out.pop("score_gen")
+            pop_dicts[i] = out
+                
         if ret_pops:
             out = (outs, xs, pop1, pop2)
             add = tuple(di for di in (dec1, dec2) if di[0] is not None and not combine)
@@ -1374,6 +1408,8 @@ class Dataset(object):
             out = (outs, xs)
         if decode_m1 is not None or decode_m2 is not None:
             out = out + (outs_gen,)
+        if ret_full_dict:
+            out = out + (pop_dicts,)
         return out
 
     def estimate_dimensionality(

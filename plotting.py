@@ -262,18 +262,24 @@ def ax_3d_adder(func):
     return ax_wrapper
 
 
-def ax_adder(func):
-    def ax_wrapper(*args, ax=None, fwid=3, **kwargs):
-        if ax is None:
-            f, ax = plt.subplots(1, 1, figsize=(fwid, fwid))
-        out = func(*args, ax=ax, **kwargs)
-        if out is None:
-            new_out = ax
-        else:
-            new_out = (out, ax)
-        return new_out
-
-    return ax_wrapper
+def ax_adder(include_fig=False):
+    def ax_adder_wrap(func):
+        def ax_wrapper(*args, ax=None, fwid=3, **kwargs):
+            if ax is None:
+                f, ax = plt.subplots(1, 1, figsize=(fwid, fwid))
+            else:
+                f = None
+            if include_fig:
+                out = func(*args, ax=ax, fig=f, **kwargs)
+            else:
+                out = func(*args, ax=ax, **kwargs)
+            if out is None:
+                new_out = ax
+            else:
+                new_out = (out, ax)
+            return new_out
+        return ax_wrapper
+    return ax_adder_wrap
 
 
 def plot_population_average(
