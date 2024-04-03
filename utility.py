@@ -34,7 +34,7 @@ monthdict = {
 
 
 def format_sirange(high, low, form=":.2f"):
-    s = "\SIrange{{{low" + form + "}}}{{{high" + form + "}}}{{}}"
+    s = "\\SIrange{{{low" + form + "}}}{{{high" + form + "}}}{{}}"
     return s.format(high=high, low=low)
 
 
@@ -56,7 +56,7 @@ def load_folder_regex_generator(
         folder,
         *patterns,
         file_target=None,
-        load_func=pickle.load,
+        load_func=pd.read_pickle,
         open_str="rb",
         open_file=True,
 ):
@@ -341,13 +341,11 @@ def generate_all_combinations(size, starting_order):
 
 
 def pickle_all_stan_models(
-    folder="general/stan_models/", pattern=".*\.stan$", decoder="utf-8"
+    folder="general/stan_models/", pattern=".*\\.stan$", decoder="utf-8"
 ):
     fls = os.listdir(folder)
-    print(fls)
     fls = filter(lambda x: re.match(pattern, x) is not None, fls)
     for f in fls:
-        print(f)
         path = os.path.join(folder, f)
         pickle_stan_model(path, decoder)
 
@@ -644,7 +642,7 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
 def load_collection_bhvmats(
     datadir,
     params,
-    expr=".*\.mat",
+    expr=".*\\.mat",
     forget_imglog=False,
     repl_logpath=None,
     log_suffix="_imglog.txt",
