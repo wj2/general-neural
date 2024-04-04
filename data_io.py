@@ -922,6 +922,8 @@ class Dataset(object):
             trs = None
         for i, m in enumerate(masks):
             if m is not None:
+                t_mask = self[tzfs[i]].rs_isnan().rs_not()
+                m = m.rs_and(t_mask)
                 cat_m = self.mask(m)
                 out_m = cat_m.get_neural_activity(
                     winsize,

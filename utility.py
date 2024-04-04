@@ -59,25 +59,30 @@ def load_folder_regex_generator(
         load_func=pd.read_pickle,
         open_str="rb",
         open_file=True,
+        load_only_nth_files=None,
 ):
+    if load_only_nth_files is not None and not check_list(load_only_nth_files):
+        load_only_nth_files = (load_only_nth_files,)
     fls = os.listdir(folder)
+    nth_file = 0
     for fl in fls:
         ms = list(re.match(pattern, fl) for pattern in patterns
                   if re.match(pattern, fl) is not None)
         if len(ms) > 0:
-            m = ms[0]
-            gd = m.groupdict()
-            if file_target:
-                load_path = os.path.join(folder, fl, file_target)
-            else:
-                load_path = os.path.join(folder, fl)
-            if open_file:
-                inp = open(load_path, open_str)
-            else:
-                inp = load_path
-            out = load_func(inp)
-            yield load_path, gd, out
-
+            if load_only_nth_files is not None and nth_file in load_only_nth_files:
+                m = ms[0]
+                gd = m.groupdict()
+                if file_target:
+                    load_path = os.path.join(folder, fl, file_target)
+                else:
+                    load_path = os.path.join(folder, fl)
+                if open_file:
+                    inp = open(load_path, open_str)
+                else:
+                    inp = load_path
+                out = load_func(inp)
+                yield load_path, gd, out
+            nth_file = nth_file + 1
 
 def make_cluster_db(
         folder, pattern,
