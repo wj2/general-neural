@@ -69,7 +69,7 @@ def load_folder_regex_generator(
         ms = list(re.match(pattern, fl) for pattern in patterns
                   if re.match(pattern, fl) is not None)
         if len(ms) > 0:
-            if load_only_nth_files is not None and nth_file in load_only_nth_files:
+            if load_only_nth_files is None or nth_file in load_only_nth_files:
                 m = ms[0]
                 gd = m.groupdict()
                 if file_target:
