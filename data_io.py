@@ -12,7 +12,10 @@ import general.neural_analysis as na
 
 class ResultSequence(object):
     def __init__(self, x):
-        self.val = list(x)
+        try:
+            self.val = x.val
+        except AttributeError:
+            self.val = list(x)
 
     def __hash__(self):
         hashable = tuple(tuple(x) for x in self.val)
@@ -922,6 +925,7 @@ class Dataset(object):
             trs = None
         for i, m in enumerate(masks):
             if m is not None:
+                m = ResultSequence(m)
                 t_mask = self[tzfs[i]].rs_isnan().rs_not()
                 m = m.rs_and(t_mask)
                 cat_m = self.mask(m)

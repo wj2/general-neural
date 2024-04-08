@@ -131,6 +131,29 @@ class BalancedShuffleSplit:
             yield np.array(tr_inds), np.array(te_inds)
 
 
+def zscore_tc(*pops, scaler=skp.StandardScaler, cat_axis=None,):
+    """ D x C x N x T """
+    if cat_axis is None:
+        shape = pops[0].shape
+        if len(shape) == 4:
+            cat_axis = 2
+            exp = True
+        else:
+            cat_axis = 1
+            exp = False
+    comb_pop = np.squeeze(np.concatenate(pops, axis=cat_axis))
+    pops_new = list(np.zeros_like(pop) for pop in pops)
+    for i in range(comb_pop.shape[-1]):
+        s = scaler()
+        s.fit(comb_pop[..., i].T)
+        for j, pop in enumerate(pops):
+            zs = s.transform(np.squeeze(pop[..., i], axis=1).T).T
+            if exp:
+                zs = np.expand_dims(zs, 1)
+            pops_new[j][..., i] = zs
+    return pops_new
+
+
 def make_data_labels(*data):
     data_all = np.concatenate(data, axis=0)
     labels_all = np.concatenate(
@@ -1902,6 +1925,7 @@ def _nominal_fold(
         scoring = _distance_scorer
     else:
         scoring = None
+    ests = np.zeros((folds_n, x_len), dtype=object)
     for j in range(x_len):
         if time_accumulate:
             in_list = list(c_flat[..., k] for k in range(j + 1))
@@ -1921,6 +1945,7 @@ def _nominal_fold(
             **kwargs,
         )
         tcs[:, j] = out["test_score"]
+        ests[:, j] = out["estimator"]
         pred = out["predictions"]
         targ = out["targets"]
         if j == 0:
@@ -1947,7 +1972,7 @@ def _nominal_fold(
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
-    out = {"score": tcs, "predictions": preds, "targets": targs,}
+    out = {"score": tcs, "predictions": preds, "targets": targs, "estimators": ests}
     if c_gen is not None:
         out["score_gen"] = tcs_gen
         out["predictions_gen"] = pred_gen
@@ -1958,6 +1983,19 @@ def _nominal_fold(
         out["rel_var"] = rvs
     
     return out
+
+
+def apply_estimators(estimators, pop, labels):
+    out = np.zeros_like(estimators, dtype=float)
+    for i, j in u.make_array_ind_iterator(estimators.shape):
+        est_ij = estimators[i, j]
+        out[i, j] = est_ij.score(pop[..., j].T, labels)
+    return out
+
+
+def apply_estimators_discrete(estimators, *pops):
+    c_flat, labels = _combine_samples(*pops)
+    return apply_estimators(estimators, c_flat, labels)
 
 
 def _fit_and_score_collapse_tc(
