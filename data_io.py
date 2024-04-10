@@ -5,6 +5,7 @@ import sklearn.linear_model as sklm
 import sklearn.preprocessing as skp
 import quantities as pq
 import neo
+import scipy.signal as sig
 
 import general.utility as u
 import general.neural_analysis as na
@@ -325,7 +326,9 @@ class Dataset(object):
                 if ppop.shape[neur_ax] >= subsample_neurons:
                     if use_inds is None:
                         inds = rng.choice(
-                            ppop.shape[neur_ax], size=subsample_neurons, replace=False,
+                            ppop.shape[neur_ax],
+                            size=subsample_neurons,
+                            replace=False,
                         )
                     else:
                         inds = use_inds[i]
@@ -337,7 +340,7 @@ class Dataset(object):
                     ppop = ppop[inds]
             if i == 0:
                 out_pseudo = np.zeros((resample_pseudos,) + ppop.shape)
-            
+
             out_pseudo[i] = ppop
         out = (out_pseudo, fracs)
         if subsample_neurons is not None:
@@ -583,41 +586,36 @@ class Dataset(object):
     def get_ntrls(self):
         return list(len(o) for o in self["data"])
 
-    def regress_target_field(
-            self,
-            target_field,
-            *args,
-            **kwargs
-    ):
+    def regress_target_field(self, target_field, *args, **kwargs):
         target = self[target_field]
         return self.regress_target(target, *args, **kwargs)
 
     def regress_target(
-            self,
-            target,
-            winsize,
-            begin,
-            end,
-            stepsize,
-            n_folds=20,
-            model=sklm.Ridge,
-            params=None,
-            pre_pca=None,
-            mean=False,
-            shuffle=False,
-            time_zero_field=None,
-            gen_tzf=None,
-            pseudo=False,
-            repl_nan=False,
-            impute_missing=False,
-            ret_pops=False,
-            train_mask=None,
-            gen_mask=None,
-            regions=None,
-            time_accumulate=False,
-            min_trials=20,
-            ret_pred_targ=False,
-            **kwargs,
+        self,
+        target,
+        winsize,
+        begin,
+        end,
+        stepsize,
+        n_folds=20,
+        model=sklm.Ridge,
+        params=None,
+        pre_pca=None,
+        mean=False,
+        shuffle=False,
+        time_zero_field=None,
+        gen_tzf=None,
+        pseudo=False,
+        repl_nan=False,
+        impute_missing=False,
+        ret_pops=False,
+        train_mask=None,
+        gen_mask=None,
+        regions=None,
+        time_accumulate=False,
+        min_trials=20,
+        ret_pred_targ=False,
+        **kwargs,
     ):
         if params is None:
             # params = {'class_weight':'balanced'}
@@ -632,9 +630,7 @@ class Dataset(object):
             )
         else:
             data_tr = self
-            targs_tr = list(
-                t.to_numpy() for t in target
-            )
+            targs_tr = list(t.to_numpy() for t in target)
         pops_tr, xs = data_tr.get_neural_activity(
             winsize,
             begin,
@@ -659,8 +655,8 @@ class Dataset(object):
                 regions=regions,
             )
         else:
-            pops_te = (None,)*len(pops_tr)
-            targs_te = (None,)*len(pops_tr)
+            pops_te = (None,) * len(pops_tr)
+            targs_te = (None,) * len(pops_tr)
         outs = np.zeros((len(pops_tr), n_folds, len(xs)))
         outs_gen = np.zeros_like(outs)
         outs_pred = []
@@ -674,10 +670,10 @@ class Dataset(object):
                 pop_te_i = pops_te[i]
             if pop_tr.shape[0] == 0 or pop_tr.shape[2] < min_trials:
                 out_i = {
-                    "score": np.zeros((n_folds, len(xs)))*np.nan,
-                    "score_gen": np.zeros((n_folds, len(xs)))*np.nan,
-                    "predictions": np.zeros((n_folds, 0, len(xs)))*np.nan,
-                    "targets": np.zeros((n_folds, 0, len(xs)))*np.nan,
+                    "score": np.zeros((n_folds, len(xs))) * np.nan,
+                    "score_gen": np.zeros((n_folds, len(xs))) * np.nan,
+                    "predictions": np.zeros((n_folds, 0, len(xs))) * np.nan,
+                    "targets": np.zeros((n_folds, 0, len(xs))) * np.nan,
                 }
             else:
                 out_i = na.fold_skl_continuous(
@@ -712,7 +708,6 @@ class Dataset(object):
             out = out + (outs_pred, outs_targ)
         return out
 
-    
     def regress_discrete_masks(
         self,
         masks,
@@ -739,7 +734,7 @@ class Dataset(object):
         regions=None,
         combine=False,
         time_accumulate=False,
-        **kwargs
+        **kwargs,
     ):
         if params is None:
             # params = {'class_weight':'balanced'}
@@ -837,7 +832,7 @@ class Dataset(object):
                 shuffle=shuffle,
                 impute_missing=(repl_nan or impute_missing),
                 gen_cs=ds,
-                time_accumulate=time_accumulate
+                time_accumulate=time_accumulate,
             )
             if not combine and (decode_masks is not None):
                 outs[i] = out["score"]
@@ -854,8 +849,27 @@ class Dataset(object):
             out = out + (outs_gen,)
         return out
 
-    def get_neural_activity(self, winsize, begin, end, stepsize=None, **kwargs):
-        if "spikeTimes" in self:
+    def get_neural_activity(
+        self,
+        winsize,
+        begin,
+        end,
+        stepsize=None,
+        use_regressors=None,
+        average_regressors=True,
+        **kwargs,
+    ):
+        if use_regressors is not None:
+            out = self.get_decoding_regressors(
+                use_regressors,
+                winsize,
+                begin,
+                end,
+                binstep=stepsize,
+                average_regressors=average_regressors,
+                **kwargs,
+            )
+        elif "spikeTimes" in self:
             out = self.get_populations(winsize, begin, end, binstep=stepsize, **kwargs)
         elif "psth" in self:
             out = self.get_psth(winsize, begin, end, binstep=stepsize, **kwargs)
@@ -863,15 +877,67 @@ class Dataset(object):
             raise TypeError("no neural data associated with this dataset")
         return out
 
+    def get_decoding_regressors(
+        self,
+        use_regressors,
+        winsize,
+        begin,
+        end,
+        stepsize=20,
+        time_zero=None,
+        time_zero_field=None,
+        average_regressors=True,
+        **kwargs,
+    ):
+        regs = self[list(use_regressors)]
+        if time_zero is None:
+            time_zero = self[time_zero_field]
+        window = np.ones((1, 1, winsize)) * 1 / winsize
+        half_win = int(winsize / 2)
+        xs = np.arange(begin - half_win, end + half_win)
+        xs_smooth = sig.convolve(xs, np.squeeze(window), mode="valid")[:-1]
+        xs_smooth = xs_smooth[::stepsize]
+        reg_all = []
+        for i, reg in enumerate(regs):
+            reg_i = np.zeros((len(reg), len(use_regressors), len(xs)))
+            for j, reg_j in enumerate(reg.to_numpy()):
+                tz = time_zero[i].iloc[j]
+                beg_ind = int(tz + begin - half_win)
+                end_ind = int(tz + end + half_win)
+                reg_arr = np.stack(reg_j, axis=0)
+                reg_i[j] = reg_arr[:, beg_ind:end_ind]
+                if np.any(np.isnan(reg_i[j])):
+                    reg_i[j] = pd.DataFrame(reg_i[j]).ffill(axis="columns").to_numpy()
+            reg_i = np.nan_to_num(reg_i, nan=0)
+            if average_regressors:
+                reg_i_process = sig.convolve(reg_i, window, mode="valid")[..., :-1]
+            else:
+                reg_i_process = np.zeros(
+                    (len(reg), len(use_regressors) * winsize, len(xs))
+                )
+                for j, x in enumerate(range(begin, end)):
+                    beg_ind = int(x - half_win)
+                    end_ind = int(x + half_win)
+                    x_mask = np.logical_and(xs >= beg_ind, xs < end_ind)
+                    feats = reg_i[:, :, x_mask]
+                    feats_r = np.reshape(feats, (feats.shape[0], -1))
+                    reg_i_process[:, :, j + half_win] = feats_r
+                reg_i_process = reg_i_process[..., half_win:-half_win]
+            reg_i_process = reg_i_process[..., ::stepsize]
+            reg_i_process = np.expand_dims(np.swapaxes(reg_i_process, 0, 1), 1)
+            reg_all.append(reg_i_process)
+            
+        return reg_all, xs_smooth
+
     def get_time_features(
-            self,
-            n_xs,
-            skl_axes=False,
-            trial_field=None,
-            model=skp.SplineTransformer,
-            knots_per_trial=.01,
-            degree=2,
-            use_trs=None
+        self,
+        n_xs,
+        skl_axes=False,
+        trial_field=None,
+        model=skp.SplineTransformer,
+        knots_per_trial=0.01,
+        degree=2,
+        use_trs=None,
     ):
         if trial_field is None:
             inds = list(row.data.index for _, row in self.data.iterrows())
@@ -881,7 +947,7 @@ class Dataset(object):
         for ind_group in inds:
             ind_group = np.expand_dims(ind_group, 1)
             if use_trs is None:
-                n_knots = max(int(np.round(len(ind_group)*knots_per_trial)), 2)
+                n_knots = max(int(np.round(len(ind_group) * knots_per_trial)), 2)
                 m = model(n_knots, degree)
                 use_trs = m.fit(ind_group)
             if ind_group.shape[0] == 0:
@@ -895,7 +961,7 @@ class Dataset(object):
                 feat_ig = np.expand_dims(np.swapaxes(feat_ig, 0, 1), 1)
             feats.append(feat_ig)
         return feats, use_trs
-    
+
     def get_dec_pops(
         self,
         winsize,
@@ -912,6 +978,8 @@ class Dataset(object):
         time_field=None,
         rel_fields=None,
         return_rel=False,
+        use_regressors=None,
+        average_regressors=True,
     ):
         try:
             assert len(tzfs) == len(masks)
@@ -939,6 +1007,8 @@ class Dataset(object):
                     time_zero_field=tzfs[i],
                     shuffle_trials=shuffle_trials,
                     regions=regions,
+                    use_regressors=use_regressors,
+                    average_regressors=average_regressors,
                 )
                 pop_m, xs = out_m
                 if rel_fields is not None:
@@ -948,10 +1018,12 @@ class Dataset(object):
                     rvs_m = list(np.expand_dims(x.T, 1) for x in rvs_m)
                 else:
                     rvs_m = (None,) * len(self.data)
-                    
+
                 if use_time and not shuffle_trials:
                     t_feat, _ = cat_m.get_time_features(
-                        len(xs), skl_axes=True, use_trs=trs,
+                        len(xs),
+                        skl_axes=True,
+                        use_trs=trs,
                     )
                     pops = []
                     for i, pop in enumerate(pop_m):
@@ -960,7 +1032,7 @@ class Dataset(object):
             else:
                 pop_m = (None,) * len(self.data)
                 rvs_m = (None,) * len(self.data)
-            
+
             out_pops.append(pop_m)
             out_rvs.append(rvs_m)
 
@@ -1031,7 +1103,7 @@ class Dataset(object):
         regions=None,
         combine=False,
         n_pseudo=500,
-        **kwargs
+        **kwargs,
     ):
         out = self.get_dec_pops(
             winsize,
@@ -1111,7 +1183,7 @@ class Dataset(object):
             tzfs=tzfs,
             repl_nan=repl_nan,
             shuffle_trials=shuffle_trials,
-            regions=regions
+            regions=regions,
         )
         pops_pseudo = self.sample_pseudo_pops(
             *pops,
@@ -1124,13 +1196,13 @@ class Dataset(object):
         return xs, pops_pseudo
 
     def sample_pseudo_pops(
-            self,
-            *pops,
-            min_trials=10,
-            resamples=10,
-            skl_axs=True,
-            same_n_trls=True,
-            subsample_neurons=None,
+        self,
+        *pops,
+        min_trials=10,
+        resamples=10,
+        skl_axs=True,
+        same_n_trls=True,
+        subsample_neurons=None,
     ):
         trls_list = []
         for pop in pops:
@@ -1151,15 +1223,14 @@ class Dataset(object):
             pops_pseudo.append(pop_i)
         return pops_pseudo
 
-
     def neuron_trial_tradeoff(
-            self,
-            m1,
-            m2,
-            time_zero_field=None, 
-            repl_nan=False,
-            regions=None,
-            **kwargs,
+        self,
+        m1,
+        m2,
+        time_zero_field=None,
+        repl_nan=False,
+        regions=None,
+        **kwargs,
     ):
         out = self.get_dec_pops(
             500,
@@ -1188,7 +1259,7 @@ class Dataset(object):
             mask = np.logical_and(m1, m2)
             n_dims[i] = np.sum(d_n[mask])
         return trl_threshs, n_dims
-    
+
     def decode_masks(
         self,
         m1,
@@ -1227,12 +1298,16 @@ class Dataset(object):
         subsample_neurons=None,
         ret_full_dict=False,
         rel_fields=None,
-        **kwargs
+        use_regressors=None,
+        average_regressors=True,
+        **kwargs,
     ):
         if rel_fields is not None and pseudo:
             raise IOError(
-                ("pseudopopulation decoding does not support carrying relevant fields"
-                 "which are specified, {}").format(rel_fields)
+                (
+                    "pseudopopulation decoding does not support carrying relevant "
+                    "fields which are specified, {}"
+                ).format(rel_fields)
             )
 
         out = self.get_dec_pops(
@@ -1250,6 +1325,8 @@ class Dataset(object):
             shuffle_trials=shuffle_trials,
             use_time=use_time,
             rel_fields=rel_fields,
+            use_regressors=use_regressors,
+            average_regressors=average_regressors,
             return_rel=True,
         )
         xs, pops, rel_fields = out
@@ -1370,10 +1447,10 @@ class Dataset(object):
                 cond2 = False
             if p1.shape[0] == 0 or cond1 or cond2:
                 out = {
-                    "score": np.zeros((n_folds, len(xs)))*np.nan,
-                    "score_gen": np.zeros((n_folds, len(xs)))*np.nan,
-                    "predictions": np.zeros((n_folds, 0, len(xs)))*np.nan,
-                    "targets": np.zeros((n_folds, 0, len(xs)))*np.nan,
+                    "score": np.zeros((n_folds, len(xs))) * np.nan,
+                    "score_gen": np.zeros((n_folds, len(xs))) * np.nan,
+                    "predictions": np.zeros((n_folds, 0, len(xs))) * np.nan,
+                    "targets": np.zeros((n_folds, 0, len(xs))) * np.nan,
                 }
             else:
                 if d1 is not None and d1.shape[2] == 0:
@@ -1399,13 +1476,13 @@ class Dataset(object):
                     rel_c2=rel_c2[i],
                     gen_rel_c1=rel_g_c1[i],
                     gen_rel_c2=rel_g_c2[i],
-                    **kwargs
+                    **kwargs,
                 )
             outs[i] = out.pop("score")
             if not combine and (decode_m1 is not None or decode_m2 is not None):
                 outs_gen[i] = out.pop("score_gen")
             pop_dicts[i] = out
-                
+
         if ret_pops:
             out = (outs, xs, pop1, pop2)
             add = tuple(di for di in (dec1, dec2) if di[0] is not None and not combine)
