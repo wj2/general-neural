@@ -162,7 +162,56 @@ def make_data_labels(*data):
     return data_all, labels_all
 
 
-def make_model_pipeline(
+class ModelPipelineTC:
+    def __init__(self, *args, pipes=None, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self.pipes = pipes
+
+    def fit(self, X, y=None, **kwargs):
+        pipes = []
+        for i in range(X.shape[-1]):
+            pipe = _make_model_pipeline(*self.args, **self.kwargs)
+            pipe = pipe.fit(X[..., i], y, **kwargs)
+            pipes.append(pipe)
+        out = ModelPipelineTC(*self.args, pipes=pipes, **self.kwargs)
+        self.pipes = pipes
+        return out
+
+    def transform(self, X, **kwargs):
+        if self.pipes is None:
+            raise IOError("the model has not been fit")
+        elif X.shape[-1] != len(self.pipes):
+            raise IOError(
+                "the fit data had a different number of time points "
+                "{} than the new data {}".format(len(self.pipes), X.shape[-1])
+            )
+        trs = []
+        n_feats = []
+        for i in range(X.shape[-1]):
+            trs_i = self.pipes[i].transform(X[..., i], **kwargs)
+            n_feats.append(trs_i.shape[1])
+            trs.append(trs_i)
+        out = np.zeros((trs[0].shape[0], max(n_feats), len(trs)))
+        for i in range(X.shape[-1]):
+            out[:, :n_feats[i], i] = trs[i]
+        return out
+
+    def fit_transform(self, X, y=None, **kwargs):
+        self.fit(X, y, **kwargs)
+        out = self.transform(X)
+        return out
+    
+
+def make_model_pipeline(*args, tc=False, **kwargs):
+    if tc:
+        out = ModelPipelineTC(*args, **kwargs)
+    else:
+        out = _make_model_pipeline(*args, **kwargs)
+    return out
+
+
+def _make_model_pipeline(
     model=None,
     norm=True,
     pca=None,
@@ -2195,6 +2244,8 @@ def fold_skl(
         model_kwargs.update(params)
         params = model_kwargs
     c_flat, labels = _combine_samples(c1, c2)
+    if "dual" not in params.keys() and model == sksvm.LinearSVC:
+        params["dual"] = "auto"
     pipe = make_model_pipeline(
         model=model,
         norm=norm,
