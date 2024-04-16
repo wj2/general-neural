@@ -1300,6 +1300,7 @@ class Dataset(object):
         rel_fields=None,
         use_regressors=None,
         average_regressors=True,
+        balance_fields=None,
         **kwargs,
     ):
         if rel_fields is not None and pseudo:
@@ -1309,7 +1310,13 @@ class Dataset(object):
                     "fields which are specified, {}"
                 ).format(rel_fields)
             )
-
+        if balance_fields is not None and rel_fields is not None:
+            raise IOError(
+                ("only one of rel_fields ({rf}) and balance_fields ({bf}) can be "
+                 "supplied".format(rf=rel_fields, bf=balance_fields))
+            )
+        elif balance_fields is not None:
+            rel_fields = balance_fields
         out = self.get_dec_pops(
             winsize,
             begin,
@@ -1476,6 +1483,7 @@ class Dataset(object):
                     rel_c2=rel_c2[i],
                     gen_rel_c1=rel_g_c1[i],
                     gen_rel_c2=rel_g_c2[i],
+                    balance_rel_fields=balance_fields is not None,
                     **kwargs,
                 )
             outs[i] = out.pop("score")

@@ -24,9 +24,9 @@ import pickle
 
 import sklearn.base as skb
 import sklearn.utils as sku
+import imblearn.under_sampling as imb_us
 import joblib as jl
 
-# import general.decoders as gd
 import general.utility as u
 import general.nested_cv as ncv
 
@@ -45,7 +45,7 @@ class JaggedArray:
     @property
     def lengths(self):
         return list(len(group[0]) for group in self.args)
-        
+
     @property
     def minimum_length(self):
         return np.min(self.lengths)
@@ -65,9 +65,7 @@ class JaggedArray:
         samples = tuple([] for i in range(self.group_length))
         for group in self.args:
             if upsample or len(group[0]) >= n_concat:
-                group_rs = sku.resample(
-                    *group, replace=upsample, n_samples=n_concat
-                )
+                group_rs = sku.resample(*group, replace=upsample, n_samples=n_concat)
                 list(s.append(group_rs[i]) for i, s in enumerate(samples))
         out = list(np.concatenate(s, axis=self.concatenate_axis) for s in samples)
         return out
@@ -91,11 +89,12 @@ class JaggedArray:
                 arg_masks[i].append(np.sum(mask) >= require_trials)
                 cond_dict[tuple(cond)].append(list(el[mask] for el in arg))
         include = {i: np.all(v) for i, v in arg_masks.items()}
-        
+
         out_dict = {
             k: JaggedArray(
                 *list(v for i, v in enumerate(vs) if include[i]),
-                concatenate_axis=self.concatenate_axis)
+                concatenate_axis=self.concatenate_axis,
+            )
             for k, vs in cond_dict.items()
         }
         return out_dict
@@ -131,8 +130,12 @@ class BalancedShuffleSplit:
             yield np.array(tr_inds), np.array(te_inds)
 
 
-def zscore_tc(*pops, scaler=skp.StandardScaler, cat_axis=None,):
-    """ D x C x N x T """
+def zscore_tc(
+    *pops,
+    scaler=skp.StandardScaler,
+    cat_axis=None,
+):
+    """D x C x N x T"""
     if cat_axis is None:
         shape = pops[0].shape
         if len(shape) == 4:
@@ -194,14 +197,14 @@ class ModelPipelineTC:
             trs.append(trs_i)
         out = np.zeros((trs[0].shape[0], max(n_feats), len(trs)))
         for i in range(X.shape[-1]):
-            out[:, :n_feats[i], i] = trs[i]
+            out[:, : n_feats[i], i] = trs[i]
         return out
 
     def fit_transform(self, X, y=None, **kwargs):
         self.fit(X, y, **kwargs)
         out = self.transform(X)
         return out
-    
+
 
 def make_model_pipeline(*args, tc=False, **kwargs):
     if tc:
@@ -267,7 +270,7 @@ def nearest_decoder(
     accumulate_time=True,
     scoring=None,
     generate_confusion=False,
-    **kwargs
+    **kwargs,
 ):
     pipe = make_model_pipeline(model, norm=norm, pca=pre_pca)
     labels = np.concatenate(
@@ -338,7 +341,7 @@ def skl_model_target_dim_tc(
             func=func,
             out=out_j,
             keep_keys=keep_keys,
-            **kwargs
+            **kwargs,
         )
         for k, v in out_j.items():
             out[k][j] = v
@@ -447,8 +450,8 @@ def bin_spiketimes_3d(
     spk_times = []
     neur_inds = []
     trl_inds = []
-    ch_edges = np.arange(spts.shape[1] + 1) - .5
-    trl_edges = np.arange(spts.shape[0] + 1) - .5
+    ch_edges = np.arange(spts.shape[1] + 1) - 0.5
+    trl_edges = np.arange(spts.shape[0] + 1) - 0.5
     trl_inds = np.repeat(
         np.expand_dims(np.arange(spts.shape[0]), 1), spts.shape[1], axis=1
     )
@@ -746,7 +749,7 @@ def organize_spiking_data_pop(
     binsize,
     binstep=None,
     bhv_extract_func=None,
-    **kwargs
+    **kwargs,
 ):
     out = organize_spiking_data(
         data,
@@ -757,7 +760,7 @@ def organize_spiking_data_pop(
         binsize,
         binstep=binstep,
         bhv_extract_func=bhv_extract_func,
-        **kwargs
+        **kwargs,
     )
     if bhv_extract_func is not None:
         spks_conds, xs, bhv = out
@@ -912,8 +915,13 @@ def _null_snr(samps, ct=np.median, var=np.var, min_samps=2):
 def snr_tc(ns, central_tend=np.median, variance=np.var, boots=1000):
     n_neurs = len(ns[0])
     ns = np.array(ns, dtype=object)
-    def snr_func(x): return _compute_snr(x, central_tend, variance)
-    def null_snr_func(x): return _null_snr(x, central_tend, variance)
+
+    def snr_func(x):
+        return _compute_snr(x, central_tend, variance)
+
+    def null_snr_func(x):
+        return _null_snr(x, central_tend, variance)
+
     for i, k in enumerate(ns[0].keys()):
         if i == 0:
             t = ns[0][k].shape[1]
@@ -1214,7 +1222,7 @@ def svm_regression(
     pop=False,
     min_population=1,
     multi_cond=False,
-    **kwargs
+    **kwargs,
 ):
     spec_params = {"C": penalty, "max_iter": max_iter, "gamma": gamma, "kernel": kernel}
     if pop:
@@ -1240,7 +1248,7 @@ def svm_regression(
         model=model,
         pseudopop=pseudopop,
         collapse_time=collapse_time,
-        **kwargs
+        **kwargs,
     )
     return out
 
@@ -1253,7 +1261,7 @@ def pop_regression_timestan(
     pre_pca=None,
     impute_missing=False,
     pre_rescale=False,
-    **model_params
+    **model_params,
 ):
     x_len = pop.shape[-1]
     steps = []
@@ -1312,7 +1320,7 @@ def pop_regression_stan(
     pre_pca=0.99,
     impute_missing=False,
     do_arviz=False,
-    **model_params
+    **model_params,
 ):
     x_len = pop.shape[-1]
     comps = []
@@ -1363,7 +1371,7 @@ def pop_regression_skl(
     n_jobs=-1,
     mean=True,
     impute_missing=False,
-    **model_params
+    **model_params,
 ):
     x_len = pop.shape[-1]
     tcs = np.zeros((folds_n, x_len))
@@ -1416,7 +1424,7 @@ def pop_regression(
     multi_cond=False,
     pseudopop=False,
     norm=True,
-    **kwargs
+    **kwargs,
 ):
     if not multi_cond:
         ds = (ds,)
@@ -1500,7 +1508,7 @@ def svm_decoding(
     min_population=1,
     multi_cond=False,
     nested=False,
-    **kwargs
+    **kwargs,
 ):
     spec_params = {
         "C": penalty,
@@ -1525,7 +1533,7 @@ def svm_decoding(
                 multi_cond=multi_cond,
                 min_population=min_population,
                 collapse_time=collapse_time,
-                **kwargs
+                **kwargs,
             )
 
         else:
@@ -1543,7 +1551,7 @@ def svm_decoding(
                 multi_cond=multi_cond,
                 min_population=min_population,
                 collapse_time=collapse_time,
-                **kwargs
+                **kwargs,
             )
     else:
         if nested:
@@ -1557,7 +1565,7 @@ def svm_decoding(
                 params=spec_params,
                 format_=format_,
                 model=model,
-                **kwargs
+                **kwargs,
             )
         else:
             out = decoding(
@@ -1574,7 +1582,7 @@ def svm_decoding(
                 format_=format_,
                 model=model,
                 collapse_time=collapse_time,
-                **kwargs
+                **kwargs,
             )
     return out
 
@@ -1597,7 +1605,7 @@ def decoding_nested_pop(
     multi_cond=False,
     norm=True,
     max_pop=5,
-    **kwargs
+    **kwargs,
 ):
     if not multi_cond:
         cat1 = (cat1,)
@@ -1650,7 +1658,7 @@ def decoding_pop(
     equal_fold=False,
     multi_cond=False,
     norm=True,
-    **kwargs
+    **kwargs,
 ):
     if not multi_cond:
         cat1 = (cat1,)
@@ -1714,7 +1722,7 @@ def decoding_pop(
                         params=params,
                         collapse_time=collapse_time,
                         equal_fold=equal_fold,
-                        **kwargs
+                        **kwargs,
                     )
                     tcs[i], _, _, ms[i], _ = out
             tcs_pops[k] = tcs
@@ -1738,7 +1746,7 @@ def decode_skl(
     verbose=False,
     class_weight="balanced",
     return_dists=False,
-    **model_kwargs
+    **model_kwargs,
 ):
     if params is None:
         params = model_kwargs
@@ -1820,7 +1828,7 @@ def _fit_model_preds(data, labels, estimators):
     for i, est in enumerate(estimators):
         scores = est.predict(data)
         out[i] = scores
-    return out    
+    return out
 
 
 def _eval_fit_models(data, labels, estimators, scoring=None):
@@ -1834,30 +1842,93 @@ def _eval_fit_models(data, labels, estimators, scoring=None):
     return out
 
 
+class BalancedCV:
+    def __init__(
+        self,
+        *args,
+        sampler=None,
+        balance_test=False,
+        cv_type=skms.ShuffleSplit,
+        **kwargs,
+    ):
+        self.cv = cv_type(*args, **kwargs)
+        if sampler is None:
+            sampler = imb_us.RandomUnderSampler()
+        self.sampler = sampler
+        self.balance_test = balance_test
+
+    def get_n_splits(self, *args, **kwargs):
+        return self.cv.get_n_splits(*args, **kwargs)
+
+    def get_metadata_routing(self):
+        return self.cv.get_metadata_routing()
+
+    def split(self, X, y=None, groups=None):
+        for tr_inds, te_inds in self.cv.split(X, y=y, groups=groups):
+            y_samped = y[tr_inds]
+            tr_inds = np.expand_dims(tr_inds, 1)
+            tr_inds_rs, _ = self.sampler.fit_resample(tr_inds, y_samped)
+            if self.balance_test:
+                y_te_samped = y[te_inds]
+                te_inds = np.expand_dims(te_inds, 1)
+                te_inds, _ = self.sampler.fit_resample(te_inds, y_te_samped)
+            tr_inds_rs = np.squeeze(tr_inds_rs)
+            te_inds = np.squeeze(te_inds)
+            yield tr_inds_rs, te_inds
+
+
 def _cv_wrapper(
-        model, X, y, rel_var=None, n_folds=20, test_frac=None, seed=None, **kwargs,
+    model,
+    X,
+    y,
+    rel_var=None,
+    n_folds=20,
+    test_frac=None,
+    seed=None,
+    balance_rel_fields=False,
+    balance_test=False,
+    **kwargs,
 ):
-    if test_frac is None:
-        splitter = skms.KFold(n_folds)
-        extra_splitter = skms.KFold(n_folds)
+    rng = np.random.default_rng()
+    rand_state = rng.integers(2**32 - 1)
+    if balance_rel_fields:
+        if rel_var is None:
+            raise IOError("told to balance rel_fields but did not provide rel_fields")
+        y_use_split = rel_var
+        cv_type = BalancedCV
+        if test_frac is None:
+            cv_kwarg = {"cv_type": skms.KFold, "balance_test": balance_test}
+        else:
+            cv_kwarg = {
+                "cv_type": skms.ShuffleSplit,
+                "test_size": test_frac,
+                "balance_test": balance_test,
+            }
     else:
-        rng = np.random.default_rng()
-        rand_state = rng.integers(2**32 - 1)
-        splitter = skms.ShuffleSplit(
-            n_folds, test_size=test_frac, random_state=rand_state,
-        )
-        extra_splitter = skms.ShuffleSplit(
-            n_folds, test_size=test_frac, random_state=rand_state,
-        )
+        y_use_split = y
+        if test_frac is None:
+            cv_type = skms.KFolds
+            cv_kwarg = {}
+        else:
+            cv_type = skms.ShuffleSplit
+            cv_kwarg = {"test_size": test_frac}
+    splitter = cv_type(n_folds, random_state=rand_state, **cv_kwarg)
+    extra_splitter = cv_type(n_folds, random_state=rand_state, **cv_kwarg)
+    cv_use = splitter.split(X, y_use_split)
 
     keep_ests = kwargs.pop("return_estimator")
     out = skms.cross_validate(
-        model, X, y, cv=splitter, return_estimator=True, **kwargs,
+        model,
+        X,
+        y,
+        cv=cv_use,
+        return_estimator=True,
+        **kwargs,
     )
     predictions = []
     targets = []
     rel_vars = []
-    for i, (_, te_inds) in enumerate(extra_splitter.split(X, y)):
+    for i, (_, te_inds) in enumerate(extra_splitter.split(X, y_use_split)):
         est = out["estimator"][i]
         pred = est.predict(X[te_inds])
         targ = y[te_inds]
@@ -1878,21 +1949,21 @@ rand_splitter = skms.ShuffleSplit
 
 
 def fold_skl_continuous(
-        c_flat,
-        labels,
-        folds_n=20,
-        model=sklm.Ridge,
-        params=None,
-        norm=True,
-        shuffle=False,
-        pre_pca=0.99,
-        n_jobs=-1,
-        verbose=False,
-        time_accumulate=False,
-        gen_cs=None,
-        test_prop=None,
-        mean=True,
-        **model_kwargs
+    c_flat,
+    labels,
+    folds_n=20,
+    model=sklm.Ridge,
+    params=None,
+    norm=True,
+    shuffle=False,
+    pre_pca=0.99,
+    n_jobs=-1,
+    verbose=False,
+    time_accumulate=False,
+    gen_cs=None,
+    test_prop=None,
+    mean=True,
+    **model_kwargs,
 ):
     if test_prop is None:
         test_prop = 1 / folds_n
@@ -1931,9 +2002,9 @@ def fold_skl_continuous(
 
 
 def fold_skl_multi(
-        *cs,
-        gen_cs=None,
-        **kwargs,
+    *cs,
+    gen_cs=None,
+    **kwargs,
 ):
     # c1 is shape (neurs, inner_conds, trials, time_points)
     c_flat, labels = _combine_samples(*cs, norm_labels=True)
@@ -1945,7 +2016,7 @@ def fold_skl_multi(
 def _distance_scorer(est, X, y):
     dists = est.decision_function(X)
     flips = np.sign(y - np.mean(y))
-    return np.mean(dists*flips)
+    return np.mean(dists * flips)
 
 
 def _nominal_fold(
@@ -2007,7 +2078,7 @@ def _nominal_fold(
             if j == 0:
                 rvs = np.zeros((folds_n,) + rv_j.shape[1:] + (x_len,), dtype=object)
             rvs[..., j] = rv_j
-        
+
         if c_gen is not None:
             if time_accumulate:
                 gen_list = list(c_gen[..., k] for k in range(j + 1))
@@ -2015,7 +2086,10 @@ def _nominal_fold(
             else:
                 gen_data = c_gen[..., j].T
             tcs_gen[:, j] = _eval_fit_models(
-                gen_data, l_gen, out["estimator"], scoring=scoring,
+                gen_data,
+                l_gen,
+                out["estimator"],
+                scoring=scoring,
             )
             pred_gen[..., j] = _fit_model_preds(gen_data, l_gen, out["estimator"])
     if mean:
@@ -2030,7 +2104,7 @@ def _nominal_fold(
         out["rel_var_gen"] = gen_rel_var
     if rel_var is not None:
         out["rel_var"] = rvs
-    
+
     return out
 
 
@@ -2096,9 +2170,11 @@ def _fit_and_score_pred(est, X, y, tr_inds, te_inds, return_estimator=True, **kw
 
 def _aggregate_dicts(dicts, num_fields=()):
     return {
-        key: np.asarray([prop[key] for prop in dicts])
-        if key in num_fields
-        else [prop[key] for prop in dicts]
+        key: (
+            np.asarray([prop[key] for prop in dicts])
+            if key in num_fields
+            else [prop[key] for prop in dicts]
+        )
         for key in dicts[0].keys()
     }
 
@@ -2113,7 +2189,7 @@ def cross_validate_collapse_tc(
     verbose=False,
     cv=None,
     num_fields=("train_score", "test_score"),
-    **kwargs
+    **kwargs,
 ):
     """
     est  : implements the fit method
@@ -2144,7 +2220,7 @@ def cross_validate_wrapper(
     verbose=False,
     cv=None,
     num_fields=("train_score", "test_score", "test_targ", "test_pred"),
-    **kwargs
+    **kwargs,
 ):
     """
     est  : implements the fit method
@@ -2183,7 +2259,9 @@ def _time_collapsed_fold(
         rng = np.random.default_rng()
         rand_state = rng.integers(2**32 - 1)
         splitter = skms.ShuffleSplit(
-            n_folds, test_size=test_frac, random_state=rand_state,
+            n_folds,
+            test_size=test_frac,
+            random_state=rand_state,
         )
 
     x_len = c_flat.shape[-1]
@@ -2191,14 +2269,21 @@ def _time_collapsed_fold(
     tcs_gen = np.zeros_like(tcs)
     c_flat = np.swapaxes(c_flat, 0, 1)
     out = cross_validate_collapse_tc(
-        pipe, c_flat, labels, time_mask=time_mask, cv=splitter, n_folds=n_folds,
+        pipe,
+        c_flat,
+        labels,
+        time_mask=time_mask,
+        cv=splitter,
+        n_folds=n_folds,
     )
     tcs = out["test_score"]
     if c_gen is not None:
         for j in range(x_len):
             gen_data = c_gen[..., j].T
             tcs_gen[:, j] = _eval_fit_models(
-                gen_data, l_gen, out["estimator"], 
+                gen_data,
+                l_gen,
+                out["estimator"],
             )
     if mean:
         tcs = np.mean(tcs, axis=0)
@@ -2234,7 +2319,8 @@ def fold_skl(
     time_mask=None,
     collapse_time=False,
     ret_projections=False,
-    **model_kwargs
+    balance_rel_fields=False,
+    **model_kwargs,
 ):
     if test_prop is None:
         test_prop = 1 / folds_n
@@ -2258,7 +2344,7 @@ def fold_skl(
         rel_flat = rel_flat.T
     else:
         rel_flat = None
-    
+
     if gen_c1 is not None or gen_c2 is not None:
         c_gen, l_gen = _combine_samples(
             *list(c for c in (gen_c1, gen_c2) if c is not None)
@@ -2306,6 +2392,7 @@ def fold_skl(
             test_frac=test_prop,
             rel_var=rel_flat,
             gen_rel_var=gen_rel,
+            balance_rel_fields=balance_rel_fields,
         )
     return out
 
@@ -2368,7 +2455,7 @@ def decoding_nested(
     latency=False,
     sample_pseudo=False,
     n_pseudo=200,
-    **kwargs
+    **kwargs,
 ):
     if format_:
         if not multi_cond:
@@ -2432,7 +2519,7 @@ def decoding(
     rand_splitter=rand_splitter,
     cat1_gen=None,
     cat2_gen=None,
-    **kwargs
+    **kwargs,
 ):
     if format_:
         if not multi_cond:
@@ -2448,7 +2535,7 @@ def decoding(
             *cats_all,
             require_trials=require_trials,
             use_avail_trials=use_avail_trials,
-            reduce_required=reduce_required
+            reduce_required=reduce_required,
         )
         require_trials, x_len = out[-2:]
         cat1_f, cat2_f = out[:2]
@@ -2579,7 +2666,7 @@ def decoding(
                     params=params,
                     collapse_time=collapse_time,
                     equal_fold=equal_fold,
-                    **kwargs
+                    **kwargs,
                 )
                 tcs[i], _, _, ms[i], inter[i] = out
     out = (tcs, cat1_f, cat2_f, ms, inter)
@@ -2627,7 +2714,7 @@ def decode_pseudo(
     pre_pca=0.99,
     cat1_gen=None,
     cat2_gen=None,
-    **kwargs
+    **kwargs,
 ):
     train_samp = np.concatenate((c1_tr, c2_tr), axis=1)
     test_samp = np.concatenate((c1_te, c2_te), axis=1)
@@ -2681,7 +2768,7 @@ def decode_pseudo(
         pre_pca=pre_pca,
         gen_samp=gen_samp,
         gen_labels=gen_labels,
-        **kwargs
+        **kwargs,
     )
     return out
 
@@ -2717,7 +2804,7 @@ def svm_cross_decoding(
     multi_cond=False,
     use_avail_trials=True,
     resample=100,
-    **kwargs
+    **kwargs,
 ):
     params = {"C": penalty, "max_iter": max_iter, "gamma": gamma, "kernel": kernel}
     if kernel != "linear":
@@ -2951,7 +3038,7 @@ def glm_fit_full(
     with_replace=False,
     use_all=True,
     full_interactions=True,
-    **kwargs
+    **kwargs,
 ):
     marker_funcs = (marker_func,) * len(constr_funcs)
     out = organize_spiking_data(
@@ -2963,7 +3050,7 @@ def glm_fit_full(
         binsize,
         binstep,
         min_spks=min_spks,
-        **kwargs
+        **kwargs,
     )
     spks, xs = out
     out = glm_fitting_diff_trials(

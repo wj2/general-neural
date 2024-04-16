@@ -33,9 +33,9 @@ monthdict = {
 }
 
 
-def format_sirange(high, low, form=":.2f"):
-    s = "\\SIrange{{{low" + form + "}}}{{{high" + form + "}}}{{}}"
-    return s.format(high=high, low=low)
+def format_sirange(high, low, units="", form=":.2f"):
+    s = "\\SIrange{{{low" + form + "}}}{{{high" + form + "}}}{{{units}}}"
+    return s.format(high=high, low=low, units=units)
 
 
 def get_matching_files(
