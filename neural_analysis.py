@@ -1864,6 +1864,8 @@ class BalancedCV:
         return self.cv.get_metadata_routing()
 
     def split(self, X, y=None, groups=None):
+        if len(y.shape) > 1 and y.shape[1] > 1:
+            _, y = np.unique(y, axis=0, return_inverse=True)
         for tr_inds, te_inds in self.cv.split(X, y=y, groups=groups):
             y_samped = y[tr_inds]
             tr_inds = np.expand_dims(tr_inds, 1)
