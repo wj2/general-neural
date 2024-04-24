@@ -1317,6 +1317,14 @@ class Dataset(object):
             )
         elif balance_fields is not None:
             rel_fields = balance_fields
+        if u.check_list(time_zero_field) and len(time_zero_field) == 2:
+            tzf1, tzf2 = time_zero_field
+        else:
+            tzf1, tzf2 = time_zero_field, time_zero_field
+        if u.check_list(decode_tzf) and len(decode_tzf) == 2:
+            decode_tzf1, decode_tzf2 = decode_tzf
+        else:
+            decode_tzf1, decode_tzf2 = decode_tzf, decode_tzf
         out = self.get_dec_pops(
             winsize,
             begin,
@@ -1326,7 +1334,7 @@ class Dataset(object):
             m2,
             decode_m1,
             decode_m2,
-            tzfs=(time_zero_field, time_zero_field, decode_tzf, decode_tzf),
+            tzfs=(tzf1, tzf2, decode_tzf1, decode_tzf2),
             repl_nan=repl_nan,
             regions=regions,
             shuffle_trials=shuffle_trials,

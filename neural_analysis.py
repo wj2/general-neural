@@ -1831,6 +1831,14 @@ def _fit_model_preds(data, labels, estimators):
     return out
 
 
+def _fit_model_proj(data, estimators):
+    out = np.zeros((len(estimators), data.shape[0]))
+    for i, est in enumerate(estimators):
+        projs = est.decision_function(data)
+        out[i] = projs
+    return out
+
+
 def _eval_fit_models(data, labels, estimators, scoring=None):
     out = np.zeros(len(estimators))
     for i, est in enumerate(estimators):
@@ -1889,6 +1897,7 @@ def _cv_wrapper(
     seed=None,
     balance_rel_fields=False,
     balance_test=False,
+    return_projection=False,
     **kwargs,
 ):
     rng = np.random.default_rng()
@@ -1930,6 +1939,7 @@ def _cv_wrapper(
     predictions = []
     targets = []
     rel_vars = []
+    proj = []
     for i, (_, te_inds) in enumerate(extra_splitter.split(X, y_use_split)):
         est = out["estimator"][i]
         pred = est.predict(X[te_inds])
@@ -1938,8 +1948,12 @@ def _cv_wrapper(
         targets.append(targ)
         if rel_var is not None:
             rel_vars.append(rel_var[te_inds])
+        if return_projection:
+            proj.append(est.decision_function(X[te_inds]))
     out["predictions"] = np.array(predictions)
     out["targets"] = np.array(targets)
+    if return_projection:
+        out["projection"] = np.array(proj)
     if rel_var is not None:
         out["rel_vars"] = np.array(rel_vars)
     if not keep_ests:
@@ -2036,6 +2050,7 @@ def _nominal_fold(
     ret_projections=False,
     rel_var=None,
     gen_rel_var=None,
+    return_projection=False,
     **kwargs,
 ):
     x_len = c_flat.shape[-1]
@@ -2043,18 +2058,20 @@ def _nominal_fold(
     tcs_gen = np.zeros_like(tcs)
     if c_gen is not None:
         pred_gen = np.zeros((folds_n, c_gen.shape[1], x_len))
+        pred_gen_proj = np.zeros_like(pred_gen)
     if ret_projections:
         scoring = _distance_scorer
     else:
         scoring = None
     ests = np.zeros((folds_n, x_len), dtype=object)
+    projs = []
     for j in range(x_len):
         if time_accumulate:
             in_list = list(c_flat[..., k] for k in range(j + 1))
             in_data = np.concatenate(in_list, axis=0).T
         else:
             in_data = c_flat[..., j].T
-        out = _cv_wrapper(
+        out_j = _cv_wrapper(
             pipe,
             in_data,
             labels,
@@ -2064,19 +2081,21 @@ def _nominal_fold(
             return_estimator=True,
             scoring=scoring,
             rel_var=rel_var,
+            return_projection=return_projection,
             **kwargs,
         )
-        tcs[:, j] = out["test_score"]
-        ests[:, j] = out["estimator"]
-        pred = out["predictions"]
-        targ = out["targets"]
+        tcs[:, j] = out_j["test_score"]
+        ests[:, j] = out_j["estimator"]
+        pred = out_j["predictions"]
+        targ = out_j["targets"]
+        projs.append(out_j["projection"])
         if j == 0:
             preds = np.zeros((folds_n, pred.shape[1], x_len))
             targs = np.zeros_like(preds)
         preds[..., j] = pred
         targs[..., j] = targ
         if rel_var is not None:
-            rv_j = out["rel_vars"]
+            rv_j = out_j["rel_vars"]
             if j == 0:
                 rvs = np.zeros((folds_n,) + rv_j.shape[1:] + (x_len,), dtype=object)
             rvs[..., j] = rv_j
@@ -2090,18 +2109,28 @@ def _nominal_fold(
             tcs_gen[:, j] = _eval_fit_models(
                 gen_data,
                 l_gen,
-                out["estimator"],
+                out_j["estimator"],
                 scoring=scoring,
             )
-            pred_gen[..., j] = _fit_model_preds(gen_data, l_gen, out["estimator"])
+            pred_gen[..., j] = _fit_model_preds(gen_data, l_gen, out_j["estimator"])
+            pred_gen_proj[..., j] = _fit_model_proj(gen_data, out_j["estimator"])
+    projections = np.stack(projs, axis=1)
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
-    out = {"score": tcs, "predictions": preds, "targets": targs, "estimators": ests}
+    out = {
+        "score": tcs,
+        "predictions": preds,
+        "targets": targs,
+        "estimators": ests,
+        "projection": projections,
+    }
     if c_gen is not None:
         out["score_gen"] = tcs_gen
         out["predictions_gen"] = pred_gen
         out["labels_gen"] = l_gen
+        if return_projection:
+            out["projection_gen"] = pred_gen_proj
     if gen_rel_var is not None:
         out["rel_var_gen"] = gen_rel_var
     if rel_var is not None:
@@ -2116,6 +2145,19 @@ def apply_estimators(estimators, pop, labels):
         est_ij = estimators[i, j]
         out[i, j] = est_ij.score(pop[..., j].T, labels)
     return out
+
+
+def project_on_estimators(estimators, pop):
+    out = np.zeros(estimators.shape + (pop.shape[1],))
+    for i, j in u.make_array_ind_iterator(estimators.shape):
+        est_ij = estimators[i, j]
+        out[i, j] = est_ij.decision_function(pop[..., j].T)
+    return out
+
+
+def project_on_estimators_discrete(estimators, *pops):
+    c_flat, _ = _combine_samples(*pops)
+    return project_on_estimators(estimators, c_flat)
 
 
 def apply_estimators_discrete(estimators, *pops):
@@ -2321,6 +2363,7 @@ def fold_skl(
     time_mask=None,
     collapse_time=False,
     ret_projections=False,
+    return_projection=False,
     balance_rel_fields=False,
     **model_kwargs,
 ):
@@ -2395,6 +2438,7 @@ def fold_skl(
             rel_var=rel_flat,
             gen_rel_var=gen_rel,
             balance_rel_fields=balance_rel_fields,
+            return_projection=return_projection,
         )
     return out
 

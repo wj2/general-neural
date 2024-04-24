@@ -33,6 +33,11 @@ monthdict = {
 }
 
 
+def format_samps_sirange(samps, axis=0, withmean=True, perc=95, **kwargs):
+    high, low = conf_interval(samps, perc=perc, axis=axis, withmean=withmean)[:, 0]
+    return format_sirange(high, low, **kwargs)
+
+
 def format_sirange(high, low, units="", form=":.2f"):
     s = "\\SIrange{{{low" + form + "}}}{{{high" + form + "}}}{{{units}}}"
     return s.format(high=high, low=low, units=units)
