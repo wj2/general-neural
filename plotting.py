@@ -734,6 +734,13 @@ def make_linear_cmap(b1, b2=None, name=""):
     return cmap
 
 
+def make_discrete_cmap(*colors, orig=(1, 1, 1, 1)):
+    colors_full = [np.array(orig)]
+    colors_full.extend(colors)
+    colors_arr = np.stack(colors_full, axis=0)
+    return mpl.colors.ListedColormap(colors_arr)
+
+
 def set_ylim(ax, low=None, up=None):
     return _set_lim(ax.get_ylim, ax.set_ylim, low=low, up=up)
 

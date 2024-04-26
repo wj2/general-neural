@@ -1834,7 +1834,7 @@ def _fit_model_preds(data, labels, estimators):
 def _fit_model_proj(data, estimators):
     out = np.zeros((len(estimators), data.shape[0]))
     for i, est in enumerate(estimators):
-        projs = est.decision_function(data)
+        projs = est.decision_function(data) 
         out[i] = projs
     return out
 
@@ -2088,7 +2088,8 @@ def _nominal_fold(
         ests[:, j] = out_j["estimator"]
         pred = out_j["predictions"]
         targ = out_j["targets"]
-        projs.append(out_j["projection"])
+        if return_projection:
+            projs.append(out_j["projection"])
         if j == 0:
             preds = np.zeros((folds_n, pred.shape[1], x_len))
             targs = np.zeros_like(preds)
@@ -2114,7 +2115,6 @@ def _nominal_fold(
             )
             pred_gen[..., j] = _fit_model_preds(gen_data, l_gen, out_j["estimator"])
             pred_gen_proj[..., j] = _fit_model_proj(gen_data, out_j["estimator"])
-    projections = np.stack(projs, axis=1)
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
@@ -2123,8 +2123,10 @@ def _nominal_fold(
         "predictions": preds,
         "targets": targs,
         "estimators": ests,
-        "projection": projections,
     }
+    if return_projection:
+        projections = np.stack(projs, axis=1)
+        out["projection"] = projections
     if c_gen is not None:
         out["score_gen"] = tcs_gen
         out["predictions_gen"] = pred_gen
