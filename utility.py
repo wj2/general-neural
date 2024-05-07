@@ -33,6 +33,27 @@ monthdict = {
 }
 
 
+def make_trs_matrix(m, n, corr_groups=None):
+    """ m is output domain, n is input """
+    rng = np.random.default_rng()
+    if corr_groups is None:
+        corr_groups = {}
+
+    if m >= n:
+        trs_mat = spla.orth(
+            rng.normal(size=(m, m))
+        )[:, :n]
+    else:
+        trs_mat = rng.normal(size=(m, n))
+    trs_mat = make_unit_vector(trs_mat)
+    for (i1, i2), t in corr_groups.items():
+        v1 = trs_mat[:, i1]
+        v2 = trs_mat[:, i2]
+        new_v = t * v1 + np.sqrt(1 - t ** 2) * v2
+        trs_mat[:, i2] = new_v
+    return trs_mat
+
+
 def format_samps_sirange(samps, axis=0, withmean=True, perc=95, **kwargs):
     high, low = conf_interval(samps, perc=perc, axis=axis, withmean=withmean)[:, 0]
     return format_sirange(high, low, **kwargs)
