@@ -18,6 +18,9 @@ class ResultSequence(object):
         except AttributeError:
             self.val = list(x)
 
+    def mask(self, m):
+        return ResultSequence(x[m[i]] for i, x in enumerate(self.val))
+
     def __hash__(self):
         hashable = tuple(tuple(x) for x in self.val)
         return hash(hashable)
@@ -160,6 +163,9 @@ class Dataset(object):
         self.population_cache = {}
         self.mask_pop_cache = {}
 
+    def reload(self):
+        return Dataset(self.data, seconds=self.seconds, sort=self.sort)
+
     @classmethod
     def from_dict(cls, sort_by=None, sort=True, seconds=False, **inputs):
         df = pd.DataFrame(data=inputs)
@@ -172,7 +178,7 @@ class Dataset(object):
     @classmethod
     def from_readfunc(cls, read_func, *args, seconds=False, sort_by=None, **kwargs):
         super_df = read_func(*args, **kwargs)
-        return cls.from_dict(seconds=seconds, sort_by=sort_by, **super_df)
+        return cls.from_dict(seconds=seconds, sort_by=sort_by, **super_df)        
 
     def __getitem__(self, key):
         try:
@@ -223,6 +229,20 @@ class Dataset(object):
             resp_arr = np.array(list(u.get_spks_window(spk, begin, end)))
             out.append(resp_arr)
         return out
+
+    def get_field_window(self, field, begin_field, end_field, offset=0):
+        field_entries = self[field]
+        begin = self[begin_field]
+        end = self[end_field]
+        out = []
+        for i, fe in enumerate(field_entries):
+            beg_inds = begin[i].to_numpy().astype(int)
+            end_inds = end[i].to_numpy().astype(int)
+            ranges_i = []
+            for j, fe_j in enumerate(fe):
+                ranges_i.append(fe_j[beg_inds[j]:end_inds[j]])
+            out.append(ranges_i)
+        return ResultSequence(out)
 
     def _get_spikerates(
         self,
@@ -970,6 +990,7 @@ class Dataset(object):
         stepsize,
         *masks,
         tzfs=None,
+        tzs=None,
         repl_nan=False,
         shuffle_trials=False,
         regions=None,
@@ -994,9 +1015,17 @@ class Dataset(object):
         for i, m in enumerate(masks):
             if m is not None:
                 m = ResultSequence(m)
-                t_mask = self[tzfs[i]].rs_isnan().rs_not()
+                if tzs is None:
+                    tz_i = self[tzfs[i]]
+                else:
+                    tz_i = tzs[i]
+                t_mask = tz_i.rs_isnan().rs_not()
                 m = m.rs_and(t_mask)
                 cat_m = self.mask(m)
+                if tzs is not None:
+                    tz_i = tzs[i].mask(m)
+                else:
+                    tz_i = None
                 out_m = cat_m.get_neural_activity(
                     winsize,
                     begin,
@@ -1005,6 +1034,7 @@ class Dataset(object):
                     skl_axes=True,
                     repl_nan=repl_nan,
                     time_zero_field=tzfs[i],
+                    time_zero=tz_i,
                     shuffle_trials=shuffle_trials,
                     regions=regions,
                     use_regressors=use_regressors,
@@ -1275,6 +1305,7 @@ class Dataset(object):
         mean=False,
         shuffle=False,
         time_zero_field=None,
+        time_zeros=None,
         pseudo=False,
         min_trials_pseudo=10,
         resample_pseudo=10,
@@ -1285,6 +1316,7 @@ class Dataset(object):
         decode_m1=None,
         decode_m2=None,
         decode_tzf=None,
+        decode_tz=None,
         regions=None,
         combine=False,
         max_iter=10000,
@@ -1325,6 +1357,12 @@ class Dataset(object):
             decode_tzf1, decode_tzf2 = decode_tzf
         else:
             decode_tzf1, decode_tzf2 = decode_tzf, decode_tzf
+        if time_zeros is None:
+            tzs = None
+        else:
+            if decode_tz is None:
+                decode_tz = (None, None)
+            tzs = tuple(time_zeros) + tuple(decode_tz)
         out = self.get_dec_pops(
             winsize,
             begin,
@@ -1335,6 +1373,7 @@ class Dataset(object):
             decode_m1,
             decode_m2,
             tzfs=(tzf1, tzf2, decode_tzf1, decode_tzf2),
+            tzs=tzs,
             repl_nan=repl_nan,
             regions=regions,
             shuffle_trials=shuffle_trials,

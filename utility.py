@@ -14,6 +14,7 @@ import sklearn.decomposition as skd
 import sklearn.preprocessing as skp
 import sklearn.utils as sku
 import matplotlib.pyplot as plt
+import joblib as jl
 from pref_looking.eyes import analyze_eyemove
 from pref_looking.bias import get_look_img
 
@@ -78,6 +79,14 @@ def get_matching_files(
     return candidates
 
 
+def get_first_matching_file(folder, *patterns, **kwargs):
+    gen = load_folder_regex_generator(folder, *patterns, **kwargs)
+    out = None
+    for out in gen:
+        break
+    return out
+
+
 def load_folder_regex_generator(
         folder,
         *patterns,
@@ -86,6 +95,7 @@ def load_folder_regex_generator(
         open_str="rb",
         open_file=True,
         load_only_nth_files=None,
+        **kwargs,
 ):
     if load_only_nth_files is not None and not check_list(load_only_nth_files):
         load_only_nth_files = (load_only_nth_files,)
@@ -106,7 +116,7 @@ def load_folder_regex_generator(
                     inp = open(load_path, open_str)
                 else:
                     inp = load_path
-                out = load_func(inp)
+                out = load_func(inp, **kwargs)
                 yield load_path, gd, out
             nth_file = nth_file + 1
 
@@ -1467,7 +1477,7 @@ def normalize_periodic_range(
     elif const is None:
         const = 180
     m = np.mod(diff + const, 2 * const)
-    m = np.mod(m + 2 * const, 2 * const) - const
+    m = np.mod(m + 2 * const, 2 * const) - const + cent
     # diff = np.array(diff) - cent
     # g_mask = diff > const
     # l_mask = diff < -const
@@ -1526,6 +1536,33 @@ def dict_diff(d1, d2):
         if v1 != v2:
             diff_dict[k] = (v1, v2)
     return diff_dict
+
+
+def non_parallel_stack(
+    func, iter_args, *args, axis=0, n_jobs=-1, stack_func=np.stack, n_outs=1, **kwargs
+):
+    out = list(func(i_args, *args, **kwargs) for i_args in iter_args)    
+    outs = list(list(o_i[i] for o_i in out) for i in range(n_outs))
+    return list(stack_func(o_i, axis=axis) for o_i in outs)    
+
+
+def parallel_stack(
+    func, iter_args, *args, axis=0, n_jobs=-1, stack_func=np.stack, n_outs=1, **kwargs
+):
+    par = jl.Parallel(n_jobs=n_jobs)
+    out = par(jl.delayed(func)(i_args, *args, **kwargs) for i_args in iter_args)    
+    outs = list(list(o_i[i] for o_i in out) for i in range(n_outs))
+    return list(stack_func(o_i, axis=axis) for o_i in outs)
+    
+
+def radian_to_sincos(rs, axis=-1):
+    arr = np.stack((np.sin(rs), np.cos(rs)), axis=axis)
+    return arr
+
+
+def sincos_to_radian(s1, s2):
+    rs = np.arctan2(s1, s2)
+    return rs
 
 
 def distribute_imglogs(il_path, out_path):

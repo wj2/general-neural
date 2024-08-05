@@ -1887,7 +1887,7 @@ class BalancedCV:
             yield tr_inds_rs, te_inds
 
 
-def _cv_wrapper(
+def cv_wrapper(
     model,
     X,
     y,
@@ -1927,7 +1927,7 @@ def _cv_wrapper(
     extra_splitter = cv_type(n_folds, random_state=rand_state, **cv_kwarg)
     cv_use = splitter.split(X, y_use_split)
 
-    keep_ests = kwargs.pop("return_estimator")
+    keep_ests = kwargs.pop("return_estimator", False)
     out = skms.cross_validate(
         model,
         X,
@@ -2071,7 +2071,7 @@ def _nominal_fold(
             in_data = np.concatenate(in_list, axis=0).T
         else:
             in_data = c_flat[..., j].T
-        out_j = _cv_wrapper(
+        out_j = cv_wrapper(
             pipe,
             in_data,
             labels,

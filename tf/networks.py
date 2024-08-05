@@ -1,7 +1,8 @@
-
 import numpy as np
 import scipy.stats as sts
 import tensorflow as tf
+import tensorflow_hub as tfhub
+import keras_cv
 
 import general.tf.callbacks as gtfc
 import general.tf.losses as gtfl
@@ -12,32 +13,34 @@ tfkl = tf.keras.layers
 
 
 def train_network(
-        model, 
-        train_x,
-        train_targ,
-        epochs=15,
-        batch_size=100,
-        use_early_stopping=True,
-        es_patience=2,
-        es_field="val_loss",
-        track_mean_tasks=True,
-        track_dimensionality=False,
-        track_reps=True,
-        val_only_groups=None,
-        **kwargs,
+    model,
+    train_x,
+    train_targ,
+    epochs=15,
+    batch_size=100,
+    use_early_stopping=True,
+    es_patience=2,
+    es_field="val_loss",
+    track_mean_tasks=True,
+    track_dimensionality=False,
+    track_reps=True,
+    val_only_groups=None,
+    **kwargs,
 ):
-    
     if use_early_stopping:
         cb = tfk.callbacks.EarlyStopping(
-            monitor=es_field, mode="min", patience=es_patience,
+            monitor=es_field,
+            mode="min",
+            patience=es_patience,
         )
         curr_cb = kwargs.get("callbacks", [])
         curr_cb.append(cb)
         kwargs["callbacks"] = curr_cb
     if track_dimensionality:
         cb = kwargs.get("callbacks", [])
-        d_callback = gtfc.DimCorrCallback(model, mean_tasks=track_mean_tasks,
-                                     only_groups=val_only_groups)
+        d_callback = gtfc.DimCorrCallback(
+            model, mean_tasks=track_mean_tasks, only_groups=val_only_groups
+        )
         cb.append(d_callback)
         kwargs["callbacks"] = cb
     if track_reps:
@@ -50,11 +53,7 @@ def train_network(
         kwargs["callbacks"] = cb
 
     out = model.model.fit(
-        x=train_x,
-        y=train_targ,
-        epochs=epochs,
-        batch_size=batch_size,
-        **kwargs
+        x=train_x, y=train_targ, epochs=epochs, batch_size=batch_size, **kwargs
     )
     if track_dimensionality:
         out.history["dimensionality"] = d_callback.dim
@@ -65,43 +64,45 @@ def train_network(
             rep_callback.stim,
             rep_callback.inp_rep,
             rep_callback.targ,
-            np.stack(rep_callback.reps, axis=0)
+            np.stack(rep_callback.reps, axis=0),
         )
     return out
 
 
 def make_ff_network(
-        inp,
-        rep,
-        out,
-        act_func=tf.nn.relu,
-        layer_type=tfkl.Dense,
-        out_act=tf.nn.sigmoid,
-        hidden=(),
-        hidden_same_reg=True,
-        noise=0.1,
-        inp_noise=0.01,
-        kernel_reg_type=tfk.regularizers.L2,
-        kernel_reg_weight=0,
-        act_reg_type=tfk.regularizers.l2,
-        act_reg_weight=0,
-        constant_init=None,
-        kernel_init=None,
-        out_kernel_init=None,
-        out_constant_init=None,
-        use_bias=True,
-        **layer_params
+    inp,
+    rep,
+    out,
+    act_func=tf.nn.relu,
+    layer_type=tfkl.Dense,
+    out_act=tf.nn.sigmoid,
+    hidden=(),
+    hidden_same_reg=True,
+    noise=0.1,
+    inp_noise=0.01,
+    kernel_reg_type=tfk.regularizers.L2,
+    kernel_reg_weight=0,
+    act_reg_type=tfk.regularizers.l2,
+    act_reg_weight=0,
+    constant_init=None,
+    kernel_init=None,
+    out_kernel_init=None,
+    out_constant_init=None,
+    use_bias=True,
+    **layer_params,
 ):
     layer_list = []
     layer_list.append(tfkl.InputLayer(input_shape=inp))
     if kernel_init is not None:
         rep_kernel_init = tfk.initializers.RandomNormal(stddev=kernel_init)
-        hidden_kernel_inits = list(tfk.initializers.RandomNormal(stddev=kernel_init)
-                                  for _ in hidden)
+        hidden_kernel_inits = list(
+            tfk.initializers.RandomNormal(stddev=kernel_init) for _ in hidden
+        )
     elif constant_init is not None:
         rep_kernel_init = tfk.initializers.Constant(constant_init)
-        hidden_kernel_inits = list(tfk.initializers.Constant(constant_init)
-                                   for _ in hidden)
+        hidden_kernel_inits = list(
+            tfk.initializers.Constant(constant_init) for _ in hidden
+        )
     else:
         rep_kernel_init = tfk.initializers.GlorotUniform()
         hidden_kernel_inits = list(tfk.initializers.GlorotUniform() for _ in hidden)
@@ -135,7 +136,10 @@ def make_ff_network(
     models = []
     for i, ah in enumerate(hidden):
         lh_ah = layer_type(
-            ah, activation=act_func, kernel_initializer=hidden_kernel_inits[i], **use_ah,
+            ah,
+            activation=act_func,
+            kernel_initializer=hidden_kernel_inits[i],
+            **use_ah,
         )
         layer_list.append(lh_ah)
         models.append(tfk.Sequential(layer_list))
@@ -147,12 +151,12 @@ def make_ff_network(
         activity_regularizer=act_reg,
         kernel_initializer=rep_kernel_init,
         use_bias=use_bias,
-        **layer_params
+        **layer_params,
     )
     layer_list.append(lh)
     if noise > 0:
         layer_list.append(tfkl.GaussianNoise(noise))
-        
+
     rep = tfk.Sequential(layer_list)
     models.append(rep)
     layer_list.append(
@@ -169,14 +173,57 @@ def make_ff_network(
     return enc, models, rep, rep_out
 
 
+default_pre_model = (
+    "https://tfhub.dev/google/imagenet/mobilenet_v3_small_100_224/feature_vector/5",
+    (224, 224, 3),
+)
+
+
+class GenericPretrainedNetwork:
+    def __init__(self, model_path, model_input_shape, trainable=False, **kwargs):
+        if len(model_input_shape) == 2:
+            model_input_shape = model_input_shape + (3,)
+        self._model_img_shape = model_input_shape
+        model = keras_cv.models.MobileNetV3Backbone.from_preset(
+            "mobilenet_v3_small_imagenet"
+        )
+        self.encoder = model
+
+    @property
+    def output_size(self):
+        return self.encoder.output.shape[1]
+
+    @property
+    def input_shape(self):
+        return self._img_shape
+
+    def get_representation(self, samples, single=False):
+        if single:
+            samples = np.expand_dims(samples, 0)
+        samples = tf.image.resize_with_pad(samples, *self._model_img_shape[:2])
+        rep = self.encoder(samples)
+        if single:
+            rep = rep[0]
+        return rep
+
+
 class GenericFFNetwork:
     def __init__(
-            self, input_generator, n_rep, tasks=None, noise=.1, **kwargs,
+        self,
+        input_generator,
+        n_rep,
+        tasks=None,
+        noise=0.1,
+        **kwargs,
     ):
         self.input_generator = input_generator
         self.tasks = tasks
         out = make_ff_network(
-            input_generator.output_dim, n_rep, len(tasks), noise=noise, **kwargs,
+            input_generator.output_dim,
+            n_rep,
+            len(tasks),
+            noise=noise,
+            **kwargs,
         )
         self.layer_reps = out[1]
         self.rep_model = out[2]
@@ -185,9 +232,8 @@ class GenericFFNetwork:
         self.compiled = False
         self.n_layers = len(self.layer_reps)
         self.noise_std = noise
-        
-    def _compile(self, optimizer=None, loss=None, ignore_nan=True,
-                 lr=1e-3):
+
+    def _compile(self, optimizer=None, loss=None, ignore_nan=True, lr=1e-3):
         if optimizer is None:
             optimizer = tf.optimizers.Adam(learning_rate=lr)
         if loss is None:
@@ -241,7 +287,7 @@ class GenericFFNetwork:
         batch_size=200,
         n_val=10**3,
         verbose=False,
-        **kwargs
+        **kwargs,
     ):
         if not self.compiled:
             self._compile()
@@ -261,12 +307,13 @@ class GenericFFNetwork:
             **kwargs,
         )
         return out
-    
-    
+
+
 class IdentityNetwork(GenericFFNetwork):
     def __init__(self, input_generator, *args, tasks=None, **kwargs):
         def identity(x):
             return x
+
         if tasks is None:
             tasks = gtc.IdentityTask(1)
         super().__init__(input_generator, *args, tasks=tasks, **kwargs)

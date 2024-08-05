@@ -8,6 +8,7 @@ import pyro.distributions.constraints as constraints
 import pyro.distributions as dist
 from pyro import poutine
 
+
 def fit_model(
         features,
         targets,
@@ -23,6 +24,7 @@ def fit_model(
         n_samps=500,
         block_vars=None,
 ):
+    pyro.clear_param_store()
     if approach is None:
         approach = pyro.infer.SVI
     if loss is None:
@@ -49,8 +51,6 @@ def fit_model(
         render_distributions=True,
         render_params=True,
     )
-    
-    pyro.clear_param_store()    
     optimizer = approach(model, use_guide, optim, loss)
 
     losses = []
@@ -71,6 +71,7 @@ def fit_model(
         "guide": use_guide,
         "model_render": model_render,
         "guide_render": guide_render,
+        "losses": losses,
     }
     return out_dict
 

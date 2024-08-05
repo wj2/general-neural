@@ -482,6 +482,56 @@ def gen_circle_pts(n, r=1):
     return r * pts
 
 
+def plot_highdim_structure(
+    conds,
+    activity,
+    targs=None,
+    colors=None,
+    targ_colors=None,
+    trs=None,
+    ax=None,
+    plot_dist=1,
+    plot_all_lines=False,
+    **kwargs,
+):
+    if ax is None:
+        f, ax = plt.subplots(1, 1, subplot_kw={"projection": "3d"})
+    _, trs = plot_highdim_points(
+        activity,
+        ax=ax,
+        p=trs,
+        dim_red_mean=False,
+        colors=((0.1, 0.1, 0.1),),
+    )
+
+    if colors is None:
+        colors = (None,) * conds.shape[1]
+    conds = conds.astype(float)
+    for j, k in it.combinations(range(len(conds)), 2):
+        sum_jk = (conds[j] - conds[k]) ** 2
+        if sum(sum_jk) == plot_dist or plot_all_lines:
+            color_jk = colors[np.argmax(sum_jk)]
+            rel_points = np.stack((activity[j], activity[k]), axis=0)
+            plot_highdim_trace(
+                rel_points,
+                ax=ax,
+                p=trs,
+                colors=(color_jk,),
+            )
+    if targ_colors is None:
+        targ_colors = (None, None)
+    if targs is not None:
+        targ_activity = list(activity[targs == t] for t in np.unique(targs))
+        plot_highdim_points(
+            *targ_activity,
+            ax=ax,
+            p=trs,
+            colors=targ_colors,
+        )
+    return ax
+    
+
+
 def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
     axvals = np.array(axvals)
     if len(axvals) == val_len:
@@ -776,8 +826,8 @@ def hls_to_rgb(color):
     return _cs_convert(color, colorsys.hls_to_rgb)
 
 
-def get_prop_cycler():
-    cycler = plt.rcParams["axes.prop_cycle"]
+def get_prop_cycler(n_entries=None):
+    cycler = plt.rcParams["axes.prop_cycle"]            
     return cycler
 
 
