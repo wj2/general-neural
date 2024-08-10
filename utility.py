@@ -87,6 +87,37 @@ def get_first_matching_file(folder, *patterns, **kwargs):
     return out
 
 
+def load_runinds(folder, axis_keys, data_keys, *patterns, sub_key=None, **kwargs):
+    out_data = {k: {} for k in data_keys}
+    all_axes = {k: [] for k in axis_keys}
+    shape_dict = {}
+    for path, gd, data in load_folder_regex_generator(folder, *patterns, **kwargs):
+        if sub_key is not None:
+            args = data[sub_key]
+        else:
+            args = data
+        ax_pt = []
+        for ak in axis_keys:
+            all_axes[ak].append(args[ak])
+            ax_pt.append(args[ak])
+        ax_pt = tuple(ax_pt)
+        for dk in data_keys:
+            out_data[dk][ax_pt] = np.array(data[dk])
+            shape_dict[dk] = out_data[dk][ax_pt].shape
+
+    out_axes = {}
+    use_inds = {}
+    for k, oa in all_axes.items():
+        out_axes[k], use_inds[k] = np.unique(oa, return_inverse=True)
+    shape = tuple(len(ind) for ind in out_axes.values())
+    out_arrs = {k: np.zeros(shape + shape_dict[k]) for k in out_data.keys()}
+    for k, data in out_data.items():
+        for i, (ind, data_i) in enumerate(data.items()):
+            ind_i = tuple(use_inds[k][i] for k in all_axes.keys())
+            out_arrs[k][ind_i] = data_i
+    return out_axes, out_arrs
+
+
 def load_folder_regex_generator(
         folder,
         *patterns,
@@ -626,6 +657,7 @@ def make_unit_vector(v, squeeze=True, dim=-1):
     if squeeze:
         v_norm = np.squeeze(v_norm)
     return v_norm
+
 
 
 def make_param_sweep_dicts(file_template, default_range_func=np.linspace, **kwargs):
