@@ -9,6 +9,7 @@ import scipy.stats as sts
 import pickle
 import pandas as pd
 import itertools as it
+import subprocess
 import configparser
 import sklearn.decomposition as skd
 import sklearn.preprocessing as skp
@@ -35,22 +36,20 @@ monthdict = {
 
 
 def make_trs_matrix(m, n, corr_groups=None):
-    """ m is output domain, n is input """
+    """m is output domain, n is input"""
     rng = np.random.default_rng()
     if corr_groups is None:
         corr_groups = {}
 
     if m >= n:
-        trs_mat = spla.orth(
-            rng.normal(size=(m, m))
-        )[:, :n]
+        trs_mat = spla.orth(rng.normal(size=(m, m)))[:, :n]
     else:
         trs_mat = rng.normal(size=(m, n))
     trs_mat = make_unit_vector(trs_mat)
     for (i1, i2), t in corr_groups.items():
         v1 = trs_mat[:, i1]
         v2 = trs_mat[:, i2]
-        new_v = t * v1 + np.sqrt(1 - t ** 2) * v2
+        new_v = t * v1 + np.sqrt(1 - t**2) * v2
         trs_mat[:, i2] = new_v
     return trs_mat
 
@@ -72,8 +71,11 @@ def get_matching_files(
     fls = os.listdir(folder)
     candidates = []
     for fl in fls:
-        ms = list(re.match(pattern, fl) for pattern in patterns
-                  if re.match(pattern, fl) is not None)
+        ms = list(
+            re.match(pattern, fl)
+            for pattern in patterns
+            if re.match(pattern, fl) is not None
+        )
         if len(ms) > 0:
             candidates.append(os.path.join(folder, fl))
     return candidates
@@ -85,6 +87,57 @@ def get_first_matching_file(folder, *patterns, **kwargs):
     for out in gen:
         break
     return out
+
+
+def download_runinds(
+    source_folder, destination_folder, *runinds, dry_run=True, **kwargs
+):
+    pattern = make_runind_regex(*runinds)
+    runinds = list(str(ri) for ri in runinds)
+    gen = folder_regex_generator(destination_folder, pattern, **kwargs)
+    found = set()
+    all_ = set(runinds)
+    for fp, gd in gen:
+        found.add(gd["runind"])
+    needed = all_.difference(found)
+    if len(needed) > 0:
+        includes = list("--include=*{}*/".format(ri) for ri in needed)
+        includes = includes 
+        exclude = "--exclude=*/"
+
+        cmd = (
+            [
+                "rsync",
+                "-vah",
+            ]
+            + includes
+            + [exclude, source_folder, destination_folder]
+        )
+        if dry_run:
+            cmd = cmd + ["--dry-run"]
+        print(" ".join(cmd))
+        subprocess.run(cmd)
+
+
+def make_runind_regex(*runinds, shell="(?P<runind>{})", any_match="."):
+    ri_pattern = "|".join(str(ri) for ri in runinds)
+    pattern = "{any_match}*{shell}{any_match}*".format(
+        shell=shell, any_match=any_match
+    ).format(ri_pattern)
+    return pattern
+
+
+def delete_runinds(folder, *runinds, **kwargs):
+    pattern = make_runind_regex(*runinds)
+    return delete_patterns(folder, pattern, **kwargs)
+
+
+def delete_patterns(folder, *patterns, dry_run=True, **kwargs):
+    gen = folder_regex_generator(folder, *patterns, **kwargs)
+    for fp, _ in gen:
+        print("deleting {}".format(fp))
+        if not dry_run:
+            shutil.rmtree(fp)
 
 
 def load_runinds(folder, axis_keys, data_keys, *patterns, sub_key=None, **kwargs):
@@ -118,23 +171,22 @@ def load_runinds(folder, axis_keys, data_keys, *patterns, sub_key=None, **kwargs
     return out_axes, out_arrs
 
 
-def load_folder_regex_generator(
-        folder,
-        *patterns,
-        file_target=None,
-        load_func=pd.read_pickle,
-        open_str="rb",
-        open_file=True,
-        load_only_nth_files=None,
-        **kwargs,
+def folder_regex_generator(
+    folder,
+    *patterns,
+    file_target=None,
+    load_only_nth_files=None,
 ):
     if load_only_nth_files is not None and not check_list(load_only_nth_files):
         load_only_nth_files = (load_only_nth_files,)
     fls = os.listdir(folder)
     nth_file = 0
     for fl in fls:
-        ms = list(re.match(pattern, fl) for pattern in patterns
-                  if re.match(pattern, fl) is not None)
+        ms = list(
+            re.match(pattern, fl)
+            for pattern in patterns
+            if re.match(pattern, fl) is not None
+        )
         if len(ms) > 0:
             if load_only_nth_files is None or nth_file in load_only_nth_files:
                 m = ms[0]
@@ -143,16 +195,38 @@ def load_folder_regex_generator(
                     load_path = os.path.join(folder, fl, file_target)
                 else:
                     load_path = os.path.join(folder, fl)
-                if open_file:
-                    inp = open(load_path, open_str)
-                else:
-                    inp = load_path
-                out = load_func(inp, **kwargs)
-                yield load_path, gd, out
+                yield load_path, gd
             nth_file = nth_file + 1
 
+
+def load_folder_regex_generator(
+    folder,
+    *patterns,
+    file_target=None,
+    load_func=pd.read_pickle,
+    open_str="rb",
+    open_file=True,
+    load_only_nth_files=None,
+    **kwargs,
+):
+    gen = folder_regex_generator(
+        folder,
+        *patterns,
+        file_target=file_target,
+        load_only_nth_files=load_only_nth_files,
+    )
+    for load_path, gd in gen:
+        if open_file:
+            inp = open(load_path, open_str)
+        else:
+            inp = load_path
+        out = load_func(inp, **kwargs)
+        yield load_path, gd, out
+
+
 def make_cluster_db(
-        folder, pattern,
+    folder,
+    pattern,
 ):
     args_all = []
     keys_all = []
@@ -171,8 +245,8 @@ def make_cluster_db(
     # for arg in args_all:
     #     for key in keys_all:
     #         arg.get(key)
-            
-            
+
+
 def load_cluster_runs(
     folder,
     pattern,
@@ -223,13 +297,14 @@ def arg_list_decorator(func, squeeze=False):
     return arg_list_func
 
 
-def merge_dict(dicts, stack_axis=0, sort_order=None):
+def merge_dict(dicts, stack_axis=0, sort_order=None, prefix=""):
     out_dict = {}
     for d in dicts:
         for k, v in d.items():
-            l_ = out_dict.get(k, [])
+            k_new = "{}{}".format(prefix, k)
+            l_ = out_dict.get(k_new, [])
             l_.append(v)
-            out_dict[k] = l_
+            out_dict[k_new] = l_
     for k, v in out_dict.items():
         arr = np.stack(v, axis=stack_axis)
         if sort_order is not None:
@@ -373,7 +448,7 @@ def alignment_index(s1, s2, thresh=1e-10, norm=True):
         u2 = p2.components_[mask2].T
 
         norm = min(u1.shape[1], u2.shape[1])
-        ais[i] = np.trace(u1.T @ u2 @ u2.T @ u1)/norm
+        ais[i] = np.trace(u1.T @ u2 @ u2.T @ u1) / norm
     return ais
 
 
@@ -622,7 +697,7 @@ def participation_ratio(samps, ret_pv=False):
         pv = p.explained_variance_ratio_
         pr = pr_only(pv)
     except np.linalg.LinAlgError:
-        pv = np.ones(samps.shape[1])*np.nan
+        pv = np.ones(samps.shape[1]) * np.nan
         pr = np.nan
     if ret_pv:
         out = (pr, pv)
@@ -653,11 +728,10 @@ def make_unit_vector(v, squeeze=True, dim=-1):
     mask_full = vl_full > 0
     v_norm = np.zeros_like(v, dtype=float)
     v_set = v[mask_full] / vl_full[mask_full]
-    v_norm[mask_full] = v_set  
+    v_norm[mask_full] = v_set
     if squeeze:
         v_norm = np.squeeze(v_norm)
     return v_norm
-
 
 
 def make_param_sweep_dicts(file_template, default_range_func=np.linspace, **kwargs):
@@ -747,7 +821,7 @@ def load_collection_bhvmats(
                 dates=dates,
                 repl_logpath=repl_logpath,
                 use_data_name=use_data_name,
-                **params
+                **params,
             )
             if max_trials is not None:
                 bhv = bhv[:max_trials]
@@ -758,8 +832,9 @@ def load_collection_bhvmats(
                     full_bhv = np.concatenate((full_bhv, bhv), axis=0)
             else:
                 print(
-                    "file {} has less than {} trials and was "
-                    "excluded".format(mf, trial_cutoff)
+                    "file {} has less than {} trials and was " "excluded".format(
+                        mf, trial_cutoff
+                    )
                 )
         except Exception as ex:
             print("error on {}".format(full_mf))
@@ -1085,6 +1160,7 @@ def load_separate(paths, pattern=None, varname="x"):
 def make_stat_string(s, samps, perc=95):
     high, low = conf_interval(samps, perc=perc, withmean=True)[:, 0]
     return s.format(low, high)
+
 
 def load_bhvmat_imglog(
     path_bhv,
@@ -1426,7 +1502,7 @@ def _add_eye_info(x_i, eye_params, eyedata_len=500):
             hei=x_i["img_hei"],
             postthr=x_i["fixation_off"],
             readdpost=False,
-            **eye_params
+            **eye_params,
         )
         x_i["saccade_begs"] = sbs
         x_i["saccade_ends"] = ses
@@ -1573,19 +1649,19 @@ def dict_diff(d1, d2):
 def non_parallel_stack(
     func, iter_args, *args, axis=0, n_jobs=-1, stack_func=np.stack, n_outs=1, **kwargs
 ):
-    out = list(func(i_args, *args, **kwargs) for i_args in iter_args)    
+    out = list(func(i_args, *args, **kwargs) for i_args in iter_args)
     outs = list(list(o_i[i] for o_i in out) for i in range(n_outs))
-    return list(stack_func(o_i, axis=axis) for o_i in outs)    
+    return list(stack_func(o_i, axis=axis) for o_i in outs)
 
 
 def parallel_stack(
     func, iter_args, *args, axis=0, n_jobs=-1, stack_func=np.stack, n_outs=1, **kwargs
 ):
     par = jl.Parallel(n_jobs=n_jobs)
-    out = par(jl.delayed(func)(i_args, *args, **kwargs) for i_args in iter_args)    
+    out = par(jl.delayed(func)(i_args, *args, **kwargs) for i_args in iter_args)
     outs = list(list(o_i[i] for o_i in out) for i in range(n_outs))
     return list(stack_func(o_i, axis=axis) for o_i in outs)
-    
+
 
 def radian_to_sincos(rs, axis=-1):
     arr = np.stack((np.sin(rs), np.cos(rs)), axis=axis)
@@ -1743,7 +1819,7 @@ def discretize_group(
     scaler=np.linspace,
     eps=1e-10,
     func=bootstrap_mean,
-    **kwargs
+    **kwargs,
 ):
     bins = scaler(np.min(split) - eps, np.max(split) + eps, n_bins)
     groups = np.digitize(split, bins)
@@ -2004,8 +2080,9 @@ def get_trls_with_neurnum(dat, neurnum, neurfield="spike_times", drunfield="data
         else:
             count_neurs = count_neurs + new_neurs
     raise Exception(
-        "only {} neurons in this dataset, which is less "
-        "than {}".format(count_neurs, neurnum)
+        "only {} neurons in this dataset, which is less " "than {}".format(
+            count_neurs, neurnum
+        )
     )
 
 

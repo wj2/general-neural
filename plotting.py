@@ -12,6 +12,7 @@ import matplotlib.patches as patches
 import matplotlib.tri as tri
 import matplotlib.patheffects as mpe
 import colorsys
+from matplotlib import animation
 
 
 def set_ax_color(ax, color, sides=("bottom", "top", "left", "right")):
@@ -33,8 +34,8 @@ def simplefy(
     Plot a heatmap or contour of 3-simplex. Indices of rows of p are:
         
              3
-            /\
-           /  \ 
+            /\\
+           /  \\ 
          1 --- 2 
            
     p: (N, 3) probabilities
@@ -133,7 +134,7 @@ def plot_colored_line(
     norm=plt.Normalize(0.0, 1.0),
     func=None,
     ax=None,
-    **kwargs
+    **kwargs,
 ):
     if u.check_list(cmap):
         cmap = plt.get_cmap(cmap)
@@ -227,12 +228,9 @@ def plot_single_units(
     return fs
 
 
-def axs_adder(func, rows, cols, **ax_kwargs):
-    if rows == 1 and cols == 1:
-        axs_wrapper = ax_adder(func)
-    else:
-
-        def axs_wrapper(*args, axs=None, fwid=3, **kwargs):
+def axs_adder(rows, cols, **ax_kwargs):
+    def adder_func(func):
+        def wrap(*args, axs=None, fwid=3, **kwargs):
             if axs is None:
                 f, axs = plt.subplots(
                     rows, cols, figsize=(fwid * cols, fwid * rows), **ax_kwargs
@@ -244,7 +242,9 @@ def axs_adder(func, rows, cols, **ax_kwargs):
                 new_out = (out, axs)
             return new_out
 
-    return axs_wrapper
+        return wrap
+
+    return adder_func
 
 
 def ax_3d_adder(func):
@@ -278,7 +278,9 @@ def ax_adder(include_fig=False):
             else:
                 new_out = (out, ax)
             return new_out
+
         return ax_wrapper
+
     return ax_adder_wrap
 
 
@@ -449,14 +451,23 @@ def plot_trial_structure(
     return ax
 
 
-def _add_lines(pos, func, lim, ax, color=(0.8, 0.8, 0.8), alpha=1, plot_outline=False,
-               outline_mult_width=1.5, **kwargs):
+def _add_lines(
+    pos,
+    func,
+    lim,
+    ax,
+    color=(0.8, 0.8, 0.8),
+    alpha=1,
+    plot_outline=False,
+    outline_mult_width=1.5,
+    **kwargs,
+):
     if plot_outline:
         default_lw = plt.rcParams["lines.linewidth"]
-        lw = kwargs.get('lw', kwargs.get('linewidth', default_lw))
-        new_lw = outline_mult_width*lw
-        use_pe = [mpe.Stroke(foreground='k', linewidth=new_lw), mpe.Normal()]
-        kwargs['path_effects'] = use_pe
+        lw = kwargs.get("lw", kwargs.get("linewidth", default_lw))
+        new_lw = outline_mult_width * lw
+        use_pe = [mpe.Stroke(foreground="k", linewidth=new_lw), mpe.Normal()]
+        kwargs["path_effects"] = use_pe
     func(pos, lim[0], lim[1], color=color, alpha=alpha, **kwargs)
 
 
@@ -529,7 +540,6 @@ def plot_highdim_structure(
             colors=targ_colors,
         )
     return ax
-    
 
 
 def pcolormesh_axes(axvals, val_len, diff_ind=0, append=True):
@@ -557,7 +567,7 @@ def plot_highdim_trace(
     n_dim=3,
     plot_outline=False,
     outline_mult_width=1.5,
-    **kwargs
+    **kwargs,
 ):
     if ax is None:
         f = plt.figure()
@@ -578,15 +588,15 @@ def plot_highdim_trace(
         p.fit(all_samps)
     colors = kwargs.get("colors")
     if colors is None:
-        colors = (None,)*len(args)
+        colors = (None,) * len(args)
     else:
         colors = kwargs.pop("colors")
     if plot_outline:
         default_lw = plt.rcParams["lines.linewidth"]
-        lw = kwargs.get('lw', kwargs.get('linewidth', default_lw))
-        new_lw = outline_mult_width*lw
-        use_pe = [mpe.Stroke(foreground='k', linewidth=new_lw), mpe.Normal()]
-        kwargs['path_effects'] = use_pe
+        lw = kwargs.get("lw", kwargs.get("linewidth", default_lw))
+        new_lw = outline_mult_width * lw
+        use_pe = [mpe.Stroke(foreground="k", linewidth=new_lw), mpe.Normal()]
+        kwargs["path_effects"] = use_pe
     for i, y in enumerate(args):
         if colors[i] is not None:
             kwargs["color"] = colors[i]
@@ -600,13 +610,42 @@ def plot_highdim_trace(
     return ax, p
 
 
+def rotate_3d_plot(
+    f,
+    ax,
+    path,
+    elev=10,
+    azim_range=None,
+    n_frames=100,
+    fps=30,
+    extra_args=("-vcodec", "libx264"),
+):
+    if azim_range is None:
+        azim_range = (0, 360)
+    azim_range = np.linspace(*azim_range, n_frames)
+
+    def animate(i):
+        ax.view_init(elev=elev, azim=azim_range[i])
+        return (f,)
+
+    def init():
+        return f
+
+    anim = animation.FuncAnimation(
+        f,
+        animate,
+        init_func=init,
+        frames=n_frames,
+        interval=1,
+    )
+    anim.save(path, fps=fps, extra_args=extra_args)
+
+
 def plot_highdim_points(*args, ms=5, **kwargs):
     return plot_highdim_trace(*args, **kwargs, plot_line=False, plot_points=True, ms=ms)
 
 
-def pcolormesh(
-        *args, ax=None, diff_ind=0, append=True, equal_bins=False, **kwargs
-):
+def pcolormesh(*args, ax=None, diff_ind=0, append=True, equal_bins=False, **kwargs):
     if ax is None:
         f, ax = plt.subplots(1, 1)
     if len(args) < 3:
@@ -632,7 +671,6 @@ def pcolormesh(
     if equal_bins:
         ax.set_xticks(xs_bins)
         ax.set_xticklabels(xs)
-
         ax.set_yticks(ys_bins)
         ax.set_yticklabels(ys)
     else:
@@ -827,7 +865,7 @@ def hls_to_rgb(color):
 
 
 def get_prop_cycler(n_entries=None):
-    cycler = plt.rcParams["axes.prop_cycle"]            
+    cycler = plt.rcParams["axes.prop_cycle"]
     return cycler
 
 
@@ -879,8 +917,8 @@ def plot_trace_werr(
     plot_outline=False,
     outline_color="k",
     outline_mult_width=1.5,
-    marker='o',
-    **kwargs
+    marker="o",
+    **kwargs,
 ):
     if conf95:
         error_func = conf95_interval
@@ -924,12 +962,12 @@ def plot_trace_werr(
 
         if plot_outline:
             default_lw = plt.rcParams["lines.linewidth"]
-            lw = kwargs.get('lw', kwargs.get('linewidth', default_lw))
-            new_lw = outline_mult_width*lw
-            use_pe = [mpe.Stroke(foreground='k', linewidth=new_lw), mpe.Normal()]
-            kwargs['path_effects'] = use_pe
+            lw = kwargs.get("lw", kwargs.get("linewidth", default_lw))
+            new_lw = outline_mult_width * lw
+            use_pe = [mpe.Stroke(foreground="k", linewidth=new_lw), mpe.Normal()]
+            kwargs["path_effects"] = use_pe
         trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha, **kwargs)
-        
+
         if color is None:
             color = trl[0].get_color()
         if points:
@@ -948,7 +986,7 @@ def plot_trace_werr(
                     color=color,
                     elinewidth=elinewidth,
                     alpha=alpha,
-                    **kwargs
+                    **kwargs,
                 )
         if len(xs_orig.shape) > 1 or err_x is not None:
             if fill:
@@ -964,7 +1002,7 @@ def plot_trace_werr(
                     color=color,
                     elinewidth=elinewidth,
                     alpha=alpha,
-                    **kwargs
+                    **kwargs,
                 )
         ax.set_title(title)
         if not polar:
@@ -1047,7 +1085,7 @@ def plot_distrib(
     style=(),
     histtype="step",
     normed=True,
-    **kwargs
+    **kwargs,
 ):
     with plt.style.context(style):
         if ax is None:
@@ -1061,7 +1099,7 @@ def plot_distrib(
             histtype=histtype,
             label=label,
             density=normed,
-            **kwargs
+            **kwargs,
         )
         if len(label) > 0:
             ax.legend()
@@ -1140,7 +1178,7 @@ def label_line(start, end, text, ax, buff=0, lat_offset=0, **kwargs):
         verticalalignment="bottom",
         horizontalalignment="center",
         rotation_mode="anchor",
-        **kwargs
+        **kwargs,
     )
     return ax
 
@@ -1248,7 +1286,7 @@ def visualize_simplex_2d(
     plot_outline=False,
     ms=2,
     outline_factor=1.5,
-    **kwargs
+    **kwargs,
 ):
     if ax is None:
         f, ax = plt.subplots(1, 1)
@@ -1319,37 +1357,37 @@ def violinplot(
     showmedians=True,
     showextrema=False,
     plot_outline=False,
-    **kwargs
+    **kwargs,
 ):
     if ax is None:
         f, ax = plt.subplots(1, 1)
     if color is None:
         color = (None,) * len(vp_seq)
     if labels is None:
-        labels = ("",)*len(vp_seq)
-    
+        labels = ("",) * len(vp_seq)
+
     if markerstyles is not None:
         showmedians = False
         if not u.check_list(markerstyles):
-            markerstyles = (markerstyles,)*len(vp_seq)
+            markerstyles = (markerstyles,) * len(vp_seq)
     elif plot_outline:
-        markerstyles = ("s",)*len(vp_seq)
+        markerstyles = ("s",) * len(vp_seq)
         showmedians = False
-            
+
     for i, vps in enumerate(vp_seq):
         p = ax.violinplot(
             vps,
             positions=[positions[i]],
             showmedians=showmedians,
             showextrema=showextrema,
-            **kwargs
+            **kwargs,
         )
         if plot_outline:
             ax.plot(
                 [positions[i]],
                 [np.median(vps)],
                 marker=markerstyles[i],
-                markersize=markersize*1.2,
+                markersize=markersize * 1.2,
                 color="k",
             )
         if markerstyles is not None:
@@ -1390,7 +1428,7 @@ def add_x_background(
         facecolor=color,
         alpha=alpha,
         zorder=zorder,
-        **kwargs
+        **kwargs,
     )
     ax.add_patch(rect)
 
@@ -1407,16 +1445,16 @@ def set_3d_background(ax, background_color=(1, 1, 1, 1), line_color=None):
 
 
 def make_2d_bars(
-    ax, center=None, bar_len=None, bar_wid=1, bar_prop=.1, color="k", **kwargs
+    ax, center=None, bar_len=None, bar_wid=1, bar_prop=0.1, color="k", **kwargs
 ):
     xl = ax.get_xlim()
     yl = ax.get_ylim()
 
     if bar_len is None:
-        bar_len_x = np.round((xl[1] - xl[0])*bar_prop)
-        bar_len_y = np.round((yl[1] - yl[0])*bar_prop)
+        bar_len_x = np.round((xl[1] - xl[0]) * bar_prop)
+        bar_len_y = np.round((yl[1] - yl[0]) * bar_prop)
         bar_len = (bar_len_x, bar_len_y)
-    
+
     ax.plot(
         [xl[0], xl[0] + bar_len[0]], [yl[0], yl[0]], lw=bar_wid, color=color, **kwargs
     )
@@ -1523,7 +1561,7 @@ def plot_scatter_average(
     eps=1e-10,
     use_max=None,
     use_min=None,
-    **kwargs
+    **kwargs,
 ):
     if ax is None:
         f, ax = plt.subplots(1, 1)
@@ -1608,13 +1646,19 @@ def get_corr_conf95(
         bs_list = bs_list[mask]
         confounders = confounders[mask]
     if use_confounders:
-        def f(x): return na.partial_correlation(x[:, 0], x[:, 1], x[:, 2:])
+
+        def f(x):
+            return na.partial_correlation(x[:, 0], x[:, 1], x[:, 2:])
+
         inp = np.stack((as_list, bs_list), axis=1)
         if len(confounders.shape) == 1:
             confounders = np.expand_dims(confounders, 1)
         inp = np.concatenate((inp, confounders), axis=1)
     else:
-        def f(x): return func(x[:, 0], x[:, 1])[1, 0]
+
+        def f(x):
+            return func(x[:, 0], x[:, 1])[1, 0]
+
         inp = np.stack((as_list, bs_list), axis=1)
     cc = u.bootstrap_list(inp, f, n=n_boots)
     cent = f(inp)
@@ -1774,8 +1818,15 @@ def print_diff_conf95(
 
 
 def make_yaxis_scale_bar(
-    ax, magnitude=None, double=True, anchor=0, left=True, label="", text_buff=0.15,
-    fontsize="medium", **kwargs, 
+    ax,
+    magnitude=None,
+    double=True,
+    anchor=0,
+    left=True,
+    label="",
+    text_buff=0.15,
+    fontsize="medium",
+    **kwargs,
 ):
     xl = ax.get_xlim()
     yl = ax.get_ylim()
@@ -1824,7 +1875,7 @@ def plot_horiz_conf_interval(
     color=None,
     error_func=conf95_interval,
     central_tend=np.nanmedian,
-    **kwargs
+    **kwargs,
 ):
     if len(x_distr.shape) < 2:
         x_distr = x_distr.reshape((-1, 1))
@@ -1836,7 +1887,7 @@ def plot_horiz_conf_interval(
         ax=ax,
         color=color,
         fill=False,
-        **kwargs
+        **kwargs,
     )
     col = l_[0].get_color()
     l_ = ax.plot(central_tend(x_distr), [y], "|", color=col)
@@ -1850,7 +1901,7 @@ def plot_conf_interval(
     color=None,
     error_func=conf95_interval,
     central_tend=np.nanmedian,
-    **kwargs
+    **kwargs,
 ):
     if len(y_distr.shape) < 2:
         y_distr = y_distr.reshape((-1, 1))
@@ -1862,7 +1913,7 @@ def plot_conf_interval(
         ax=ax,
         color=color,
         fill=False,
-        **kwargs
+        **kwargs,
     )
     col = l_[0].get_color()
     l_ = ax.plot([x], central_tend(y_distr), "_", color=col)
@@ -1911,7 +1962,7 @@ def scatter_error(x_data, y_data, x_sem, y_sem, ax=None, elinewidth=1, **kwargs)
         xerr=x_sem,
         yerr=y_sem,
         elinewidth=elinewidth,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -2029,9 +2080,10 @@ def plot_glm_pop_selectivity_prop(
         for ind, j in enumerate(sg):
             sgm = use_pop[:, j]
             psm = ps[:, j]
-            def distr_func(x): return np.mean(
-                    np.logical_and(sgm[x] > eps, psm[x] < p_thr)
-            )
+
+            def distr_func(x):
+                return np.mean(np.logical_and(sgm[x] > eps, psm[x] < p_thr))
+
             inds = np.arange(len(sgm))
             prop_distr = u.bootstrap_list(inds, distr_func, n=boots)
             plot_conf_interval(j, prop_distr, ax, color=colors[i])
@@ -2067,7 +2119,10 @@ def plot_glm_coeff_tc(
     diff=False,
 ):
     coeff_arr = np.zeros((boots, len(xs), coeffs.shape[-1]))
-    def nm_ax(x): return np.nanmean(x, axis=0)
+
+    def nm_ax(x):
+        return np.nanmean(x, axis=0)
+
     for i, t in enumerate(xs):
         out = _preprocess_glm(
             coeffs[:, i],
@@ -2153,9 +2208,10 @@ def plot_glm_pop_selectivity_mag(
             if len(pop_mags) > 0:
                 sg_mags = sg_mags + (pop_mags,)
                 sg_violin = sg_violin + (j,)
-            def distr_func(x): return _cent_selectivity(
-                x, psm, sgm, p_thr, eps, np.nanmedian
-            )
+
+            def distr_func(x):
+                return _cent_selectivity(x, psm, sgm, p_thr, eps, np.nanmedian)
+
             inds = np.arange(len(sgm))
             sg_cent_dist = u.bootstrap_list(inds, distr_func, n=boots)
             plot_conf_interval(j, sg_cent_dist, ax, color=colors[i])

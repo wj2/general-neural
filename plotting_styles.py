@@ -44,6 +44,7 @@ def set_poster_style(colors=None):
     plt.rcParams.update({"xtick.labelsize": 15})
     plt.rcParams.update({"ytick.labelsize": 15})
     plt.rcParams.update({"lines.linewidth": 6})
+    plt.rcParams.update({"svg.fonttype": "none"})
 
 
 def set_paper_style(colors=None):
@@ -58,3 +59,5 @@ def set_paper_style(colors=None):
     plt.rcParams.update({"lines.linewidth": 1.75})
     plt.rcParams.update({"lines.markersize": 2})
     plt.rcParams.update({"axes.titlesize": "medium"})
+    plt.rcParams.update({"svg.fonttype": "none"})
+

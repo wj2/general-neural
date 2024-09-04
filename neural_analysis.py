@@ -24,6 +24,7 @@ import pickle
 
 import sklearn.base as skb
 import sklearn.utils as sku
+import sklearn.multioutput as skout
 import imblearn.under_sampling as imb_us
 import joblib as jl
 
@@ -223,6 +224,7 @@ def _make_model_pipeline(
     use_ica=False,
     ica_iter=2000,
     imputer=skimp.SimpleImputer,
+    multioutput=False,
     **kwargs,
 ):
     if use_ica:
@@ -239,7 +241,11 @@ def _make_model_pipeline(
     if post_norm:
         pipe_steps.append(skp.StandardScaler())
     if model is not None:
-        pipe_steps.append(model(**kwargs))
+        if multioutput:
+            m = skout.MultiOutputClassifier(model(**kwargs))
+        else:
+            m = model(**kwargs)
+        pipe_steps.append(m)
     pipe = sklpipe.make_pipeline(*pipe_steps)
     return pipe
 
@@ -1834,7 +1840,7 @@ def _fit_model_preds(data, labels, estimators):
 def _fit_model_proj(data, estimators):
     out = np.zeros((len(estimators), data.shape[0]))
     for i, est in enumerate(estimators):
-        projs = est.decision_function(data) 
+        projs = est.decision_function(data)
         out[i] = projs
     return out
 
@@ -1940,6 +1946,7 @@ def cv_wrapper(
     targets = []
     rel_vars = []
     proj = []
+    test_inds = []
     for i, (_, te_inds) in enumerate(extra_splitter.split(X, y_use_split)):
         est = out["estimator"][i]
         pred = est.predict(X[te_inds])
@@ -1950,8 +1957,10 @@ def cv_wrapper(
             rel_vars.append(rel_var[te_inds])
         if return_projection:
             proj.append(est.decision_function(X[te_inds]))
+        test_inds.append(te_inds)
     out["predictions"] = np.array(predictions)
     out["targets"] = np.array(targets)
+    out["test_inds"] = np.array(test_inds)
     if return_projection:
         out["projection"] = np.array(proj)
     if rel_var is not None:
@@ -2057,7 +2066,14 @@ def _nominal_fold(
     tcs = np.zeros((folds_n, x_len))
     tcs_gen = np.zeros_like(tcs)
     if c_gen is not None:
-        pred_gen = np.zeros((folds_n, c_gen.shape[1], x_len))
+        pred_gen = np.zeros(
+            (
+                folds_n,
+                c_gen.shape[1],
+            )
+            + labels.shape[1:]
+            + (x_len,)
+        )
         pred_gen_proj = np.zeros_like(pred_gen)
     if ret_projections:
         scoring = _distance_scorer
@@ -2065,6 +2081,7 @@ def _nominal_fold(
         scoring = None
     ests = np.zeros((folds_n, x_len), dtype=object)
     projs = []
+    test_inds = []
     for j in range(x_len):
         if time_accumulate:
             in_list = list(c_flat[..., k] for k in range(j + 1))
@@ -2088,10 +2105,18 @@ def _nominal_fold(
         ests[:, j] = out_j["estimator"]
         pred = out_j["predictions"]
         targ = out_j["targets"]
+        test_inds.append(out_j["test_inds"])
         if return_projection:
             projs.append(out_j["projection"])
         if j == 0:
-            preds = np.zeros((folds_n, pred.shape[1], x_len))
+            preds = np.zeros(
+                (
+                    folds_n,
+                    pred.shape[1],
+                )
+                + labels.shape[1:]
+                + (x_len,)
+            )
             targs = np.zeros_like(preds)
         preds[..., j] = pred
         targs[..., j] = targ
@@ -2123,6 +2148,7 @@ def _nominal_fold(
         "predictions": preds,
         "targets": targs,
         "estimators": ests,
+        "test_inds": np.stack(test_inds, axis=1),
     }
     if return_projection:
         projections = np.stack(projs, axis=1)
@@ -2340,12 +2366,11 @@ def _time_collapsed_fold(
     return out
 
 
-def fold_skl(
-    c1,
-    c2,
+def fold_skl_flat(
+    c_flat,
+    labels,
     folds_n,
-    rel_c1=None,
-    rel_c2=None,
+    rel_flat=None,
     model=svm.SVC,
     params=None,
     norm=True,
@@ -2357,10 +2382,9 @@ def fold_skl(
     verbose=False,
     rand_splitter=rand_splitter,
     time_accumulate=False,
-    gen_c1=None,
-    gen_c2=None,
-    gen_rel_c1=None,
-    gen_rel_c2=None,
+    c_gen=None,
+    l_gen=None,
+    gen_rel=None,
     test_prop=None,
     time_mask=None,
     collapse_time=False,
@@ -2376,7 +2400,6 @@ def fold_skl(
     else:
         model_kwargs.update(params)
         params = model_kwargs
-    c_flat, labels = _combine_samples(c1, c2)
     if "dual" not in params.keys() and model == sksvm.LinearSVC:
         params["dual"] = "auto"
     pipe = make_model_pipeline(
@@ -2384,27 +2407,9 @@ def fold_skl(
         norm=norm,
         impute_missing=impute_missing,
         pca=pre_pca,
+        multioutput=len(labels.shape) > 1,
         **params,
     )
-    if rel_c1 is not None and rel_c2 is not None:
-        rel_flat, _ = _combine_samples(rel_c1, rel_c2)
-        rel_flat = rel_flat.T
-    else:
-        rel_flat = None
-
-    if gen_c1 is not None or gen_c2 is not None:
-        c_gen, l_gen = _combine_samples(
-            *list(c for c in (gen_c1, gen_c2) if c is not None)
-        )
-        if gen_rel_c1 is not None and gen_rel_c2 is not None:
-            gen_rel, _ = _combine_samples(gen_rel_c1, gen_rel_c2)
-            gen_rel = gen_rel.T
-        else:
-            gen_rel = None
-    else:
-        c_gen = None
-        l_gen = None
-        gen_rel = None
     if shuffle:
         np.random.shuffle(labels)
     if verbose:
@@ -2442,6 +2447,51 @@ def fold_skl(
             balance_rel_fields=balance_rel_fields,
             return_projection=return_projection,
         )
+    return out
+
+
+def fold_skl(
+    c1,
+    c2,
+    folds_n,
+    rel_c1=None,
+    rel_c2=None,
+    gen_c1=None,
+    gen_c2=None,
+    gen_rel_c1=None,
+    gen_rel_c2=None,
+    **kwargs,
+):
+    c_flat, labels = _combine_samples(c1, c2)
+    if rel_c1 is not None and rel_c2 is not None:
+        rel_flat, _ = _combine_samples(rel_c1, rel_c2)
+        rel_flat = rel_flat.T
+    else:
+        rel_flat = None
+
+    if gen_c1 is not None or gen_c2 is not None:
+        c_gen, l_gen = _combine_samples(
+            *list(c for c in (gen_c1, gen_c2) if c is not None)
+        )
+        if gen_rel_c1 is not None and gen_rel_c2 is not None:
+            gen_rel, _ = _combine_samples(gen_rel_c1, gen_rel_c2)
+            gen_rel = gen_rel.T
+        else:
+            gen_rel = None
+    else:
+        c_gen = None
+        l_gen = None
+        gen_rel = None
+    out = fold_skl_flat(
+        c_flat,
+        labels,
+        folds_n,
+        c_gen=c_gen,
+        l_gen=l_gen,
+        gen_rel=gen_rel,
+        rel_flat=rel_flat,
+        **kwargs,
+    )
     return out
 
 
