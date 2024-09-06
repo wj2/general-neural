@@ -131,9 +131,10 @@ def plot_colored_line(
     zs=None,
     col_inds=None,
     cmap="Blues",
-    norm=plt.Normalize(0.0, 1.0),
+    norm=None,
     func=None,
     ax=None,
+    color_bounds=(.3, .99),
     **kwargs,
 ):
     if u.check_list(cmap):
@@ -143,7 +144,7 @@ def plot_colored_line(
     if func is not None:
         col_inds = func(xs, ys)
     elif col_inds is None:
-        col_inds = np.linspace(0, 1, len(xs))
+        col_inds = np.linspace(*color_bounds, len(xs))
     if norm is not None:
         norm.autoscale(col_inds)
     else:
