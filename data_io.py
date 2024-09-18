@@ -1424,7 +1424,7 @@ class Dataset(object):
                     trls_list = trls_list + (g2_n,)
 
             comb_n = combine_ntrls(*trls_list)
-            if dec_less:
+            if dec_less and len(trls_list_dec) > 0:
                 comb_n_dec = combine_ntrls(*trls_list_dec)
             else:
                 comb_n_dec = comb_n
