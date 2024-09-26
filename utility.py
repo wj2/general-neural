@@ -99,7 +99,8 @@ def download_runinds(
     all_ = set(runinds)
     for fp, gd in gen:
         found.add(gd["runind"])
-    needed = all_.difference(found)
+    # needed = all_.difference(found)
+    needed = all_
     if len(needed) > 0:
         includes = list("--include=*{}*/".format(ri) for ri in needed)
         includes = includes 
@@ -217,7 +218,11 @@ def load_folder_regex_generator(
     )
     for load_path, gd in gen:
         if open_file:
-            inp = open(load_path, open_str)
+            try: 
+                inp = open(load_path, open_str)
+            except FileNotFoundError as e:
+                print("could not find {}".format(load_path))
+                continue
         else:
             inp = load_path
         out = load_func(inp, **kwargs)

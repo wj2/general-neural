@@ -113,21 +113,16 @@ def combine_ntrls(*args):
 
 def _convolve_psth(psth_tm, binsize, xs, causal_xs=False, binwidth=20):
     filt_wid = int(np.round(binsize))
-    filt = np.ones(filt_wid) / filt_wid
+    filt = np.ones((1, 1, filt_wid)) / filt_wid
     n_ts = psth_tm.shape[2]
     out_len = int(n_ts - binsize + 1)
     mult = 1000 / binwidth
     smooth_psth = np.zeros(psth_tm.shape[:2] + (out_len,))
-    for i, ptm_i in enumerate(psth_tm):
-        for j, ptm_ij in enumerate(ptm_i):
-            smooth_psth[i, j] = np.convolve(ptm_ij, filt, mode="valid")
+    smooth_psth = sig.convolve(psth_tm, filt, mode="valid")
+    filt_xs = np.ones(filt.shape[-1]) / len(filt)
+    xs_adj = sig.convolve(xs, filt_xs, mode="valid")
     if causal_xs:
-        xs_adj = xs[:out_len]
-    else:
-        step = xs[1] - xs[0]
-        cent_offset = step * binsize / 2
-        xs_adj = xs + cent_offset
-        xs_adj = xs_adj[:out_len]
+        xs_adj = xs_adj + (xs_adj[1] - xs_adj[0]) / 2
     return mult * smooth_psth, xs_adj
 
 
@@ -385,8 +380,95 @@ class Dataset(object):
             self.mask_pop_cache[key] = (data, pop, xs)
         return data, pop, xs
 
-    def get_psth(
+    def get_psth(self, **kwargs):
+        return self._get_psth_timeseries(self["psth"], self["psth_timing"], **kwargs)
+
+    def get_field_timeseries(self, fields, timing_key="video_frames", **kwargs):
+        fs = self[list(fields)]
+        xs_all = self[timing_key]
+        ts = []
+        for i, fs_i in enumerate(fs):
+            fs_i = fs_i.to_numpy()
+            ts_i = []
+            for j, fs_ij in enumerate(fs_i):
+                fs_ij_new = np.stack(fs_ij, axis=0)
+                ts_i.append(fs_ij_new)
+            ts.append(ts_i)
+        ts = ResultSequence(ts)
+        return self._get_generic_timeseries(ts, xs_all, **kwargs)
+
+    def _get_generic_timeseries(
         self,
+        psths,
+        xs_all,
+        timing_key=None,
+        binsize=None,
+        begin=0,
+        end=500,
+        binstep=None,
+        skl_axes=False,
+        accumulate=False,
+        time_zero=None,
+        time_zero_field=None,
+        repl_nan=False,
+        ret_no_spk=False,
+        causal_timing=False,
+        shuffle_trials=False,
+    ):
+        outs = []
+        for i, psth_l in enumerate(psths):
+            n_trls = len(psth_l)
+            if len(psth_l) > 0:
+                n_dims = len(psth_l[0])
+            else:
+                n_dims = 0
+            xs = xs_all[i]
+            if time_zero is not None:
+                tz = time_zero
+            elif time_zero_field is not None:
+                tz = self[time_zero_field][i].to_numpy()
+            else:
+                tz = np.zeros(n_trls)
+            trl_sections = []
+            for j, trl in enumerate(psth_l):
+                xs_ij = xs.iloc[j] - tz[j]
+                l_diff = xs_ij.shape[0] - trl.shape[-1]
+                if l_diff > 0:
+                    xs_ij = xs_ij[:-l_diff]
+                    if l_diff > 1:
+                        print("length difference: {}".format(l_diff))
+                tmask_ij = np.logical_and(xs_ij >= begin, xs_ij < end)
+                trl_section = trl[:, tmask_ij]
+                trl_sections.append(trl_section)
+                xs_reg = xs_ij[tmask_ij]
+            trl_sections = np.stack(trl_sections, axis=0)
+            ts_bs = np.median(np.diff(xs_reg))
+            if binsize is not None:
+                # assert (binsize % ts_bs) == 0
+                trl_sections, xs_reg = _convolve_psth(
+                    trl_sections, binsize / ts_bs, xs_reg, causal_xs=causal_timing
+                )
+            if binstep is not None:
+                xs_0 = xs_reg - xs_reg[0]
+                xs_rem = np.mod(xs_0 / binstep, 1)
+                step_mask = xs_rem == 0
+                psth_tm = trl_sections[..., step_mask]
+                xs_reg = xs_reg[step_mask]
+            if shuffle_trials:
+                rng = np.random.default_rng()
+                list(
+                    rng.shuffle(trl_sections[:, i]) for i in range(trl_sections.shape[1])
+                )
+            if skl_axes:
+                trl_sections = np.expand_dims(np.swapaxes(trl_sections, 0, 1), 1)
+            outs.append(trl_sections)
+        return outs, xs_reg
+
+    def _get_psth_timeseries(
+        self,
+        psths,
+        xs_all,
+        timing_key=None,
         binsize=None,
         begin=None,
         end=None,
@@ -404,20 +486,21 @@ class Dataset(object):
         causal_timing=False,
         shuffle_trials=False,
     ):
-        psths = self["psth"]
-        xs_all = self["psth_timing"]
         if regions is not None:
             regions_all = self["neur_regions"]
         outs = []
-        n_trls = []
+        n_trls_l = []
         for i, psth_l in enumerate(psths):
+            n_trls = len(psth_l)
             if len(psth_l) > 0:
+                n_dims = len(psth_l[0])
                 psth = np.stack(psth_l, axis=0)
             else:
+                n_dims = 0
                 psth = np.zeros((0, 0, len(xs_all[i])))
             xs = xs_all[i]
             if time_zero is not None:
-                xs_i = np.repeat(np.expand_dims(xs - time_zero, 0), len(psth_l), 0)
+                xs_i = np.repeat(np.expand_dims(xs - time_zero, 0), n_trls, 0)
             elif time_zero_field is not None:
                 xs_exp = np.expand_dims(xs, 0)
                 tzf = self[time_zero_field][i]
@@ -426,14 +509,14 @@ class Dataset(object):
                     tzf_exp = np.zeros((1, 1))
                 xs_i = xs_exp - tzf_exp
             else:
-                xs_i = np.repeat(np.expand_dims(xs, 0), len(psth_l), 0)
+                xs_i = np.repeat(np.expand_dims(xs, 0), n_trls, 0)
             psth_bs = xs[1] - xs[0]
             time_mask = np.ones_like(xs_i, dtype=bool)
             if begin is not None:
                 time_mask = np.logical_and(xs_i >= begin, time_mask)
             if end is not None:
                 time_mask = np.logical_and(xs_i < end, time_mask)
-            psth_tm = np.zeros(psth.shape[:2] + (np.sum(time_mask, axis=1)[0],))
+            psth_tm = np.zeros((n_trls, n_dims, np.sum(time_mask, axis=1)[0],))
             for k, trl in enumerate(psth):
                 for j, trl_ij in enumerate(trl):
                     psth_tm[k, j] = trl_ij[time_mask[k]]
@@ -459,10 +542,10 @@ class Dataset(object):
             if skl_axes:
                 psth_tm = np.expand_dims(np.swapaxes(psth_tm, 0, 1), 1)
             outs.append(psth_tm)
-            n_trls.append(psth_tm.shape[0])
+            n_trls_l.append(psth_tm.shape[0])
         if combine_pseudo:
             outs, _ = self.make_pseudopop(
-                outs, n_trls, min_trials_pseudo, resample_pseudos
+                outs, n_trls_l, min_trials_pseudo, resample_pseudos
             )
         return outs, xs_reg
 

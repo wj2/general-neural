@@ -1558,7 +1558,7 @@ def plot_scatter_average(
     *args,
     ax=None,
     n_bins=10,
-    cent_func=np.mean,
+    cent_func=np.nanmean,
     eps=1e-10,
     use_max=None,
     use_min=None,
@@ -1566,6 +1566,8 @@ def plot_scatter_average(
 ):
     if ax is None:
         f, ax = plt.subplots(1, 1)
+    xs = np.array(xs)
+    ys = np.array(ys)
     x_cs, y_cs = digitize_vars(
         xs,
         ys,
