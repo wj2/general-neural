@@ -1439,6 +1439,8 @@ class Dataset(object):
         if u.check_list(decode_tzf) and len(decode_tzf) == 2:
             decode_tzf1, decode_tzf2 = decode_tzf
         else:
+            if decode_tzf is None:
+                decode_tzf = time_zero_field
             decode_tzf1, decode_tzf2 = decode_tzf, decode_tzf
         if time_zeros is None:
             tzs = None
