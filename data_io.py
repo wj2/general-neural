@@ -117,9 +117,8 @@ def _convolve_psth(psth_tm, binsize, xs, causal_xs=False, binwidth=20):
     n_ts = psth_tm.shape[2]
     out_len = int(n_ts - binsize + 1)
     mult = 1000 / binwidth
-    smooth_psth = np.zeros(psth_tm.shape[:2] + (out_len,))
     smooth_psth = sig.convolve(psth_tm, filt, mode="valid")
-    filt_xs = np.ones(filt.shape[-1]) / len(filt)
+    filt_xs = np.ones(filt.shape[-1]) / filt.shape[-1]
     xs_adj = sig.convolve(xs, filt_xs, mode="valid")
     if causal_xs:
         xs_adj = xs_adj + (xs_adj[1] - xs_adj[0]) / 2
