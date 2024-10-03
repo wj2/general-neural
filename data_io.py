@@ -250,8 +250,11 @@ class Dataset(object):
         pre_bound=-2,
         post_bound=2,
         use_new=True,
+        causal_timing=False,
     ):
-        xs = na.compute_xs(binsize, bounds[0], bounds[1], binstep)
+        xs = na.compute_xs(
+            binsize, bounds[0], bounds[1], binstep, causal_timing=causal_timing,
+        )
         if len(spk.shape) > 2:
             spk = np.squeeze(spk)
         no_spks = np.zeros_like(spk, dtype=bool)
@@ -636,6 +639,7 @@ class Dataset(object):
         ret_no_spk=False,
         shuffle_trials=False,
         use_new=False,
+        causal_timing=False,
     ):
         spks = self["spikeTimes"]
         spks = self._center_spks(spks, time_zero, time_zero_field)
@@ -646,7 +650,9 @@ class Dataset(object):
         no_spks = []
         for i, spk in enumerate(spks):
             if len(spk) == 0:
-                xs = na.compute_xs(binsize, begin, end, binstep)
+                xs = na.compute_xs(
+                    binsize, begin, end, binstep, causal_timing=causal_timing,
+                )
                 resp_arr = np.zeros((0, self.get_nneurs()[i], len(xs)))
                 out = (resp_arr, xs, np.ones_like(resp_arr, dtype=bool))
             else:
@@ -663,6 +669,7 @@ class Dataset(object):
                     accumulate,
                     convert_seconds=not self.seconds,
                     use_new=use_new,
+                    causal_timing=causal_timing,
                 )
             resp_arr, xs, no_spk_mask = out
             # if regions is not None and len(resp_arr) > 0:
@@ -1084,6 +1091,7 @@ class Dataset(object):
         return_rel=False,
         use_regressors=None,
         average_regressors=True,
+        causal_timing=False,
     ):
         try:
             assert len(tzfs) == len(masks)
@@ -1122,6 +1130,7 @@ class Dataset(object):
                     regions=regions,
                     use_regressors=use_regressors,
                     average_regressors=average_regressors,
+                    causal_timing=causal_timing,
                 )
                 pop_m, xs = out_m
                 if rel_fields is not None:
@@ -1153,41 +1162,6 @@ class Dataset(object):
         if return_rel:
             out = out + (out_rvs,)
         return out
-
-        # cat1 = self.mask(m1)
-        # cat2 = self.mask(m2)
-        # if decode_tzf is None:
-        #     decode_tzf = time_zero_field
-        # if decode_m1 is not None:
-        #     dec_data_c1 = self.mask(decode_m1)
-        # else:
-        #     dec1 = (None,)*len(cat1)
-        # if decode_m2 is not None:
-        #     dec_data_c2 = self.mask(decode_m2)
-        # else:
-        #     dec2 = (None,)*len(cat2)
-        # out1 = cat1.get_neural_activity(winsize, begin, end, stepsize,
-        #                                 skl_axes=True, repl_nan=repl_nan,
-        #                                 time_zero_field=time_zero_field,
-        #                                 shuffle_trials=shuffle_trials,
-        #                                 regions=regions)
-        # out2 = cat2.get_neural_activity(winsize, begin, end, stepsize,
-        #                                 skl_axes=True, repl_nan=repl_nan,
-        #                                 time_zero_field=time_zero_field,
-        #                                 shuffle_trials=shuffle_trials,
-        #                                 regions=regions)
-        # if decode_m1 is not None:
-        #     dec1 = dec_data_c1.get_neural_activity(
-        #         winsize, begin, end, stepsize, skl_axes=True,
-        #         repl_nan=repl_nan, time_zero_field=decode_tzf,
-        #         shuffle_trials=shuffle_trials, regions=regions)[0]
-        # if decode_m2 is not None:
-        #     dec2 = dec_data_c2.get_neural_activity(
-        #         winsize, begin, end, stepsize, skl_axes=True,
-        #         repl_nan=repl_nan, time_zero_field=decode_tzf,
-        #         shuffle_trials=shuffle_trials, regions=regions)[0]
-        # pop1, xs = out1
-        # pop2, xs = out2
 
     def decode_masks_upsample(
         self,
@@ -1416,6 +1390,7 @@ class Dataset(object):
         use_regressors=None,
         average_regressors=True,
         balance_fields=None,
+        causal_timing=False,
         **kwargs,
     ):
         if rel_fields is not None and pseudo:
@@ -1467,6 +1442,7 @@ class Dataset(object):
             use_regressors=use_regressors,
             average_regressors=average_regressors,
             return_rel=True,
+            causal_timing=causal_timing,
         )
         xs, pops, rel_fields = out
 
