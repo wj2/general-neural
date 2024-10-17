@@ -1562,6 +1562,7 @@ def plot_scatter_average(
     eps=1e-10,
     use_max=None,
     use_min=None,
+    return_xy=False,
     **kwargs,
 ):
     if ax is None:
@@ -1579,6 +1580,9 @@ def plot_scatter_average(
         ret_all_y=True,
     )
     out = plot_trace_werr(x_cs, y_cs, *args, jagged=True, ax=ax, **kwargs)
+    if return_xy:
+        y_mu = np.array(list(np.mean(y_i) for y_i in y_cs))
+        out = (out, (x_cs, y_mu))
     return out
 
 

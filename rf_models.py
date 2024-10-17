@@ -1862,6 +1862,8 @@ def make_gaussian_vector_rf(
     n_samps=10000,
     cost_func=None,
     titrate_func=None,
+    titrate_samps=None,
+    return_params=False,
 ):
     cents = np.array(cents)
     sizes = np.array(sizes)
@@ -1875,6 +1877,8 @@ def make_gaussian_vector_rf(
     if len(scales.shape) == 1:
         scales = np.expand_dims(scales, axis=0)
     if titrate_pwr is not None:
+        titrate_samps = titrate_pwr.rvs(n_samps)
+    if titrate_samps is not None:
         rfs = ft.partial(
             eval_gaussian_vector_rf,
             cents=cents,
@@ -1883,15 +1887,16 @@ def make_gaussian_vector_rf(
             baseline=baseline,
         )
         if cost_func is None:
-            pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps)) ** 2, axis=1))
+            pwr = np.mean(np.sum(rfs(titrate_samps) ** 2, axis=1))
         else:
-            pwr = cost_func(rfs(titrate_pwr.rvs(n_samps)))
+            pwr = cost_func(rfs(titrate_samps))
         if titrate_func is None:
             new_scale = np.sqrt(scales / pwr)
         else:
             new_scale = titrate_func(scales, pwr)
     else:
         new_scale = scales
+    print("rf", new_scale)
     rfs = ft.partial(
         eval_gaussian_vector_rf,
         cents=cents,
@@ -1908,7 +1913,10 @@ def make_gaussian_vector_rf(
     )
     if titrate_pwr is not None:
         pwr = np.mean(np.sum(rfs(titrate_pwr.rvs(n_samps)) ** 2, axis=1))
-    return rfs, drfs
+    out = (rfs, drfs)
+    if return_params:
+        out = out, (cents, sizes, new_scale, baseline)
+    return out
 
 
 def make_ramp_vector_rf(num, extent, scale, baseline, sub_dim=None):
