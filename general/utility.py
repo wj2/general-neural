@@ -16,8 +16,6 @@ import sklearn.preprocessing as skp
 import sklearn.utils as sku
 import matplotlib.pyplot as plt
 import joblib as jl
-from pref_looking.eyes import analyze_eyemove
-from pref_looking.bias import get_look_img
 
 monthdict = {
     "01": "Jan",
@@ -1492,55 +1490,6 @@ def load_bhvmat_imglog(
     if noerr:
         x = x[x["TrialError"] == 0]
     return x, log_dict
-
-
-def _add_eye_info(x_i, eye_params, eyedata_len=500):
-    ep = x_i["eyepos"]
-    ang = compute_angular_separation(x_i["img1_xy"], x_i["img2_xy"])
-    x_i["angular_separation"] = np.round(ang)
-    if ep.shape[0] > eyedata_len:
-        sbs, ses, l, look = analyze_eyemove(
-            ep,
-            x_i["img1_xy"],
-            x_i["img2_xy"],
-            wid=x_i["img_wid"],
-            hei=x_i["img_hei"],
-            postthr=x_i["fixation_off"],
-            readdpost=False,
-            **eye_params,
-        )
-        x_i["saccade_begs"] = sbs
-        x_i["saccade_ends"] = ses
-        x_i["saccade_lens"] = l
-        x_i["saccade_targ"] = look
-        if len(look) > 0:
-            x_i["left_first"] = look[0] == b"l"
-            x_i["right_first"] = look[0] == b"r"
-            x_i["first_sacc_time"] = sbs[0] + x_i["fixation_off"]
-            x_i["first_look"] = look[0]
-        if np.isnan(x_i["fixation_off"]):
-            x_i["on_left_img"] = np.nan
-            x_i["on_right_img"] = np.nan
-            x_i["not_on_img"] = np.nan
-        else:
-            tlen = int(x_i["eyepos"].shape[0] - x_i["fixation_off"])
-            all_eyes = get_look_img(
-                (x_i,),
-                2,
-                1,
-                0,
-                x_i["img1_xy"],
-                x_i["img2_xy"],
-                x_i["img_wid"],
-                x_i["img_hei"],
-                fix_time=0,
-                tlen=tlen,
-                eye_field="eyepos",
-                eyemove_flag="fixation_off",
-            )
-            x_i["on_left_img"] = all_eyes[0, :, 2]
-            x_i["on_right_img"] = all_eyes[0, :, 1]
-            x_i["not_on_img"] = all_eyes[0, :, 0]
 
 
 def copy_struct_array(new_arr, old_arr):
