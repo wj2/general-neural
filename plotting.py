@@ -620,6 +620,7 @@ def rotate_3d_plot(
     n_frames=100,
     fps=30,
     extra_args=("-vcodec", "libx264"),
+    **kwargs,
 ):
     if azim_range is None:
         azim_range = (0, 360)
@@ -639,7 +640,7 @@ def rotate_3d_plot(
         frames=n_frames,
         interval=1,
     )
-    anim.save(path, fps=fps, extra_args=extra_args)
+    anim.save(path, fps=fps, extra_args=extra_args, **kwargs)
 
 
 def plot_highdim_points(*args, ms=5, **kwargs):
