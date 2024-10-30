@@ -393,7 +393,13 @@ class Dataset(object):
             fs_i = fs_i.to_numpy()
             ts_i = []
             for j, fs_ij in enumerate(fs_i):
-                fs_ij_new = np.stack(fs_ij, axis=0)
+                for fs_ijk in fs_ij:
+                    if u.check_list(fs_ijk):
+                        use_len = len(fs_ijk)
+                        break
+                fs_ij_new = np.zeros((len(fs_ij), use_len))
+                for k, fs_ijk in enumerate(fs_ij):
+                    fs_ij_new[k] = fs_ijk
                 ts_i.append(fs_ij_new)
             ts.append(ts_i)
         ts = ResultSequence(ts)
@@ -416,6 +422,7 @@ class Dataset(object):
         ret_no_spk=False,
         causal_timing=False,
         shuffle_trials=False,
+        verbose=False,
     ):
         outs = []
         for i, psth_l in enumerate(psths):
@@ -437,7 +444,7 @@ class Dataset(object):
                 l_diff = xs_ij.shape[0] - trl.shape[-1]
                 if l_diff > 0:
                     xs_ij = xs_ij[:-l_diff]
-                    if l_diff > 1:
+                    if l_diff > 1 and verbose:
                         print("length difference: {}".format(l_diff))
                 tmask_ij = np.logical_and(xs_ij >= begin, xs_ij < end)
                 trl_section = trl[:, tmask_ij]

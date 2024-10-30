@@ -263,11 +263,14 @@ def ax_3d_adder(func):
     return ax_wrapper
 
 
-def ax_adder(include_fig=False):
+def ax_adder(include_fig=False, three_dim=False):
     def ax_adder_wrap(func):
         def ax_wrapper(*args, ax=None, fwid=3, **kwargs):
             if ax is None:
-                f, ax = plt.subplots(1, 1, figsize=(fwid, fwid))
+                subplot_kw = {}
+                if three_dim:
+                    subplot_kw["projection"] = "3d"
+                f, ax = plt.subplots(1, 1, figsize=(fwid, fwid), subplot_kw=subplot_kw)
             else:
                 f = None
             if include_fig:
