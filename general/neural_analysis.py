@@ -145,7 +145,7 @@ def zscore_tc(
         else:
             cat_axis = 1
             exp = False
-    comb_pop = np.squeeze(np.concatenate(pops, axis=cat_axis))
+    comb_pop = np.squeeze(np.concatenate(pops, axis=cat_axis), axis=1)
     pops_new = list(np.zeros_like(pop) for pop in pops)
     for i in range(comb_pop.shape[-1]):
         s = scaler()
@@ -1924,7 +1924,7 @@ def cv_wrapper(
     else:
         y_use_split = y
         if test_frac is None:
-            cv_type = skms.KFolds
+            cv_type = skms.KFold
             cv_kwarg = {}
         else:
             cv_type = skms.ShuffleSplit
@@ -2011,7 +2011,7 @@ def fold_skl_continuous(
         print("--")
         print(c_flat.shape)
 
-    out = _nominal_fold(
+    out = nominal_fold(
         c_flat,
         labels,
         pipe,
@@ -2044,7 +2044,7 @@ def _distance_scorer(est, X, y):
     return np.mean(dists * flips)
 
 
-def _nominal_fold(
+def nominal_fold(
     c_flat,
     labels,
     pipe,
@@ -2430,7 +2430,7 @@ def fold_skl_flat(
             test_frac=test_prop,
         )
     else:
-        out = _nominal_fold(
+        out = nominal_fold(
             c_flat,
             labels,
             pipe,

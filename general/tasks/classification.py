@@ -1,4 +1,3 @@
-
 import numpy as np
 import scipy.stats as sts
 import itertools as it
@@ -15,8 +14,9 @@ def parity(x):
 class Task:
     """
     A task needs to define a call method that takes in stimuli with shape N x D
-    and returns an array with shape N x T 
+    and returns an array with shape N x T
     """
+
     def __init__(self, t_inds):
         if not u.check_list(t_inds):
             t_inds = np.arange(t_inds)
@@ -56,15 +56,83 @@ class CompositeTask:
     def __len__(self):
         return 1
 
+
 class ParityTask(Task):
     def __call__(self, x):
         stim = x[:, self.t_inds]
         return parity(stim)
 
+
 class IdentityTask(Task):
     def __call__(self, x):
         stim = x[:, self.t_inds]
         return stim
+
+
+class ColoringTask(Task):
+    def __init__(self, t_inds, coloring=None, n_coloring=None, merger=np.sum):
+        super().__init__(t_inds)
+        if n_coloring is None:
+            n_coloring = 2 ** (len(t_inds) - 1)
+        self.merger = merger
+        if coloring is None:
+            coloring = generate_many_colorings(n_coloring, len(self.t_inds))
+        self.coloring = coloring
+        self.c_func = ft.partial(
+            ft.partial(
+                apply_many_colorings, colorings=self.coloring, merger=self.merger
+            )
+        )
+
+    def __call__(self, x):
+        stim = x[:, self.t_inds]
+        return self.c_func(stim)
+
+
+class LinearTask(Task):
+    def __init__(
+        self,
+        t_inds,
+        task_vec=None,
+        offset=None,
+        axis_aligned=False,
+        offset_var=0,
+        center=.5,
+        scale=2,
+    ):
+        super().__init__(t_inds)
+        if task_vec is None:
+            vec = sts.norm(0, 1).rvs((1, len(self.t_inds)))
+            task_vec = u.make_unit_vector(vec)
+        self.task_vec = task_vec
+        if offset is None:
+            offset = sts.norm(0, np.sqrt(offset_var)).rvs(1, 1)
+        self.offset = offset
+        self.center = center
+        self.scale = scale
+
+    def __call__(self, x): 
+        stim = self.scale * (x[:, self.t_inds] - self.center)
+        proj = np.sum(self.task_vec * stim, axis=1, keepdims=True)
+        return (proj + self.offset) > 0
+
+
+class ContextualTask(Task):
+    def __init__(self, *tasks, c_inds=None):
+        if c_inds is None:
+            c_inds = np.arange(-len(tasks), 0)
+        self.c_inds = c_inds
+        self.tasks = tasks
+
+    def __call__(self, x):
+        task_inds = np.argmax(x[:, self.c_inds], axis=1)
+        outs_all = np.stack(list(t(x) for t in self.tasks), axis=0)
+        
+        targets = np.zeros(outs_all.shape[1:])
+        for i in range(x.shape[0]):
+            targets[i] = outs_all[task_inds[i], i]
+        return targets
+
 
 def generate_many_colorings(n_colorings, n_g):
     rng = np.random.default_rng()
@@ -84,54 +152,15 @@ def apply_many_colorings(x, colorings=None, merger=np.sum):
     return merger(out, axis=1, keepdims=True) > 0
 
 
-class ColoringTask(Task):
-    def __init__(self, t_inds, coloring=None, n_coloring=None, merger=np.sum):
-        super().__init__(t_inds)
-        if n_coloring is None:
-            n_coloring = 2 ** (len(t_inds) - 1)
-        self.merger = merger
-        if coloring is None:
-            coloring = generate_many_colorings(n_coloring, len(self.t_inds))
-        self.coloring = coloring
-        self.c_func = ft.partial(
-            ft.partial(apply_many_colorings, colorings=self.coloring, merger=self.merger)
-        )
-
-    def __call__(self, x):
-        stim = x[:, self.t_inds]
-        return self.c_func(stim)
-
-
-class LinearTask(Task):
-    def __init__(
-            self, t_inds, task_vec=None, offset=None, axis_aligned=False, offset_var=0,
-    ):
-        super().__init__(t_inds)
-        if task_vec is None:
-            task_vec = u.make_unit_vector(
-                sts.norm(0, 1).rvs(1, len(self.t_inds))
-            )
-        self.task_vec = task_vec
-        if offset is None:
-            offset = sts.norm(0, np.sqrt(offset_var)).rvs(1, 1)
-        self.offset = offset
-
-    def __call__(self, x):
-        stim = x[:, self.t_inds]
-        proj = np.sum(self.task_vec * stim, axis=1, keepdims=True)
-        return (proj + self.offset) > 0
-
-
-
-
-
 def group_xor_task(n_g):
     if not u.check_list(n_g):
         n_g = np.arange(n_g)
+
     def task_func(samps):
         rel_dims = samps[:, n_g]
         targ = parity(rel_dims)
         return targ
+
     return (task_func,)
 
 
@@ -151,15 +180,14 @@ def group_coloring_tasks(g1, g2, n_tasks=10, combine=parity, merger=np.sum):
         def group_func(samps):
             targ = combine(
                 np.concatenate(
-                    (c1_func(samps[:, g1]), c2_func(samps[:, g2]),), axis=1,
-                )                  
+                    (
+                        c1_func(samps[:, g1]),
+                        c2_func(samps[:, g2]),
+                    ),
+                    axis=1,
+                )
             )
             return targ
-        
-        funcs.append(
-            group_func
-        )
+
+        funcs.append(group_func)
     return funcs
-
-
-
