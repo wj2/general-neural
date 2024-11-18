@@ -26,7 +26,7 @@ class ResultSequence(object):
         return hash(hashable)
 
     def _op(self, x, operator):
-        out = ResultSequence(pd.Series(operator(v, x)) for v in self.val)
+        out = ResultSequence(pd.Series(operator(v, x), index=v.index) for v in self.val)
         return out
 
     def _unary_op(self, operator):
@@ -194,6 +194,7 @@ class Dataset(object):
         return self.data["data"].iloc[0].columns
 
     def session_mask(self, mask):
+        assert len(mask) == len(self.data)
         return Dataset(self.data[mask], seconds=self.seconds, sort=self.sort)
 
     def mask(self, mask):
