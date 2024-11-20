@@ -172,7 +172,7 @@ class Dataset(object):
     @classmethod
     def from_readfunc(cls, read_func, *args, seconds=False, sort_by=None, **kwargs):
         super_df = read_func(*args, **kwargs)
-        return cls.from_dict(seconds=seconds, sort_by=sort_by, **super_df)        
+        return cls.from_dict(seconds=seconds, sort_by=sort_by, **super_df)
 
     def __getitem__(self, key):
         try:
@@ -235,7 +235,7 @@ class Dataset(object):
             end_inds = end[i].to_numpy().astype(int)
             ranges_i = []
             for j, fe_j in enumerate(fe):
-                ranges_i.append(fe_j[beg_inds[j]:end_inds[j]])
+                ranges_i.append(fe_j[beg_inds[j] : end_inds[j]])
             out.append(ranges_i)
         return ResultSequence(out)
 
@@ -253,7 +253,11 @@ class Dataset(object):
         causal_timing=False,
     ):
         xs = na.compute_xs(
-            binsize, bounds[0], bounds[1], binstep, causal_timing=causal_timing,
+            binsize,
+            bounds[0],
+            bounds[1],
+            binstep,
+            causal_timing=causal_timing,
         )
         if len(spk.shape) > 2:
             spk = np.squeeze(spk)
@@ -275,7 +279,7 @@ class Dataset(object):
             for i, spk_i in enumerate(spk):
                 for j, spk_sq in enumerate(spk_i):
                     if len(spk_sq.shape) > 1:
-                        spk_sq = np.squeeze(spk_ij)
+                        spk_sq = np.squeeze(spk_sq)
                     # UNCOMMENT IF SOMETHING BREAKS IN BUSCHMAN
                     # if convert_seconds:
                     #     spk_sq = spk_sq * 1000
@@ -428,10 +432,6 @@ class Dataset(object):
         outs = []
         for i, psth_l in enumerate(psths):
             n_trls = len(psth_l)
-            if len(psth_l) > 0:
-                n_dims = len(psth_l[0])
-            else:
-                n_dims = 0
             xs = xs_all[i]
             if time_zero is not None:
                 tz = time_zero
@@ -462,12 +462,12 @@ class Dataset(object):
                 xs_0 = xs_reg - xs_reg[0]
                 xs_rem = np.mod(xs_0 / binstep, 1)
                 step_mask = xs_rem == 0
-                psth_tm = trl_sections[..., step_mask]
                 xs_reg = xs_reg[step_mask]
             if shuffle_trials:
                 rng = np.random.default_rng()
                 list(
-                    rng.shuffle(trl_sections[:, i]) for i in range(trl_sections.shape[1])
+                    rng.shuffle(trl_sections[:, i])
+                    for i in range(trl_sections.shape[1])
                 )
             if skl_axes:
                 trl_sections = np.expand_dims(np.swapaxes(trl_sections, 0, 1), 1)
@@ -526,7 +526,13 @@ class Dataset(object):
                 time_mask = np.logical_and(xs_i >= begin, time_mask)
             if end is not None:
                 time_mask = np.logical_and(xs_i < end, time_mask)
-            psth_tm = np.zeros((n_trls, n_dims, np.sum(time_mask, axis=1)[0],))
+            psth_tm = np.zeros(
+                (
+                    n_trls,
+                    n_dims,
+                    np.sum(time_mask, axis=1)[0],
+                )
+            )
             for k, trl in enumerate(psth):
                 for j, trl_ij in enumerate(trl):
                     psth_tm[k, j] = trl_ij[time_mask[k]]
@@ -658,7 +664,11 @@ class Dataset(object):
         for i, spk in enumerate(spks):
             if len(spk) == 0:
                 xs = na.compute_xs(
-                    binsize, begin, end, binstep, causal_timing=causal_timing,
+                    binsize,
+                    begin,
+                    end,
+                    binstep,
+                    causal_timing=causal_timing,
                 )
                 resp_arr = np.zeros((0, self.get_nneurs()[i], len(xs)))
                 out = (resp_arr, xs, np.ones_like(resp_arr, dtype=bool))
@@ -1043,7 +1053,7 @@ class Dataset(object):
             reg_i_process = reg_i_process[..., ::stepsize]
             reg_i_process = np.expand_dims(np.swapaxes(reg_i_process, 0, 1), 1)
             reg_all.append(reg_i_process)
-            
+
         return reg_all, xs_smooth
 
     def get_time_features(
@@ -1101,7 +1111,7 @@ class Dataset(object):
         causal_timing=False,
     ):
         try:
-            assert len(tzfs) == len(masks)
+            assert len(tzfs) == len(masks) and u.check_list(tzfs)
         except AssertionError:
             tzfs = (tzfs,) * len(masks)
         out_pops = []
@@ -1409,8 +1419,10 @@ class Dataset(object):
             )
         if balance_fields is not None and rel_fields is not None:
             raise IOError(
-                ("only one of rel_fields ({rf}) and balance_fields ({bf}) can be "
-                 "supplied".format(rf=rel_fields, bf=balance_fields))
+                (
+                    "only one of rel_fields ({rf}) and balance_fields ({bf}) can be "
+                    "supplied".format(rf=rel_fields, bf=balance_fields)
+                )
             )
         elif balance_fields is not None:
             rel_fields = balance_fields
