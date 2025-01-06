@@ -131,6 +131,15 @@ class BalancedShuffleSplit:
             yield np.array(tr_inds), np.array(te_inds)
 
 
+def zscore_tc_shape(
+        pop, scaler=skp.StandardScaler,
+):
+    new_pop = np.zeros_like(pop)
+    for i in range(pop.shape[-1]):
+        new_pop[..., i] = scaler().fit_transform(pop[..., i])
+    return new_pop
+
+
 def zscore_tc(
     *pops,
     scaler=skp.StandardScaler,
@@ -215,6 +224,27 @@ def make_model_pipeline(*args, tc=False, **kwargs):
     return out
 
 
+class MultiOutputClassifierWrapper:
+    def __init__(self, model, **kwargs):
+        self.moc = skout.MultiOutputClassifier(model, **kwargs)
+
+    def fit(self, X, y):
+        self.moc.fit(X, y)
+        return self
+
+    def predict(self, X):
+        return self.moc.predict(X)
+
+    def score(self, X, y):
+        return self.moc.score(X, y)
+
+    def decision_function(self, X):
+        dfs = []
+        for est in self.moc.estimators_:
+            dfs.append(est.decision_function(X))
+        return np.stack(dfs, axis=1)
+
+
 def _make_model_pipeline(
     model=None,
     norm=True,
@@ -242,7 +272,7 @@ def _make_model_pipeline(
         pipe_steps.append(skp.StandardScaler())
     if model is not None:
         if multioutput:
-            m = skout.MultiOutputClassifier(model(**kwargs))
+            m = MultiOutputClassifierWrapper(model(**kwargs))
         else:
             m = model(**kwargs)
         pipe_steps.append(m)
@@ -1830,15 +1860,21 @@ def _combine_samples(*c_is, norm_labels=False):
 
 
 def _fit_model_preds(data, labels, estimators):
-    out = np.zeros((len(estimators), data.shape[0]))
+    out_shape = (len(estimators), data.shape[0])
+    if len(labels.shape) > 1:
+        out_shape = out_shape + (labels.shape[1],)
+    out = np.zeros(out_shape)
     for i, est in enumerate(estimators):
         scores = est.predict(data)
         out[i] = scores
     return out
 
 
-def _fit_model_proj(data, estimators):
-    out = np.zeros((len(estimators), data.shape[0]))
+def _fit_model_proj(data, labels, estimators):
+    out_shape = (len(estimators), data.shape[0])
+    if len(labels.shape) > 1:
+        out_shape = out_shape + (labels.shape[1],)
+    out = np.zeros(out_shape)
     for i, est in enumerate(estimators):
         projs = est.decision_function(data)
         out[i] = projs
@@ -1904,6 +1940,7 @@ def cv_wrapper(
     balance_rel_fields=False,
     balance_test=False,
     return_projection=False,
+    return_confusion=False,
     **kwargs,
 ):
     rng = np.random.default_rng()
@@ -1947,6 +1984,8 @@ def cv_wrapper(
     rel_vars = []
     proj = []
     test_inds = []
+    confusion = []
+    u_labels = np.unique(y, axis=0)
     for i, (_, te_inds) in enumerate(extra_splitter.split(X, y_use_split)):
         est = out["estimator"][i]
         pred = est.predict(X[te_inds])
@@ -1957,6 +1996,8 @@ def cv_wrapper(
             rel_vars.append(rel_var[te_inds])
         if return_projection:
             proj.append(est.decision_function(X[te_inds]))
+        if return_confusion:
+            confusion.append(skm.confusion_matrix(targ, pred, labels=u_labels))
         test_inds.append(te_inds)
     out["predictions"] = np.array(predictions)
     out["targets"] = np.array(targets)
@@ -1965,6 +2006,8 @@ def cv_wrapper(
         out["projection"] = np.array(proj)
     if rel_var is not None:
         out["rel_vars"] = np.array(rel_vars)
+    if return_confusion:
+        out["confusion"] = np.stack(confusion, axis=0)
     if not keep_ests:
         out.pop("estimator")
     return out
@@ -2060,6 +2103,7 @@ def nominal_fold(
     rel_var=None,
     gen_rel_var=None,
     return_projection=False,
+    return_confusion=False,
     **kwargs,
 ):
     x_len = c_flat.shape[-1]
@@ -2082,6 +2126,7 @@ def nominal_fold(
     ests = np.zeros((folds_n, x_len), dtype=object)
     projs = []
     test_inds = []
+    confusion = []
     for j in range(x_len):
         if time_accumulate:
             in_list = list(c_flat[..., k] for k in range(j + 1))
@@ -2099,6 +2144,7 @@ def nominal_fold(
             scoring=scoring,
             rel_var=rel_var,
             return_projection=return_projection,
+            return_confusion=return_confusion,
             **kwargs,
         )
         tcs[:, j] = out_j["test_score"]
@@ -2108,6 +2154,8 @@ def nominal_fold(
         test_inds.append(out_j["test_inds"])
         if return_projection:
             projs.append(out_j["projection"])
+        if return_confusion:
+            confusion.append(out_j["confusion"])
         if j == 0:
             preds = np.zeros(
                 (
@@ -2139,7 +2187,7 @@ def nominal_fold(
                 scoring=scoring,
             )
             pred_gen[..., j] = _fit_model_preds(gen_data, l_gen, out_j["estimator"])
-            pred_gen_proj[..., j] = _fit_model_proj(gen_data, out_j["estimator"])
+            pred_gen_proj[..., j] = _fit_model_proj(gen_data, l_gen, out_j["estimator"])
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
@@ -2153,6 +2201,8 @@ def nominal_fold(
     if return_projection:
         projections = np.stack(projs, axis=1)
         out["projection"] = projections
+    if return_confusion:
+        out["confusion"] = np.stack(confusion, axis=-1)
     if c_gen is not None:
         out["score_gen"] = tcs_gen
         out["predictions_gen"] = pred_gen
@@ -2366,6 +2416,15 @@ def _time_collapsed_fold(
     return out
 
 
+def fold_skl_shape(
+        c_flat, labels, folds_n, c_gen=None, **kwargs,
+):
+    c_flat = np.swapaxes(c_flat, 0, 1)
+    if c_gen is not None:
+        c_gen = np.swapaxes(c_gen, 0, 1)
+    return fold_skl_flat(c_flat, labels, folds_n, c_gen=c_gen, **kwargs)
+
+
 def fold_skl_flat(
     c_flat,
     labels,
@@ -2391,6 +2450,7 @@ def fold_skl_flat(
     ret_projections=False,
     return_projection=False,
     balance_rel_fields=False,
+    return_confusion=False,
     **model_kwargs,
 ):
     if test_prop is None:
@@ -2446,6 +2506,7 @@ def fold_skl_flat(
             gen_rel_var=gen_rel,
             balance_rel_fields=balance_rel_fields,
             return_projection=return_projection,
+            return_confusion=return_confusion,
         )
     return out
 

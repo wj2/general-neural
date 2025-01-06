@@ -169,6 +169,11 @@ class Dataset(object):
             df = df.reset_index(drop=True)
         return cls(df, seconds=seconds, sort=(not already_sorted and sort))
 
+    def resort_sessions(self, sort_by):
+        new_data = self.data.sort_values(by=sort_by)
+        new_data = new_data.reset_index(drop=True)
+        return Dataset(new_data, seconds=self.seconds, sort=False)
+
     @classmethod
     def from_readfunc(cls, read_func, *args, seconds=False, sort_by=None, **kwargs):
         super_df = read_func(*args, **kwargs)

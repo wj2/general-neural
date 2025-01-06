@@ -134,7 +134,7 @@ def plot_colored_line(
     norm=None,
     func=None,
     ax=None,
-    color_bounds=(.3, .99),
+    color_bounds=(0.3, 0.99),
     **kwargs,
 ):
     if u.check_list(cmap):
@@ -261,6 +261,35 @@ def ax_3d_adder(func):
         return new_out
 
     return ax_wrapper
+
+
+def _boxcar(ref_feat, feats, radius=0.2):
+    dists = np.sqrt(np.sum((np.expand_dims(ref_feat, 0) - feats) ** 2, axis=1))
+    weights = dists < radius
+    return weights / np.sum(weights)
+
+
+def periodic_boxcar(ref_feat, feats, radius=0.2):
+    dists = np.sqrt(
+        np.sum(
+            u.normalize_periodic_range(np.expand_dims(ref_feat, 0) - feats) ** 2, axis=1
+        )
+    )
+    weights = dists < radius
+    return weights / np.sum(weights)
+
+
+def average_similar_stimuli(
+    reps,
+    feats,
+    weight_func=_boxcar,
+    **kwargs,
+):
+    new_reps = np.zeros_like(reps)
+    for i, rep_i in enumerate(reps):
+        weights = weight_func(feats[i], feats, **kwargs)
+        new_reps[i] = np.sum(np.expand_dims(weights, 1) * reps, axis=0)
+    return new_reps
 
 
 def ax_adder(include_fig=False, three_dim=False):
