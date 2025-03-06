@@ -227,10 +227,23 @@ def make_model_pipeline(*args, tc=False, **kwargs):
 class MultiOutputClassifierWrapper:
     def __init__(self, model, **kwargs):
         self.moc = skout.MultiOutputClassifier(model, **kwargs)
+        self.is_fitted = False
+
+    @property
+    def estimators_(self):
+        return self.moc.estimators_
+
+    @property
+    def n_features_in_(self):
+        return self.moc.n_features_in_
 
     def fit(self, X, y):
-        self.moc.fit(X, y)
+        self.moc = self.moc.fit(X, y)
+        self.is_fitted = True
         return self
+
+    def __sklearn_is_fitted__(self):
+        return self.is_fitted
 
     def predict(self, X):
         return self.moc.predict(X)
@@ -1859,6 +1872,25 @@ def _combine_samples(*c_is, norm_labels=False):
     return data_full, labels_full
 
 
+def get_multioutput_coeffs(ests, pipeline_ind=None, orthog=False):
+    est_i = ests.flatten()[0]
+    if pipeline_ind is not None:
+        est_i = est_i[pipeline_ind]
+    n_feats = est_i.n_features_in_
+    n_outs = len(est_i.estimators_)
+    coeffs = np.zeros(ests.shape + (n_outs, n_feats))
+    for ind in u.make_array_ind_iterator(ests.shape):
+        est = ests[ind]
+        if pipeline_ind is not None:
+            est = est[pipeline_ind]
+        for j, est_j in enumerate(est.estimators_):
+            coeffs[ind][j] = est_j.coef_
+        if orthog:
+            q, _ = np.linalg.qr(coeffs[ind].T)
+            coeffs[ind] = q.T
+    return coeffs
+
+
 def _fit_model_preds(data, labels, estimators):
     out_shape = (len(estimators), data.shape[0])
     if len(labels.shape) > 1:
@@ -1941,10 +1973,14 @@ def cv_wrapper(
     balance_test=False,
     return_projection=False,
     return_confusion=False,
+    rng_seed=None,
     **kwargs,
 ):
     rng = np.random.default_rng()
-    rand_state = rng.integers(2**32 - 1)
+    if rng_seed is not None:
+        rand_state = rng_seed
+    else:
+        rand_state = rng.integers(2**32 - 1)
     if balance_rel_fields:
         if rel_var is None:
             raise IOError("told to balance rel_fields but did not provide rel_fields")
@@ -1986,8 +2022,10 @@ def cv_wrapper(
     test_inds = []
     confusion = []
     u_labels = np.unique(y, axis=0)
+    # print(out["estimator"])
     for i, (_, te_inds) in enumerate(extra_splitter.split(X, y_use_split)):
         est = out["estimator"][i]
+        # print(sku.validation.check_is_fitted(est))
         pred = est.predict(X[te_inds])
         targ = y[te_inds]
         predictions.append(pred)
@@ -2451,6 +2489,7 @@ def fold_skl_flat(
     return_projection=False,
     balance_rel_fields=False,
     return_confusion=False,
+    rng_seed=None,
     **model_kwargs,
 ):
     if test_prop is None:
@@ -2507,6 +2546,7 @@ def fold_skl_flat(
             balance_rel_fields=balance_rel_fields,
             return_projection=return_projection,
             return_confusion=return_confusion,
+            rng_seed=rng_seed,
         )
     return out
 

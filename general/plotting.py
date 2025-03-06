@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import scipy.stats as sts
 import sklearn.decomposition as skd
 import itertools as it
@@ -532,6 +533,7 @@ def plot_highdim_structure(
     targs=None,
     colors=None,
     targ_colors=None,
+    pt_color=None,
     trs=None,
     ax=None,
     plot_dist=1,
@@ -572,6 +574,14 @@ def plot_highdim_structure(
             p=trs,
             colors=targ_colors,
         )
+    else:
+        _, trs = plot_highdim_points(
+            activity,
+            ax=ax,
+            p=trs,
+            dim_red_mean=False,
+            colors=(pt_color,),
+        )
     return ax
 
 
@@ -600,6 +610,7 @@ def plot_highdim_trace(
     n_dim=3,
     plot_outline=False,
     outline_mult_width=1.5,
+    line_color=None,
     **kwargs,
 ):
     if ax is None:
@@ -636,11 +647,193 @@ def plot_highdim_trace(
         y_mu = p.transform(np.mean(y, axis=0))
         y_pts = p.transform(np.concatenate(y, axis=0))
         if plot_line:
-            l_ = ax.plot(*y_mu.T, **kwargs)
-            kwargs["color"] = l_[0].get_color()
+            line_kwargs = kwargs.copy()
+            if line_color is None:
+                line_color = line_kwargs.pop("color", None)
+            else:
+                line_kwargs.pop("color", None)
+            l_ = ax.plot(*y_mu.T, color=line_color, **line_kwargs)
+            if line_color is None:
+                kwargs["color"] = l_[0].get_color()
         if plot_points:
             ax.plot(*y_pts.T, "o", ms=ms, **kwargs)
     return ax, p
+
+
+def animate_plot_axs(
+    f,
+    axs,
+    path,
+    arg_tc,
+    plot_func,
+    three_dim=False,
+    elev=10,
+    azim_range=None,
+    fps=30,
+    extra_args=("-vcodec", "libx264"),
+    save_first=True,
+    save_last=True,
+    format=".pdf",
+    **kwargs,
+):
+    if three_dim:
+        subplot_kw = {"projection": "3d"}
+    else:
+        subplot_kw = {}
+    _, scrub_axs =  plt.subplots(*axs.shape, subplot_kw=subplot_kw)
+    list(plot_func(arg_i, axs=scrub_axs) for arg_i in arg_tc)
+    use_xlims = {
+        ind: scrub_axs[ind].get_xlim() for ind in u.make_array_ind_iterator(axs.shape)
+    }
+    use_ylims = {
+        ind: scrub_axs[ind].get_ylim() for ind in u.make_array_ind_iterator(axs.shape)
+    }
+    if three_dim:
+        use_zlims = {
+            ind: scrub_axs[ind].get_zlim()
+            for ind in u.make_array_ind_iterator(axs.shape)
+        }
+
+    n_frames = len(arg_tc)
+    if azim_range is None:
+        azim_range = (0, 360)
+    azim_range = np.linspace(*azim_range, n_frames)
+    f.set_tight_layout(True)
+
+    def animate(i):
+        list(ax.clear() for ax in axs.flatten())
+        plot_func(arg_tc[i], axs=axs)
+        list(
+            axs[ind].set_xlim(use_xlims[ind])
+            for ind in u.make_array_ind_iterator(axs.shape)
+        )
+        list(
+            axs[ind].set_xlim(use_ylims[ind])
+            for ind in u.make_array_ind_iterator(axs.shape)
+        )
+        if three_dim:
+            list(
+                axs[ind].set_xlim(use_zlims[ind])
+                for ind in u.make_array_ind_iterator(axs.shape)
+            )
+            list(
+                ax.view_init(elev=elev, azim=azim_range[i])
+                for ax in axs.flatten() if ax.name == "3d"
+            )
+        return (f,)
+
+    def init():
+        list(ax.clear() for ax in axs.flatten())
+        list(
+            axs[ind].set_xlim(use_xlims[ind])
+            for ind in u.make_array_ind_iterator(axs.shape)
+        )
+        list(
+            axs[ind].set_xlim(use_xlims[ind])
+            for ind in u.make_array_ind_iterator(axs.shape)
+        )
+        if three_dim:
+            list(
+                axs[ind].set_xlim(use_xlims[ind])
+                for ind in u.make_array_ind_iterator(axs.shape)
+            )
+        return f
+
+    anim = animation.FuncAnimation(
+        f,
+        animate,
+        init_func=init,
+        frames=n_frames,
+        interval=1,
+    )
+    anim.save(path, fps=fps, extra_args=extra_args, **kwargs)
+    path_root, _ = os.path.splitext(path)
+    if save_first:
+        path_first = path_root + "_first" + format
+        f, = animate(0)
+        f.savefig(path_first, bbox_inches="tight", transparent=True)
+    if save_last:
+        path_last = path_root + "_last" + format
+        f, = animate(-1)
+        f.savefig(path_last, bbox_inches="tight", transparent=True)
+
+
+def animate_plot(
+    f,
+    ax,
+    path,
+    arg_tc,
+    plot_func,
+    three_dim=False,
+    elev=10,
+    azim_range=None,
+    fps=30,
+    extra_args=("-vcodec", "libx264"),
+    save_first=True,
+    save_last=True,
+    use_xlim=None,
+    use_ylim=None,
+    use_zlim=None,
+    format=".pdf",
+    **kwargs,
+):
+    if three_dim:
+        subplot_kw = {"projection": "3d"}
+    else:
+        subplot_kw = {}
+    _, scrub_ax =  plt.subplots(1, 1, subplot_kw=subplot_kw)
+    list(plot_func(arg_i, ax=scrub_ax, ind=0) for arg_i in arg_tc)
+    if use_xlim is None:
+        use_xlim = scrub_ax.get_xlim()
+    if use_ylim is None:
+        use_ylim = scrub_ax.get_ylim()
+    if three_dim and use_zlim is None:
+        use_zlim = scrub_ax.get_zlim()
+
+    n_frames = len(arg_tc)
+    if azim_range is None:
+        azim_range = (0, 360)
+    azim_range = np.linspace(*azim_range, n_frames)
+    f.set_tight_layout(True)
+
+    def animate(i):
+        ax.clear()
+        plot_func(arg_tc[i], ax=ax, ind=i)
+        ax.set_xlim(use_xlim)
+        ax.set_ylim(use_ylim)
+        if three_dim:
+            ax.set_zlim(use_zlim)
+            ax.view_init(elev=elev, azim=azim_range[i])
+        return (f,)
+
+    def init():
+        ax.set_xlim(use_xlim)
+        ax.set_ylim(use_ylim)
+        if three_dim:
+            ax.set_zlim(use_zlim)        
+        return f
+
+    anim = animation.FuncAnimation(
+        f,
+        animate,
+        init_func=init,
+        frames=n_frames,
+        interval=1,
+    )
+    anim.save(path, fps=fps, extra_args=extra_args, **kwargs)
+    path_root, _ = os.path.splitext(path)
+    if save_first:
+        path_first = path_root + "_first" + format
+        f, = animate(0)
+        f.savefig(path_first, bbox_inches="tight", transparent=True)
+    if save_last:
+        path_last = path_root + "_last" + format
+        f, = animate(-1)
+        f.savefig(path_last, bbox_inches="tight", transparent=True)
+
+
+def animate_3d_plot(*args, **kwargs):
+    return animate_plot(*args, three_dim=True, **kwargs)
 
 
 def rotate_3d_plot(
@@ -652,10 +845,13 @@ def rotate_3d_plot(
     n_frames=100,
     fps=30,
     extra_args=("-vcodec", "libx264"),
+    save_first=True,
+    save_last=True,
+    format=".pdf",        
     **kwargs,
 ):
     if azim_range is None:
-        azim_range = (0, 360)
+        azim_range = (45, 405)
     azim_range = np.linspace(*azim_range, n_frames)
 
     def animate(i):
@@ -673,6 +869,15 @@ def rotate_3d_plot(
         interval=1,
     )
     anim.save(path, fps=fps, extra_args=extra_args, **kwargs)
+    path_root, _ = os.path.splitext(path)
+    if save_first:
+        path_first = path_root + "_first" + format
+        f, = animate(0)
+        f.savefig(path_first, bbox_inches="tight", transparent=True)
+    if save_last:
+        path_last = path_root + "_last" + format
+        f, = animate(-1)
+        f.savefig(path_last, bbox_inches="tight", transparent=True)
 
 
 def plot_highdim_points(*args, ms=5, **kwargs):
