@@ -136,6 +136,7 @@ def plot_colored_line(
     func=None,
     ax=None,
     color_bounds=(0.3, 0.99),
+    marker=None,
     **kwargs,
 ):
     if u.check_list(cmap):
@@ -153,16 +154,19 @@ def plot_colored_line(
     if zs is None:
         points = np.array([xs, ys]).T.reshape(-1, 1, 2)
         lc_func = LineCollection
+        l_ = (xs, ys)
     else:
         points = np.array([xs, ys, zs]).T.reshape(-1, 1, 3)
         lc_func = Line3DCollection
+        l_ = (xs, ys, zs)
     segments = np.concatenate([points[:-1], points[1:]], axis=1)
     lc = lc_func(segments, array=col_inds, cmap=cmap, norm=norm, **kwargs)
     ax.add_collection(lc)
-    if zs is not None:
-        ax.plot(xs, ys, zs, alpha=0)
-    else:
-        ax.plot(xs, ys, alpha=0)
+    ax.plot(*l_, alpha=0)
+    if marker is not None:
+        cm = plt.get_cmap(cmap)
+        ax.plot(*l_, marker=marker, color=cm(col_inds[-1]))
+    
     return lc
 
 

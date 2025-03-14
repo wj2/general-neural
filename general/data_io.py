@@ -114,12 +114,14 @@ def combine_ntrls(*args):
 def _convolve_psth(psth_tm, binsize, xs, causal_xs=False, binwidth=20):
     filt_wid = int(np.round(binsize))
     filt = np.ones((1, 1, filt_wid)) / filt_wid
-    n_ts = psth_tm.shape[2]
-    out_len = int(n_ts - binsize + 1)
     mult = 1000 / binwidth
-    smooth_psth = sig.convolve(psth_tm, filt, mode="valid")
-    filt_xs = np.ones(filt.shape[-1]) / filt.shape[-1]
-    xs_adj = sig.convolve(xs, filt_xs, mode="valid")
+    if psth_tm.shape[-1] >= filt.shape[-1]:
+        smooth_psth = sig.convolve(psth_tm, filt, mode="valid")
+        filt_xs = np.ones(filt.shape[-1]) / filt.shape[-1]
+        xs_adj = sig.convolve(xs, filt_xs, mode="valid")
+    else:
+        smooth_psth = np.mean(psth_tm, axis=-1, keepdims=True)
+        xs_adj = np.mean(xs, keepdims=True)
     if causal_xs:
         xs_adj = xs_adj + (xs_adj[1] - xs_adj[0]) / 2
     return mult * smooth_psth, xs_adj
@@ -465,9 +467,13 @@ class Dataset(object):
                 )
             if binstep is not None:
                 xs_0 = xs_reg - xs_reg[0]
-                xs_rem = np.mod(xs_0 / binstep, 1)
-                step_mask = xs_rem == 0
+                xs_rem = np.mod(xs_0, binstep)
+                xs_rem = np.concatenate(([binstep], xs_rem, [binstep]))
+                # print(xs_rem.astype(int))
+                # print(xs_reg.astype(int))
+                step_mask = sig.argrelmin(xs_rem)[0] - 1
                 xs_reg = xs_reg[step_mask]
+                trl_sections = trl_sections[..., step_mask]
             if shuffle_trials:
                 rng = np.random.default_rng()
                 list(

@@ -1872,6 +1872,20 @@ def _combine_samples(*c_is, norm_labels=False):
     return data_full, labels_full
 
 
+def get_estimator_coeffs(ests, pipeline_ind=None):
+    est_i = ests.flatten()[0]
+    if pipeline_ind is not None:
+        est_i = est_i[pipeline_ind]
+    n_feats = est_i.n_features_in_
+    coeffs = np.zeros(ests.shape + (n_feats,))
+    for ind in u.make_array_ind_iterator(ests.shape):
+        est = ests[ind]
+        if pipeline_ind is not None:
+            est = est[pipeline_ind]
+        coeffs[ind] = est.coef_
+    return coeffs
+
+
 def get_multioutput_coeffs(ests, pipeline_ind=None, orthog=False):
     est_i = ests.flatten()[0]
     if pipeline_ind is not None:
