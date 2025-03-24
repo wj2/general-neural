@@ -166,7 +166,54 @@ def plot_colored_line(
     if marker is not None:
         cm = plt.get_cmap(cmap)
         ax.plot(*l_, marker=marker, color=cm(col_inds[-1]))
-    
+
+    return lc
+
+
+def plot_width_line(
+    xs,
+    ys,
+    zs=None,
+    wid_inds=None,
+    norm=None,
+    func=None,
+    ax=None,
+    color=None,
+    width_bounds=(1, 8),
+    vmin=0,
+    vmax=1,
+    marker=None,
+    **kwargs,
+):
+    if ax is None:
+        f, ax = plt.subplots(1, 1)
+    if func is not None:
+        wid_inds = func(xs, ys)
+    elif wid_inds is None:
+        wid_inds = np.linspace(*width_bounds, len(xs))
+    else:
+        wid_diff = width_bounds[1] - width_bounds[0]
+        wid_inds = wid_diff * (wid_inds - vmin) / (vmax - vmin)
+        wid_inds = wid_inds + width_bounds[0]
+    if norm is not None:
+        norm.autoscale(wid_inds)
+    # else:
+    #     norm = plt.Normalize(*width_bounds)
+    if zs is None:
+        points = np.array([xs, ys]).T.reshape(-1, 1, 2)
+        lc_func = LineCollection
+        l_ = (xs, ys)
+    else:
+        points = np.array([xs, ys, zs]).T.reshape(-1, 1, 3)
+        lc_func = Line3DCollection
+        l_ = (xs, ys, zs)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = lc_func(segments, linewidths=wid_inds, color=color, norm=norm, **kwargs)
+    ax.add_collection(lc)
+    ax.plot(*l_, alpha=0)
+    if marker is not None:
+        ax.plot(*l_, marker=marker, color=color, lw=wid_inds[0])
+
     return lc
 
 
@@ -684,7 +731,7 @@ def animate_plot_axs(
         subplot_kw = {"projection": "3d"}
     else:
         subplot_kw = {}
-    _, scrub_axs =  plt.subplots(*axs.shape, subplot_kw=subplot_kw)
+    _, scrub_axs = plt.subplots(*axs.shape, subplot_kw=subplot_kw)
     list(plot_func(arg_i, axs=scrub_axs) for arg_i in arg_tc)
     use_xlims = {
         ind: scrub_axs[ind].get_xlim() for ind in u.make_array_ind_iterator(axs.shape)
@@ -722,7 +769,8 @@ def animate_plot_axs(
             )
             list(
                 ax.view_init(elev=elev, azim=azim_range[i])
-                for ax in axs.flatten() if ax.name == "3d"
+                for ax in axs.flatten()
+                if ax.name == "3d"
             )
         return (f,)
 
@@ -754,11 +802,11 @@ def animate_plot_axs(
     path_root, _ = os.path.splitext(path)
     if save_first:
         path_first = path_root + "_first" + format
-        f, = animate(0)
+        (f,) = animate(0)
         f.savefig(path_first, bbox_inches="tight", transparent=True)
     if save_last:
         path_last = path_root + "_last" + format
-        f, = animate(-1)
+        (f,) = animate(-1)
         f.savefig(path_last, bbox_inches="tight", transparent=True)
 
 
@@ -785,7 +833,7 @@ def animate_plot(
         subplot_kw = {"projection": "3d"}
     else:
         subplot_kw = {}
-    _, scrub_ax =  plt.subplots(1, 1, subplot_kw=subplot_kw)
+    _, scrub_ax = plt.subplots(1, 1, subplot_kw=subplot_kw)
     list(plot_func(arg_i, ax=scrub_ax, ind=0) for arg_i in arg_tc)
     if use_xlim is None:
         use_xlim = scrub_ax.get_xlim()
@@ -814,7 +862,7 @@ def animate_plot(
         ax.set_xlim(use_xlim)
         ax.set_ylim(use_ylim)
         if three_dim:
-            ax.set_zlim(use_zlim)        
+            ax.set_zlim(use_zlim)
         return f
 
     anim = animation.FuncAnimation(
@@ -828,11 +876,11 @@ def animate_plot(
     path_root, _ = os.path.splitext(path)
     if save_first:
         path_first = path_root + "_first" + format
-        f, = animate(0)
+        (f,) = animate(0)
         f.savefig(path_first, bbox_inches="tight", transparent=True)
     if save_last:
         path_last = path_root + "_last" + format
-        f, = animate(-1)
+        (f,) = animate(-1)
         f.savefig(path_last, bbox_inches="tight", transparent=True)
 
 
@@ -851,7 +899,7 @@ def rotate_3d_plot(
     extra_args=("-vcodec", "libx264"),
     save_first=True,
     save_last=True,
-    format=".pdf",        
+    format=".pdf",
     **kwargs,
 ):
     if azim_range is None:
@@ -876,11 +924,11 @@ def rotate_3d_plot(
     path_root, _ = os.path.splitext(path)
     if save_first:
         path_first = path_root + "_first" + format
-        f, = animate(0)
+        (f,) = animate(0)
         f.savefig(path_first, bbox_inches="tight", transparent=True)
     if save_last:
         path_last = path_root + "_last" + format
-        f, = animate(-1)
+        (f,) = animate(-1)
         f.savefig(path_last, bbox_inches="tight", transparent=True)
 
 

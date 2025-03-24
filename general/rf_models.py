@@ -1364,7 +1364,8 @@ def ni_non_deriv_term(w, approx=False):
     if approx:
         de = d + e
     else:
-        _f = lambda x: ss.erf((1 - x) / w) * ss.erf(x / w)
+        def _f(x):
+            return ss.erf((1 - x) / w) * ss.erf(x / w)
         de = sint.quad(_f, 0, 1)[0]
 
     return np.pi * (w**2) * (a + b + c + de) / 2
@@ -1428,7 +1429,8 @@ def ni_deriv_term(w, approx=False):
             * (ss.erf(1 / (2 * w)) + (2 * w / spi) * (np.exp(-1 / (4 * (w**2))) - 1))
         )
     else:
-        _f = lambda x: ss.erf((1 - x) / w) * ss.erf(x / w)
+        def _f(x):
+            return ss.erf((1 - x) / w) * ss.erf(x / w)
         l = np.pi * (w**2) * sint.quad(_f, 0, 1)[0]
 
     m = d
@@ -1896,7 +1898,7 @@ def make_gaussian_vector_rf(
             new_scale = titrate_func(scales, pwr)
     else:
         new_scale = scales
-    print("rf", new_scale)
+    # print("rf", new_scale)
     rfs = ft.partial(
         eval_gaussian_vector_rf,
         cents=cents,

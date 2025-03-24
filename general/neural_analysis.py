@@ -132,7 +132,8 @@ class BalancedShuffleSplit:
 
 
 def zscore_tc_shape(
-        pop, scaler=skp.StandardScaler,
+    pop,
+    scaler=skp.StandardScaler,
 ):
     new_pop = np.zeros_like(pop)
     for i in range(pop.shape[-1]):
@@ -1893,16 +1894,22 @@ def get_multioutput_coeffs(ests, pipeline_ind=None, orthog=False):
     n_feats = est_i.n_features_in_
     n_outs = len(est_i.estimators_)
     coeffs = np.zeros(ests.shape + (n_outs, n_feats))
+    offsets = np.zeros(ests.shape + (n_outs,))
     for ind in u.make_array_ind_iterator(ests.shape):
         est = ests[ind]
         if pipeline_ind is not None:
             est = est[pipeline_ind]
         for j, est_j in enumerate(est.estimators_):
             coeffs[ind][j] = est_j.coef_
+            offsets[ind][j] = est_j.intercept_
         if orthog:
             q, _ = np.linalg.qr(coeffs[ind].T)
             coeffs[ind] = q.T
-    return coeffs
+    if orthog:
+        out = coeffs
+    else:
+        out = (coeffs, offsets)
+    return out
 
 
 def _fit_model_preds(data, labels, estimators):
@@ -1927,13 +1934,19 @@ def _fit_model_proj(data, labels, estimators):
     return out
 
 
-def _eval_fit_models(data, labels, estimators, scoring=None):
+def _eval_fit_models(data, labels, estimators, scoring=None, use_inds=None):
     out = np.zeros(len(estimators))
     for i, est in enumerate(estimators):
-        if scoring is not None:
-            scores = scoring(est, data, labels)
+        if use_inds is not None:
+            data_i = data[use_inds[i]]
+            labels_i = labels[use_inds[i]]
         else:
-            scores = est.score(data, labels)
+            data_i = data
+            labels_i = labels
+        if scoring is not None:
+            scores = scoring(est, data_i, labels_i)
+        else:
+            scores = est.score(data_i, labels_i)
         out[i] = scores
     return out
 
@@ -2083,6 +2096,7 @@ def fold_skl_continuous(
     gen_cs=None,
     test_prop=None,
     mean=True,
+    time_generalization=False,
     **model_kwargs,
 ):
     if test_prop is None:
@@ -2117,6 +2131,7 @@ def fold_skl_continuous(
         mean=mean,
         time_accumulate=time_accumulate,
         test_frac=test_prop,
+        time_generalization=time_generalization,
     )
     return out
 
@@ -2156,6 +2171,7 @@ def nominal_fold(
     gen_rel_var=None,
     return_projection=False,
     return_confusion=False,
+    time_generalization=False,
     **kwargs,
 ):
     x_len = c_flat.shape[-1]
@@ -2171,11 +2187,15 @@ def nominal_fold(
             + (x_len,)
         )
         pred_gen_proj = np.zeros_like(pred_gen)
+    if time_generalization:
+        time_gen = np.zeros((folds_n, x_len, x_len))
+        time_gen_gen = np.zeros_like(time_gen)
     if ret_projections:
         scoring = _distance_scorer
     else:
         scoring = None
     ests = np.zeros((folds_n, x_len), dtype=object)
+
     projs = []
     test_inds = []
     confusion = []
@@ -2240,6 +2260,22 @@ def nominal_fold(
             )
             pred_gen[..., j] = _fit_model_preds(gen_data, l_gen, out_j["estimator"])
             pred_gen_proj[..., j] = _fit_model_proj(gen_data, l_gen, out_j["estimator"])
+        if time_generalization:
+            for k in range(x_len):
+                time_gen[:, j, k] = _eval_fit_models(
+                    c_flat[..., k].T,
+                    labels,
+                    out_j["estimator"],
+                    scoring=scoring,
+                    use_inds=out_j["test_inds"],
+                )
+                if c_gen is not None:
+                    time_gen_gen[:, j, k] = _eval_fit_models(
+                        c_gen[..., k].T,
+                        l_gen,
+                        out_j["estimator"],
+                        scoring=scoring,
+                    )
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
@@ -2265,7 +2301,10 @@ def nominal_fold(
         out["rel_var_gen"] = gen_rel_var
     if rel_var is not None:
         out["rel_var"] = rvs
-
+    if time_generalization:
+        out["time_generalization"] = time_gen
+        if c_gen is not None:
+            out["time_generalization_gen"] = time_gen_gen
     return out
 
 
@@ -2469,7 +2508,11 @@ def _time_collapsed_fold(
 
 
 def fold_skl_shape(
-        c_flat, labels, folds_n, c_gen=None, **kwargs,
+    c_flat,
+    labels,
+    folds_n,
+    c_gen=None,
+    **kwargs,
 ):
     c_flat = np.swapaxes(c_flat, 0, 1)
     if c_gen is not None:
@@ -2504,6 +2547,7 @@ def fold_skl_flat(
     balance_rel_fields=False,
     return_confusion=False,
     rng_seed=None,
+    time_generalization=False,
     **model_kwargs,
 ):
     if test_prop is None:
@@ -2561,6 +2605,7 @@ def fold_skl_flat(
             return_projection=return_projection,
             return_confusion=return_confusion,
             rng_seed=rng_seed,
+            time_generalization=time_generalization,
         )
     return out
 
