@@ -2,6 +2,11 @@ import numpy as np
 import scipy.stats as sts
 import itertools as it
 import functools as ft
+import scipy.special as ss
+import sklearn.preprocessing as skp
+import sklearn.pipeline as sklpipe
+import sklearn.decomposition as skd
+import sklearn.metrics.pairwise as skmp
 
 import general.utility as u
 
@@ -89,6 +94,127 @@ class ColoringTask(Task):
         return self.c_func(stim)
 
 
+def make_discrete_order_transform(k, n, order, use_pca=True):
+    categories = [np.arange(n, dtype=int)] * k
+    if n**k > 10000:
+        print("there are {} unique stimuli... this will take awhile".format(n**k))
+    binary = list(it.product(range(n), repeat=k))
+    ohe = skp.OneHotEncoder(categories=categories, sparse_output=False)
+    pf = skp.PolynomialFeatures(
+        degree=(order, order), include_bias=False, interaction_only=True
+    )
+    steps = [ohe, pf]
+    if use_pca:
+        pca = skd.PCA()
+        steps.append(pca)    
+    pipe = sklpipe.make_pipeline(*steps)
+    pipe = pipe.fit(binary)
+    mask = np.var(pipe.transform(binary), axis=0) > 1e-10
+
+    def trs(x):
+        return pipe.transform(x)[:, mask]
+
+    return trs, np.sum(mask)
+
+
+class DiscreteOrderTask(Task):
+    def __init__(
+        self,
+        t_inds,
+        order,
+        n_vals=2,
+        task_vec=None,
+        offset=None,
+        axis_aligned=False,
+        offset_var=0,
+        scale=2,
+    ):
+        super().__init__(t_inds)
+        self.trs, self.vec_dim = make_discrete_order_transform(
+            len(self.t_inds), n_vals, order
+        )
+        if task_vec is None:
+            vec = sts.norm(0, 1).rvs((1, self.vec_dim))
+            task_vec = u.make_unit_vector(vec)
+        self.task_vec = task_vec
+        if offset is None:
+            offset = sts.norm(0, np.sqrt(offset_var)).rvs(1, 1)
+        self.offset = offset
+
+    def __call__(self, x):
+        stim = x[:, self.t_inds]
+        rep = self.trs(stim)
+        proj = np.sum(self.task_vec * rep, axis=1, keepdims=True)
+        return (proj + self.offset) > 0
+
+
+
+def make_strict_discrete_order_transform(k, n, order, retries=10, **kwargs):
+    for i in range(retries):
+        binary, labels = _label_stim(k, n, order, **kwargs)
+        if np.all(np.abs(labels) > 0):
+            break
+
+    def trs(x):
+        ds = skmp.euclidean_distances(x, binary)
+        inds = np.argmin(ds, axis=1)
+        return labels[inds]
+
+    return trs, None
+
+
+def _label_stim(k, n, order, balanced=True, exclusion=None):
+    if n**k > 10000:
+        print("there are {} unique stimuli... this will take awhile".format(n**k))
+    if exclusion is None:
+        exclusion = ()
+    binary = np.array(list(it.product(range(n), repeat=k)))
+    labels = np.zeros(len(binary))
+    combs = np.array(list(it.combinations(range(k), order)))
+    sub_stim = np.array(list(it.product(range(n), repeat=order)))
+    sub_stim_all = np.tile(sub_stim, (int(ss.comb(k, order)), 1))
+    combs_all = np.repeat(combs, n**order, axis=0)
+
+    exclusion_mask = np.ones(len(combs_all), dtype=bool)
+    for (fs, vs) in exclusion:
+        fs_match = np.all(combs_all == np.array(fs)[None], axis=1)
+        vs_match = np.all(sub_stim_all == np.array(vs)[None], axis=1)
+        exclude = np.logical_and(fs_match, vs_match)
+        exclusion_mask = np.logical_xor(exclusion_mask, exclude)
+
+    sub_stim_all = sub_stim_all[exclusion_mask]
+    combs_all = combs_all[exclusion_mask]
+    
+    rng = np.random.default_rng()
+    shuff_inds = rng.permutation(len(combs_all))
+    if balanced:
+        signs = np.tile((-1, 1), int(np.ceil(len(shuff_inds) / 2)))
+    else:
+        signs = rng.choice((-1, 1), size=len(shuff_inds))
+    j = 0
+    for i, si in enumerate(shuff_inds):
+        feats_i = np.array(combs_all[si])
+        ss_i = np.array(sub_stim_all[si])
+        mask = np.all(binary[:, feats_i] == ss_i[None], axis=1)
+        if np.all(labels[mask] == 0):
+            sign = signs[j]
+            j += 1
+            labels[mask] = sign
+    return binary, labels[:, None]
+
+
+class DiscreteOrderTaskStrict(Task):
+    def __init__(self, t_inds, order, n_vals=2, **kwargs):
+        super().__init__(t_inds)
+        self.trs, self.vec_dim = make_strict_discrete_order_transform(
+            len(self.t_inds), n_vals, order, **kwargs,
+        )
+
+    def __call__(self, x):
+        stim = x[:, self.t_inds]
+        return self.trs(stim) > 0
+
+
 class LinearTask(Task):
     def __init__(
         self,
@@ -97,7 +223,7 @@ class LinearTask(Task):
         offset=None,
         axis_aligned=False,
         offset_var=0,
-        center=.5,
+        center=0.5,
         scale=2,
     ):
         super().__init__(t_inds)
@@ -111,27 +237,47 @@ class LinearTask(Task):
         self.center = center
         self.scale = scale
 
-    def __call__(self, x): 
+    def __call__(self, x):
         stim = self.scale * (x[:, self.t_inds] - self.center)
         proj = np.sum(self.task_vec * stim, axis=1, keepdims=True)
         return (proj + self.offset) > 0
 
 
 class ContextualTask(Task):
-    def __init__(self, *tasks, c_inds=None):
+    def __init__(self, *tasks, c_inds=None, single_ind=False):
+        if single_ind:
+            assert len(tasks) == 2
+        self.single_ind = single_ind
         if c_inds is None:
-            c_inds = np.arange(-len(tasks), 0)
+            c_inds = np.arange(-len(tasks) + single_ind, 0)
         self.c_inds = c_inds
         self.tasks = tasks
 
+    def __len__(self):
+        return len(self.tasks[0])
+
     def __call__(self, x):
-        task_inds = np.argmax(x[:, self.c_inds], axis=1)
+        if self.single_ind:
+            task_inds = x[:, self.c_inds]
+        else:
+            task_inds = np.argmax(x[:, self.c_inds], axis=1)
         outs_all = np.stack(list(t(x) for t in self.tasks), axis=0)
-        
-        targets = np.zeros(outs_all.shape[1:])
+
+        targets = np.zeros_like(outs_all[0])
         for i in range(x.shape[0]):
             targets[i] = outs_all[task_inds[i], i]
         return targets
+
+
+def make_contextual_task(
+    t_inds, n_tasks=1, n_contexts=2, single_ind=False, c_inds=None
+):
+    tasks = []
+    for i in range(n_contexts):
+        task_i = LinearTask.make_task_group(n_tasks, t_inds)
+        tasks.append(task_i)
+    contask = ContextualTask(*tasks, single_ind=single_ind)
+    return contask
 
 
 def generate_many_colorings(n_colorings, n_g):

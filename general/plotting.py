@@ -700,10 +700,10 @@ def plot_highdim_trace(
         if plot_line:
             line_kwargs = kwargs.copy()
             if line_color is None:
-                line_color = line_kwargs.pop("color", None)
+                line_color_i = line_kwargs.pop("color", None)
             else:
                 line_kwargs.pop("color", None)
-            l_ = ax.plot(*y_mu.T, color=line_color, **line_kwargs)
+            l_ = ax.plot(*y_mu.T, color=line_color_i, **line_kwargs)
             if line_color is None:
                 kwargs["color"] = l_[0].get_color()
         if plot_points:

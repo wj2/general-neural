@@ -14,6 +14,7 @@ import configparser
 import sklearn.decomposition as skd
 import sklearn.preprocessing as skp
 import sklearn.utils as sku
+import numbers
 import matplotlib.pyplot as plt
 import joblib as jl
 
@@ -226,7 +227,7 @@ def load_folder_regex_generator(
         if open_file:
             try: 
                 inp = open(load_path, open_str)
-            except FileNotFoundError as e:
+            except FileNotFoundError:
                 print("could not find {}".format(load_path))
                 continue
         else:
@@ -247,7 +248,7 @@ def make_cluster_db(
             args["path"] = path
             args_all.append(args)
             keys_all.append(list(args.keys()))
-        except TypeError as e:
+        except TypeError:
             pass
     db = pd.DataFrame.from_records(args_all)
     return db
@@ -345,7 +346,7 @@ def merge_params_dict(args, d):
 def check_list(x):
     try:
         len(x)
-        ret = type(x) is not str
+        ret = not isinstance(x, str)
     except TypeError:
         ret = False
     return ret
@@ -381,12 +382,13 @@ class ConfigParserColor(configparser.ConfigParser):
         string = self.get(*args, **kwargs)
         return plt.get_cmap(string)
 
-    def getlist(self, *args, typefunc=None, **kwargs):
+    def getlist(self, *args, typefunc=None, splitchar=",", **kwargs):
         if typefunc is None:
-            typefunc = lambda x: x
+            def typefunc(x):
+                return x
         string = self.get(*args, **kwargs)
         if string is not None:
-            vals = string.split(",")
+            vals = string.split(splitchar)
             out = list(typefunc(v.strip()) for v in vals)
         else:
             out = string
@@ -498,25 +500,25 @@ def generate_all_combinations(size, starting_order):
     return combs
 
 
-def pickle_all_stan_models(
-    folder="general/stan_models/", pattern=".*\\.stan$", decoder="utf-8"
-):
-    fls = os.listdir(folder)
-    fls = filter(lambda x: re.match(pattern, x) is not None, fls)
-    for f in fls:
-        path = os.path.join(folder, f)
-        pickle_stan_model(path, decoder)
+# def pickle_all_stan_models(
+#     folder="general/stan_models/", pattern=".*\\.stan$", decoder="utf-8"
+# ):
+#     fls = os.listdir(folder)
+#     fls = filter(lambda x: re.match(pattern, x) is not None, fls)
+#     for f in fls:
+#         path = os.path.join(folder, f)
+#         pickle_stan_model(path, decoder)
 
 
-def pickle_stan_model(path, decoder="utf-8"):
-    name, ext = os.path.splitext(path)
-    with open(path, "rb") as f:
-        s = f.read().decode(decoder)
-    newname = name + ".pkl"
-    sm = ps.StanModel(model_code=s)
-    with open(newname, "wb") as f:
-        pickle.dump(sm, f)
-    return newname
+# def pickle_stan_model(path, decoder="utf-8"):
+#     name, ext = os.path.splitext(path)
+#     with open(path, "rb") as f:
+#         s = f.read().decode(decoder)
+#     newname = name + ".pkl"
+#     sm = ps.StanModel(model_code=s)
+#     with open(newname, "wb") as f:
+#         pickle.dump(sm, f)
+#     return newname
 
 
 def h2(p):
@@ -797,60 +799,60 @@ def collapse_array_dim(arr, col_dim, stack_dim=0):
     return np.concatenate(arrs, axis=stack_dim)
 
 
-def load_collection_bhvmats(
-    datadir,
-    params,
-    expr=".*\\.mat",
-    forget_imglog=False,
-    repl_logpath=None,
-    log_suffix="_imglog.txt",
-    make_log_name=True,
-    trial_cutoff=300,
-    max_trials=None,
-    dates=None,
-    use_data_name=False,
-):
-    dirfiles = os.listdir(datadir)
-    matchfiles = filter(lambda x: re.match(expr, x) is not None, dirfiles)
-    ld = {}
-    full_bhv = None
-    for i, mf in enumerate(matchfiles):
-        name, ext = os.path.splitext(mf)
-        if make_log_name:
-            imglog = os.path.join(datadir, name + log_suffix)
-        else:
-            imglog = None
-        full_mf = os.path.join(datadir, mf)
-        if forget_imglog:
-            ld = {}
-        try:
-            bhv, ld = load_bhvmat_imglog(
-                full_mf,
-                imglog,
-                datanum=i,
-                prevlog_dict=ld,
-                dates=dates,
-                repl_logpath=repl_logpath,
-                use_data_name=use_data_name,
-                **params,
-            )
-            if max_trials is not None:
-                bhv = bhv[:max_trials]
-            if len(bhv) > trial_cutoff:
-                if full_bhv is None:
-                    full_bhv = bhv
-                else:
-                    full_bhv = np.concatenate((full_bhv, bhv), axis=0)
-            else:
-                print(
-                    "file {} has less than {} trials and was " "excluded".format(
-                        mf, trial_cutoff
-                    )
-                )
-        except Exception as ex:
-            print("error on {}".format(full_mf))
-            print(ex)
-    return full_bhv
+# def load_collection_bhvmats(
+#     datadir,
+#     params,
+#     expr=".*\\.mat",
+#     forget_imglog=False,
+#     repl_logpath=None,
+#     log_suffix="_imglog.txt",
+#     make_log_name=True,
+#     trial_cutoff=300,
+#     max_trials=None,
+#     dates=None,
+#     use_data_name=False,
+# ):
+#     dirfiles = os.listdir(datadir)
+#     matchfiles = filter(lambda x: re.match(expr, x) is not None, dirfiles)
+#     ld = {}
+#     full_bhv = None
+#     for i, mf in enumerate(matchfiles):
+#         name, ext = os.path.splitext(mf)
+#         if make_log_name:
+#             imglog = os.path.join(datadir, name + log_suffix)
+#         else:
+#             imglog = None
+#         full_mf = os.path.join(datadir, mf)
+#         if forget_imglog:
+#             ld = {}
+#         try:
+#             bhv, ld = load_bhvmat_imglog(
+#                 full_mf,
+#                 imglog,
+#                 datanum=i,
+#                 prevlog_dict=ld,
+#                 dates=dates,
+#                 repl_logpath=repl_logpath,
+#                 use_data_name=use_data_name,
+#                 **params,
+#             )
+#             if max_trials is not None:
+#                 bhv = bhv[:max_trials]
+#             if len(bhv) > trial_cutoff:
+#                 if full_bhv is None:
+#                     full_bhv = bhv
+#                 else:
+#                     full_bhv = np.concatenate((full_bhv, bhv), axis=0)
+#             else:
+#                 print(
+#                     "file {} has less than {} trials and was " "excluded".format(
+#                         mf, trial_cutoff
+#                     )
+#                 )
+#         except Exception as ex:
+#             print("error on {}".format(full_mf))
+#             print(ex)
+#     return full_bhv
 
 
 code_to_direc_saccdmc = {201: 0, 219: 270, 213: 180, 207: 90}
@@ -1173,331 +1175,331 @@ def make_stat_string(s, samps, perc=95):
     return s.format(low, high)
 
 
-def load_bhvmat_imglog(
-    path_bhv,
-    path_log=None,
-    noerr=True,
-    prevlog_dict=None,
-    trial_field="TrialNumber",
-    fixation_on=35,
-    fixation_off=36,
-    start_trial=9,
-    datanum=0,
-    lever_release=4,
-    lever_hold=7,
-    reward_given=48,
-    end_trial=18,
-    fixation_acq=8,
-    left_img_on=191,
-    left_img_off=192,
-    right_img_on=195,
-    right_img_off=196,
-    default_wid=5,
-    default_hei=5,
-    default_img1_xy=(-5, 0),
-    default_img2_xy=(5, 0),
-    spks_buff=1000,
-    plt_conds=(7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
-    sdms_conds=(1, 2, 3, 4, 5, 6, 7, 8),
-    ephys=False,
-    centimgon=25,
-    centimgoff=26,
-    eyedata_len=500,
-    eye_params={},
-    dates=None,
-    xy1_loc_dict=None,
-    xy2_loc_dict=None,
-    repl_logpath=None,
-    use_data_name=False,
-    lum_conds=None,
-    correct_sdms_position=True,
-):
-    if prevlog_dict is None:
-        log_dict = {}
-    else:
-        log_dict = prevlog_dict
-    data = sio.loadmat(path_bhv)
-    if ephys:
-        data = data["data"][0]
-        bhv = data["BHV"][0]
-    else:
-        data = data["bhv"]
-        bhv = data
-    print("---")
-    if path_log is None and "imglog" in data.dtype.names:
-        path_log = data["imglog"][0][0]
-        path_log = path_log.replace("uc/freedman/", "")
-        # if use_data_name:
-        _, name = os.path.split(path_log)
-        folder, _ = os.path.split(path_bhv)
-        path_log = os.path.join(folder, name)
-    elif path_log is None and use_data_name:
-        filename = bhv["DataFileName"][0][0][0]
-        fn, ext = os.path.splitext(filename)
-        folder, end = os.path.split(path_bhv)
-        print(fn)
-        alt_fn1 = fn.replace("dimming-", "dim_and_pref_looking-")
-        alt_fn2 = alt_fn1.replace("dimming_task-", "dim_and_pref_looking-")
-        path_log = os.path.join(folder, fn + "_imglog.txt")
-        alt_path1 = os.path.join(folder, alt_fn1 + "_imglog.txt")
-        alt_path2 = os.path.join(folder, alt_fn2 + "_imglog.txt")
-        if os.path.exists(alt_path1):
-            path_log = alt_path1
-        elif os.path.exists(alt_path2):
-            path_log = alt_path2
-    log = None
-    if "imglog_data" in data.dtype.names:
-        raw_log = data["imglog_data"][0][0]
-        log = list(x[0].encode() for x in raw_log)
-    if ephys:
-        neuro = data["NEURO"][0]
-        neurons = split_spikes_startdur(
-            neuro["Neuron"][0, 0],
-            neuro["TrialTimes"][0, 0],
-            neuro["TrialDurations"][0, 0],
-            buff=spks_buff,
-        )
-    if path_log is not None and log is None:
-        if repl_logpath is not None:
-            p, name = os.path.split(path_log)
-            path_log = os.path.join(repl_logpath, name)
-        if os.path.exists(path_log):
-            log = open(path_log, "rb").readlines()
-    if path_log is not None and not os.path.exists(path_log) and log is None:
-        print("imglog path does not exist")
-        print(path_log)
-        print("and no log data provided; not attempting to load")
-        path_log = None
-        cns = bhv["ConditionNumber"][0, 0][:, 0]
-        n_pltrials = sum(c in plt_conds for c in cns)
-        print("there are {} pref looking trials".format(n_pltrials))
-    else:
-        print("---")
-        print("imglog found")
-        print(path_log)
-        print("---")
-    if dates is not None:
-        date_pattern = "[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}"
-        m = re.search(date_pattern, path_bhv)
-        if m is not None:
-            included_date = m[0] in dates
-        else:
-            print("no date found in file name")
-            included_date = False
-    else:
-        included_date = None
-    trls = bhv[trial_field][0, 0]
-    fields = [
-        "trial_type",
-        "TrialError",
-        "block_number",
-        "code_numbers",
-        "code_times",
-        "trial_starts",
-        "datafile",
-        "datanum",
-        "samp_img_on",
-        "samp_img_off",
-        "trialnum",
-        "image_nos",
-        "leftimg",
-        "rightimg",
-        "leftviews",
-        "rightviews",
-        "fixation_on",
-        "fixation_off",
-        "lever_release",
-        "lever_hold",
-        "reward_time",
-        "ISI_start",
-        "ISI_end",
-        "fixation_acquired",
-        "left_img_on",
-        "left_img_off",
-        "right_img_on",
-        "right_img_off",
-        "eyepos",
-        "spike_times",
-        "LFP",
-        "task_cond_num",
-        "img1_xy",
-        "img2_xy",
-        "img_wid",
-        "img_hei",
-        "test_array_on",
-        "test_array_off",
-        "left_first",
-        "right_first",
-        "first_sacc_time",
-        "angular_separation",
-        "included_date",
-        "saccade_begs",
-        "saccade_ends",
-        "saccade_lens",
-        "saccade_targ",
-        "leftimg_type",
-        "rightimg_type",
-        "first_look",
-        "on_left_img",
-        "on_right_img",
-        "not_on_img",
-    ]
-    dt = {"names": fields, "formats": ["O"] * len(fields)}
-    x = np.zeros(len(trls), dtype=dt)
-    for i, t in enumerate(trls):
-        x[i]["included_date"] = included_date
-        x[i]["code_numbers"] = bhv["CodeNumbers"][0, 0][0, i]
-        x[i]["code_times"] = bhv["CodeTimes"][0, 0][0, i]
-        x[i]["trial_starts"] = get_bhvcode_time(
-            start_trial, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["ISI_end"] = get_bhvcode_time(
-            start_trial, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        if ephys:
-            x[i]["spike_times"] = dict(
-                (k, neurons[k][i] + x[i]["trial_starts"]) for k in neurons
-            )
-        else:
-            x[i]["spike_times"] = None
-        x[i]["trial_type"] = bhv["ConditionNumber"][0, 0][i, 0]
-        x[i]["task_cond_num"] = bhv["ConditionNumber"][0, 0][i, 0]
-        x[i]["TrialError"] = bhv["TrialError"][0, 0][i, 0]
-        x[i]["block_number"] = bhv["BlockNumber"][0, 0][i, 0]
-        x[i]["ISI_start"] = get_bhvcode_time(
-            end_trial, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        # x[i]['datafile'] = bhv['DataFileName'][0][0][0]
-        x[i]["datanum"] = datanum
-        x[i]["samp_img_on"] = get_bhvcode_time(
-            centimgon, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["samp_img_off"] = get_bhvcode_time(
-            centimgoff, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["test_array_on"] = get_bhvcode_time(
-            centimgon, x[i]["code_numbers"], x[i]["code_times"], first=False
-        )
-        x[i]["test_array_off"] = get_bhvcode_time(
-            centimgoff, x[i]["code_numbers"], x[i]["code_times"], first=False
-        )
-        x[i]["trialnum"] = bhv["TrialNumber"][0, 0][i, 0]
-        x[i]["image_nos"] = []
-        if (
-            x[i]["trial_type"] in plt_conds or x[i]["trial_type"] in sdms_conds
-        ) and log is not None:
-            entry1 = log.pop(0)
-            entry1 = entry1.strip(b"\r\n").split(b"\t")
-            tn1, s1, _, cond1, vs1, cat1, img1 = entry1
-            entry2 = log.pop(0)
-            entry2 = entry2.strip(b"\r\n").split(b"\t")
-            tn2, s2, _, cond2, vs2, cat2, img2 = entry2
-            if int(tn1) != int(x[i]["trialnum"]):
-                print(x[i]["trialnum"])
-                print(x[0]["trialnum"])
-                # print(filename)
-                print(tn1, x[i]["trialnum"])
-            assert tn1 == tn2
-            assert int(tn1) == int(x[i]["trialnum"])
-            img1_n, ext1 = os.path.splitext(img1)
-            img2_n, ext2 = os.path.splitext(img2)
-            log_dict[img1_n] = log_dict.get(img1_n, 0) + 1
-            log_dict[img2_n] = log_dict.get(img2_n, 0) + 1
-            x[i]["leftimg"] = img1_n
-            x[i]["rightimg"] = img2_n
-            x[i]["leftviews"] = log_dict[img1_n]
-            x[i]["rightviews"] = log_dict[img2_n]
-            x[i]["leftimg_type"] = cat1
-            x[i]["rightimg_type"] = cat2
-        else:
-            x[i]["leftimg"] = ""
-            x[i]["rightimg"] = ""
-            x[i]["leftviews"] = 0
-            x[i]["rightviews"] = 0
-        x[i]["fixation_on"] = get_bhvcode_time(
-            fixation_on, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["fixation_off"] = get_bhvcode_time(
-            fixation_off, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["lever_release"] = get_bhvcode_time(
-            lever_release, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["lever_hold"] = get_bhvcode_time(
-            lever_hold, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["reward_time"] = get_bhvcode_time(
-            reward_given, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["fixation_acquired"] = get_bhvcode_time(
-            fixation_acq, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["left_img_on"] = get_bhvcode_time(
-            left_img_on, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["left_img_off"] = get_bhvcode_time(
-            left_img_off, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["right_img_on"] = get_bhvcode_time(
-            right_img_on, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        x[i]["right_img_off"] = get_bhvcode_time(
-            right_img_off, x[i]["code_numbers"], x[i]["code_times"], first=True
-        )
-        ep = bhv["AnalogData"][0, 0][0, i]["EyeSignal"][0, 0]
-        x[i]["eyepos"] = ep
-        if (
-            "UserVars" in bhv.dtype.names
-            and "img1_xy" in bhv["UserVars"][0, 0].dtype.names
-        ):
-            tmp1 = bhv["UserVars"][0, 0]["img1_xy"]
-            tmp2 = bhv["UserVars"][0, 0]["img2_xy"]
-            if tmp1.shape == (1, 1) and tmp1[0, 0].shape[1] > i:
-                if tmp1[0, 0][0, i].shape[1] > 0:
-                    x[i]["img1_xy"] = tmp1[0, 0][0, i][0]
-                    x[i]["img2_xy"] = tmp2[0, 0][0, i][0]
-                else:
-                    x[i]["img1_xy"] = default_img1_xy
-                    x[i]["img2_xy"] = default_img2_xy
-            elif tmp1.shape[1] > i and tmp1[0, i].shape[1] > 0:
-                x[i]["img1_xy"] = tmp1[0, i]
-                x[i]["img2_xy"] = tmp2[0, i]
-            else:
-                x[i]["img1_xy"] = default_img1_xy
-                x[i]["img2_xy"] = default_img2_xy
-        elif xy1_loc_dict is not None and not np.any(np.isnan(xy1_loc_dict[datanum])):
-            x[i]["img1_xy"] = xy1_loc_dict[datanum]
-            x[i]["img2_xy"] = xy2_loc_dict[datanum]
-        else:
-            x[i]["img1_xy"] = default_img1_xy
-            x[i]["img2_xy"] = default_img2_xy
-        if (
-            "UserVars" in bhv.dtype.names
-            and "img_wid" in bhv["UserVars"][0, 0].dtype.names
-            and bhv["UserVars"][0, 0]["img_wid"].shape[1] > i
-        ):
-            x[i]["img_wid"] = bhv["UserVars"][0, 0]["img_wid"][0, i]
-            x[i]["img_hei"] = bhv["UserVars"][0, 0]["img_hei"][0, i]
-        else:
-            x[i]["img_wid"] = default_wid
-            x[i]["img_hei"] = default_hei
-        _add_eye_info(x[i], eye_params, eyedata_len)
+# def load_bhvmat_imglog(
+#     path_bhv,
+#     path_log=None,
+#     noerr=True,
+#     prevlog_dict=None,
+#     trial_field="TrialNumber",
+#     fixation_on=35,
+#     fixation_off=36,
+#     start_trial=9,
+#     datanum=0,
+#     lever_release=4,
+#     lever_hold=7,
+#     reward_given=48,
+#     end_trial=18,
+#     fixation_acq=8,
+#     left_img_on=191,
+#     left_img_off=192,
+#     right_img_on=195,
+#     right_img_off=196,
+#     default_wid=5,
+#     default_hei=5,
+#     default_img1_xy=(-5, 0),
+#     default_img2_xy=(5, 0),
+#     spks_buff=1000,
+#     plt_conds=(7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
+#     sdms_conds=(1, 2, 3, 4, 5, 6, 7, 8),
+#     ephys=False,
+#     centimgon=25,
+#     centimgoff=26,
+#     eyedata_len=500,
+#     eye_params={},
+#     dates=None,
+#     xy1_loc_dict=None,
+#     xy2_loc_dict=None,
+#     repl_logpath=None,
+#     use_data_name=False,
+#     lum_conds=None,
+#     correct_sdms_position=True,
+# ):
+#     if prevlog_dict is None:
+#         log_dict = {}
+#     else:
+#         log_dict = prevlog_dict
+#     data = sio.loadmat(path_bhv)
+#     if ephys:
+#         data = data["data"][0]
+#         bhv = data["BHV"][0]
+#     else:
+#         data = data["bhv"]
+#         bhv = data
+#     print("---")
+#     if path_log is None and "imglog" in data.dtype.names:
+#         path_log = data["imglog"][0][0]
+#         path_log = path_log.replace("uc/freedman/", "")
+#         # if use_data_name:
+#         _, name = os.path.split(path_log)
+#         folder, _ = os.path.split(path_bhv)
+#         path_log = os.path.join(folder, name)
+#     elif path_log is None and use_data_name:
+#         filename = bhv["DataFileName"][0][0][0]
+#         fn, ext = os.path.splitext(filename)
+#         folder, end = os.path.split(path_bhv)
+#         print(fn)
+#         alt_fn1 = fn.replace("dimming-", "dim_and_pref_looking-")
+#         alt_fn2 = alt_fn1.replace("dimming_task-", "dim_and_pref_looking-")
+#         path_log = os.path.join(folder, fn + "_imglog.txt")
+#         alt_path1 = os.path.join(folder, alt_fn1 + "_imglog.txt")
+#         alt_path2 = os.path.join(folder, alt_fn2 + "_imglog.txt")
+#         if os.path.exists(alt_path1):
+#             path_log = alt_path1
+#         elif os.path.exists(alt_path2):
+#             path_log = alt_path2
+#     log = None
+#     if "imglog_data" in data.dtype.names:
+#         raw_log = data["imglog_data"][0][0]
+#         log = list(x[0].encode() for x in raw_log)
+#     if ephys:
+#         neuro = data["NEURO"][0]
+#         neurons = split_spikes_startdur(
+#             neuro["Neuron"][0, 0],
+#             neuro["TrialTimes"][0, 0],
+#             neuro["TrialDurations"][0, 0],
+#             buff=spks_buff,
+#         )
+#     if path_log is not None and log is None:
+#         if repl_logpath is not None:
+#             p, name = os.path.split(path_log)
+#             path_log = os.path.join(repl_logpath, name)
+#         if os.path.exists(path_log):
+#             log = open(path_log, "rb").readlines()
+#     if path_log is not None and not os.path.exists(path_log) and log is None:
+#         print("imglog path does not exist")
+#         print(path_log)
+#         print("and no log data provided; not attempting to load")
+#         path_log = None
+#         cns = bhv["ConditionNumber"][0, 0][:, 0]
+#         n_pltrials = sum(c in plt_conds for c in cns)
+#         print("there are {} pref looking trials".format(n_pltrials))
+#     else:
+#         print("---")
+#         print("imglog found")
+#         print(path_log)
+#         print("---")
+#     if dates is not None:
+#         date_pattern = "[0-9]{2}[-_]?[0-9]{2}[_-]?[0-9]{4}"
+#         m = re.search(date_pattern, path_bhv)
+#         if m is not None:
+#             included_date = m[0] in dates
+#         else:
+#             print("no date found in file name")
+#             included_date = False
+#     else:
+#         included_date = None
+#     trls = bhv[trial_field][0, 0]
+#     fields = [
+#         "trial_type",
+#         "TrialError",
+#         "block_number",
+#         "code_numbers",
+#         "code_times",
+#         "trial_starts",
+#         "datafile",
+#         "datanum",
+#         "samp_img_on",
+#         "samp_img_off",
+#         "trialnum",
+#         "image_nos",
+#         "leftimg",
+#         "rightimg",
+#         "leftviews",
+#         "rightviews",
+#         "fixation_on",
+#         "fixation_off",
+#         "lever_release",
+#         "lever_hold",
+#         "reward_time",
+#         "ISI_start",
+#         "ISI_end",
+#         "fixation_acquired",
+#         "left_img_on",
+#         "left_img_off",
+#         "right_img_on",
+#         "right_img_off",
+#         "eyepos",
+#         "spike_times",
+#         "LFP",
+#         "task_cond_num",
+#         "img1_xy",
+#         "img2_xy",
+#         "img_wid",
+#         "img_hei",
+#         "test_array_on",
+#         "test_array_off",
+#         "left_first",
+#         "right_first",
+#         "first_sacc_time",
+#         "angular_separation",
+#         "included_date",
+#         "saccade_begs",
+#         "saccade_ends",
+#         "saccade_lens",
+#         "saccade_targ",
+#         "leftimg_type",
+#         "rightimg_type",
+#         "first_look",
+#         "on_left_img",
+#         "on_right_img",
+#         "not_on_img",
+#     ]
+#     dt = {"names": fields, "formats": ["O"] * len(fields)}
+#     x = np.zeros(len(trls), dtype=dt)
+#     for i, t in enumerate(trls):
+#         x[i]["included_date"] = included_date
+#         x[i]["code_numbers"] = bhv["CodeNumbers"][0, 0][0, i]
+#         x[i]["code_times"] = bhv["CodeTimes"][0, 0][0, i]
+#         x[i]["trial_starts"] = get_bhvcode_time(
+#             start_trial, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["ISI_end"] = get_bhvcode_time(
+#             start_trial, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         if ephys:
+#             x[i]["spike_times"] = dict(
+#                 (k, neurons[k][i] + x[i]["trial_starts"]) for k in neurons
+#             )
+#         else:
+#             x[i]["spike_times"] = None
+#         x[i]["trial_type"] = bhv["ConditionNumber"][0, 0][i, 0]
+#         x[i]["task_cond_num"] = bhv["ConditionNumber"][0, 0][i, 0]
+#         x[i]["TrialError"] = bhv["TrialError"][0, 0][i, 0]
+#         x[i]["block_number"] = bhv["BlockNumber"][0, 0][i, 0]
+#         x[i]["ISI_start"] = get_bhvcode_time(
+#             end_trial, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         # x[i]['datafile'] = bhv['DataFileName'][0][0][0]
+#         x[i]["datanum"] = datanum
+#         x[i]["samp_img_on"] = get_bhvcode_time(
+#             centimgon, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["samp_img_off"] = get_bhvcode_time(
+#             centimgoff, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["test_array_on"] = get_bhvcode_time(
+#             centimgon, x[i]["code_numbers"], x[i]["code_times"], first=False
+#         )
+#         x[i]["test_array_off"] = get_bhvcode_time(
+#             centimgoff, x[i]["code_numbers"], x[i]["code_times"], first=False
+#         )
+#         x[i]["trialnum"] = bhv["TrialNumber"][0, 0][i, 0]
+#         x[i]["image_nos"] = []
+#         if (
+#             x[i]["trial_type"] in plt_conds or x[i]["trial_type"] in sdms_conds
+#         ) and log is not None:
+#             entry1 = log.pop(0)
+#             entry1 = entry1.strip(b"\r\n").split(b"\t")
+#             tn1, s1, _, cond1, vs1, cat1, img1 = entry1
+#             entry2 = log.pop(0)
+#             entry2 = entry2.strip(b"\r\n").split(b"\t")
+#             tn2, s2, _, cond2, vs2, cat2, img2 = entry2
+#             if int(tn1) != int(x[i]["trialnum"]):
+#                 print(x[i]["trialnum"])
+#                 print(x[0]["trialnum"])
+#                 # print(filename)
+#                 print(tn1, x[i]["trialnum"])
+#             assert tn1 == tn2
+#             assert int(tn1) == int(x[i]["trialnum"])
+#             img1_n, ext1 = os.path.splitext(img1)
+#             img2_n, ext2 = os.path.splitext(img2)
+#             log_dict[img1_n] = log_dict.get(img1_n, 0) + 1
+#             log_dict[img2_n] = log_dict.get(img2_n, 0) + 1
+#             x[i]["leftimg"] = img1_n
+#             x[i]["rightimg"] = img2_n
+#             x[i]["leftviews"] = log_dict[img1_n]
+#             x[i]["rightviews"] = log_dict[img2_n]
+#             x[i]["leftimg_type"] = cat1
+#             x[i]["rightimg_type"] = cat2
+#         else:
+#             x[i]["leftimg"] = ""
+#             x[i]["rightimg"] = ""
+#             x[i]["leftviews"] = 0
+#             x[i]["rightviews"] = 0
+#         x[i]["fixation_on"] = get_bhvcode_time(
+#             fixation_on, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["fixation_off"] = get_bhvcode_time(
+#             fixation_off, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["lever_release"] = get_bhvcode_time(
+#             lever_release, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["lever_hold"] = get_bhvcode_time(
+#             lever_hold, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["reward_time"] = get_bhvcode_time(
+#             reward_given, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["fixation_acquired"] = get_bhvcode_time(
+#             fixation_acq, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["left_img_on"] = get_bhvcode_time(
+#             left_img_on, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["left_img_off"] = get_bhvcode_time(
+#             left_img_off, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["right_img_on"] = get_bhvcode_time(
+#             right_img_on, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         x[i]["right_img_off"] = get_bhvcode_time(
+#             right_img_off, x[i]["code_numbers"], x[i]["code_times"], first=True
+#         )
+#         ep = bhv["AnalogData"][0, 0][0, i]["EyeSignal"][0, 0]
+#         x[i]["eyepos"] = ep
+#         if (
+#             "UserVars" in bhv.dtype.names
+#             and "img1_xy" in bhv["UserVars"][0, 0].dtype.names
+#         ):
+#             tmp1 = bhv["UserVars"][0, 0]["img1_xy"]
+#             tmp2 = bhv["UserVars"][0, 0]["img2_xy"]
+#             if tmp1.shape == (1, 1) and tmp1[0, 0].shape[1] > i:
+#                 if tmp1[0, 0][0, i].shape[1] > 0:
+#                     x[i]["img1_xy"] = tmp1[0, 0][0, i][0]
+#                     x[i]["img2_xy"] = tmp2[0, 0][0, i][0]
+#                 else:
+#                     x[i]["img1_xy"] = default_img1_xy
+#                     x[i]["img2_xy"] = default_img2_xy
+#             elif tmp1.shape[1] > i and tmp1[0, i].shape[1] > 0:
+#                 x[i]["img1_xy"] = tmp1[0, i]
+#                 x[i]["img2_xy"] = tmp2[0, i]
+#             else:
+#                 x[i]["img1_xy"] = default_img1_xy
+#                 x[i]["img2_xy"] = default_img2_xy
+#         elif xy1_loc_dict is not None and not np.any(np.isnan(xy1_loc_dict[datanum])):
+#             x[i]["img1_xy"] = xy1_loc_dict[datanum]
+#             x[i]["img2_xy"] = xy2_loc_dict[datanum]
+#         else:
+#             x[i]["img1_xy"] = default_img1_xy
+#             x[i]["img2_xy"] = default_img2_xy
+#         if (
+#             "UserVars" in bhv.dtype.names
+#             and "img_wid" in bhv["UserVars"][0, 0].dtype.names
+#             and bhv["UserVars"][0, 0]["img_wid"].shape[1] > i
+#         ):
+#             x[i]["img_wid"] = bhv["UserVars"][0, 0]["img_wid"][0, i]
+#             x[i]["img_hei"] = bhv["UserVars"][0, 0]["img_hei"][0, i]
+#         else:
+#             x[i]["img_wid"] = default_wid
+#             x[i]["img_hei"] = default_hei
+#         _add_eye_info(x[i], eye_params, eyedata_len)
 
-    if correct_sdms_position:
-        t_mask = np.isin(x["trial_type"], plt_conds)
-        ang_mask = x["angular_separation"] == 180
-        full_mask = t_mask * ang_mask
-        filt = x[full_mask]
-        xy1 = filt[0]["img1_xy"]
-        xy2 = filt[0]["img2_xy"]
-        sdms_mask = np.isin(x["trial_type"], sdms_conds)
-        for i in np.where(sdms_mask)[0]:
-            x[i]["img1_xy"] = xy1
-            x[i]["img2_xy"] = xy2
-            _add_eye_info(x[i], eye_params, eyedata_len)
-    if noerr:
-        x = x[x["TrialError"] == 0]
-    return x, log_dict
+#     if correct_sdms_position:
+#         t_mask = np.isin(x["trial_type"], plt_conds)
+#         ang_mask = x["angular_separation"] == 180
+#         full_mask = t_mask * ang_mask
+#         filt = x[full_mask]
+#         xy1 = filt[0]["img1_xy"]
+#         xy2 = filt[0]["img2_xy"]
+#         sdms_mask = np.isin(x["trial_type"], sdms_conds)
+#         for i in np.where(sdms_mask)[0]:
+#             x[i]["img1_xy"] = xy1
+#             x[i]["img2_xy"] = xy2
+#             _add_eye_info(x[i], eye_params, eyedata_len)
+#     if noerr:
+#         x = x[x["TrialError"] == 0]
+#     return x, log_dict
 
 
 def copy_struct_array(new_arr, old_arr):
@@ -1537,9 +1539,15 @@ def make_ratio_function(func1, func2):
     return _ratio_func
 
 
+def normalize_periodic(diff):
+    normed = 2 * np.arcsin(np.sin((diff) / 2))
+    return normed
+
+
 def normalize_periodic_range(
     diff, cent=0, radians=True, const=None, convert_array=True
 ):
+    # return normalize_periodic(diff)
     if convert_array:
         diff = np.array(diff)
     if radians and const is None:
@@ -1654,6 +1662,17 @@ def distribute_imglogs(il_path, out_path):
             nomatch.append(il)
     return nomatch
 
+def aggregate_dictionary(d):
+    """ cribbed from sklearn """
+    return {
+        key: (
+            np.asarray([score[key] for score in d])
+            if isinstance(d[0][key], numbers.Number)
+            else [score[key] for score in d]
+        )
+        for key in d[0]
+    }
+
 
 def iterate_function(func, args, kv_argdict):
     """
@@ -1763,15 +1782,15 @@ def bootstrap_diff(a, b, func=np.nanmean, n=1000, geometric=False):
 
 def bootstrap_tc(tc, func, axis=0, n=1000):
     new_shape = tc.shape[:axis] + tc.shape[axis + 1 :]
-    out = np.zeros((n,) + new_shape)
-    func_ax = lambda x: func(x, axis=axis)
+    def func_ax(x):
+        return func(x, axis=axis)
     return bootstrap_list(tc, func_ax, n=n, out_shape=new_shape)
 
 
-def bootstrap_mean(l, n=None):
+def bootstrap_mean(l_, n=None):
     if n is None:
-        n = len(l)
-    return bootstrap_list(l, np.nanmean, n=n)
+        n = len(l_)
+    return bootstrap_list(l_, np.nanmean, n=n)
 
 
 def discretize_group(
@@ -1795,7 +1814,7 @@ def discretize_group(
     return split_mus, other_mus
 
 
-def bootstrap_list(l, func, n=1000, out_shape=None, ret_sem=False):
+def bootstrap_list(l_, func, n=1000, out_shape=None, ret_sem=False):
     if out_shape is None:
         stats = np.zeros(n)
     else:
@@ -1803,11 +1822,11 @@ def bootstrap_list(l, func, n=1000, out_shape=None, ret_sem=False):
     if ret_sem:
         sems = np.zeros_like(stats)
     for i in range(n):
-        inds = np.random.choice(np.arange(len(l)), len(l))
-        samp = l[inds]
+        inds = np.random.choice(np.arange(len(l_)), len(l_))
+        samp = l_[inds]
         stats[i] = func(samp)
         if ret_sem:
-            sems[i] = np.var(samp) / len(l)
+            sems[i] = np.var(samp) / len(l_)
     if ret_sem:
         out = (stats, sems)
     else:
@@ -1844,10 +1863,10 @@ def bootstrap_on_axis(d, func, axis=0, n=500, with_replace=True):
 def collapse_list_dict(ld):
     for i, k in enumerate(ld.keys()):
         if i == 0:
-            l = ld[k]
+            l_ = ld[k]
         else:
-            l = np.concatenate((l, ld[k]))
-    return l
+            l_ = np.concatenate((l_, ld[k]))
+    return l_
 
 
 def gen_img_list(
@@ -1997,16 +2016,15 @@ def evoked_st_cumdist(spkts, t, lam):
 
 
 def empirical_fs_cumdist(spkts, t):
-    spk_before = lambda x: np.any(x < t) or (x.size == 0)
+    def spk_before(x):
+        return np.any(x < t) or (x.size == 0)
     successes = np.sum(map(spk_before, spkts))
-    x = map(spk_before, spkts)
     return successes / float(len(spkts))
 
 
 def get_spks_window(dat, begwin, endwin):
-    makecut = lambda x: (
-        np.sum(np.logical_and(begwin <= x, x <= endwin)) / (endwin - begwin)
-    )
+    def makecut(x):
+        return np.sum(np.logical_and(begwin <= x, x <= endwin)) / (endwin - begwin)
     stuff = map(makecut, dat)
     return stuff
 
@@ -2019,9 +2037,11 @@ def get_code_time(trl, code, codenumfield="code_numbers", codetimefield="code_ti
 def estimate_latency(neurspks, backgrd_window, latenwindow, integstep=0.5):
     bckgrd_spks = get_spks_window(neurspks, backgrd_window[0], backgrd_window[1])
     bgd_est = np.mean(bckgrd_spks)
-    expect_func = lambda x: 1 - evoked_st_cumdist(neurspks, x, bgd_est)
+    def expect_func(x):
+        return 1 - evoked_st_cumdist(neurspks, x, bgd_est)
     est_lat = euler_integrate(expect_func, latenwindow[0], latenwindow[1], integstep)
-    sm_func = lambda x: 2 * x * (1 - evoked_st_cumdist(neurspks, x, bgd_est))
+    def sm_func(x):
+        return 2 * x * (1 - evoked_st_cumdist(neurspks, x, bgd_est))
     sm_latency = euler_integrate(sm_func, latenwindow[0], latenwindow[1], integstep)
     est_std = np.sqrt(sm_latency - est_lat**2)
     return est_lat, est_std
