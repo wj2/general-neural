@@ -33,6 +33,14 @@ monthdict = {
 }
 
 
+def make_eye(n, thickness=1, dtype=bool):
+    out = np.zeros((n, n))
+    for i in range(thickness):
+        out = out + np.eye(n, k=i)
+        out = out + np.eye(n, k=-i)
+    return out > 0
+        
+
 def make_trs_matrix(m, n, corr_groups=None):
     """m is output domain, n is input"""
     rng = np.random.default_rng()
