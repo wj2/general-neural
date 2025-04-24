@@ -1,7 +1,6 @@
 import numpy as np
 import scipy.stats as sts
 import tensorflow as tf
-import tensorflow_hub as tfhub
 import keras_cv
 
 import general.tf.callbacks as gtfc
@@ -92,7 +91,7 @@ def make_ff_network(
     **layer_params,
 ):
     layer_list = []
-    layer_list.append(tfkl.InputLayer(input_shape=inp))
+    layer_list.append(tfkl.InputLayer(shape=inp))
     if kernel_init is not None:
         rep_kernel_init = tfk.initializers.RandomNormal(stddev=kernel_init)
         hidden_kernel_inits = list(
@@ -219,7 +218,7 @@ class GenericFFNetwork:
         self.input_generator = input_generator
         self.tasks = tasks
         out = make_ff_network(
-            input_generator.output_dim,
+            (input_generator.output_dim,),
             n_rep,
             len(tasks),
             noise=noise,

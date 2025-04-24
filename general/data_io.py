@@ -1419,6 +1419,7 @@ class Dataset(object):
         average_regressors=True,
         balance_fields=None,
         causal_timing=False,
+        balance_training=False,
         **kwargs,
     ):
         if rel_fields is not None and pseudo:
@@ -1602,6 +1603,14 @@ class Dataset(object):
                     d1 = np.zeros((d2.shape[0],) + d1.shape[1:])
                 if d2 is not None and d2.shape[2] == 0:
                     d2 = np.zeros((d1.shape[0],) + d2.shape[1:])
+                if balance_training:
+                    balance_rel_fields = True
+                    rel_c1_i = np.zeros((1, 1, p1.shape[2]))
+                    rel_c2_i = np.ones((1, 1, p2.shape[2]))
+                else:
+                    balance_rel_fields = balance_fields is not None
+                    rel_c1_i = rel_c1[i]
+                    rel_c2_i = rel_c2[i]
                 out = na.fold_skl(
                     p1,
                     p2,
@@ -1617,11 +1626,11 @@ class Dataset(object):
                     collapse_time=collapse_time,
                     time_mask=time_mask,
                     ret_projections=ret_projections,
-                    rel_c1=rel_c1[i],
-                    rel_c2=rel_c2[i],
+                    rel_c1=rel_c1_i,
+                    rel_c2=rel_c2_i,
                     gen_rel_c1=rel_g_c1[i],
                     gen_rel_c2=rel_g_c2[i],
-                    balance_rel_fields=balance_fields is not None,
+                    balance_rel_fields=balance_rel_fields,
                     **kwargs,
                 )
             outs[i] = out.pop("score")

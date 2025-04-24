@@ -24,6 +24,7 @@ import pickle
 
 import sklearn.base as skb
 import sklearn.utils as sku
+import sklearn.utils.parallel as skup
 import sklearn.multioutput as skout
 import imblearn.under_sampling as imb_us
 import joblib as jl
@@ -1988,6 +1989,72 @@ class BalancedCV:
             yield tr_inds_rs, te_inds
 
 
+def _fit_and_score_set(est, X_tr, y_tr, X_te, y_te):
+    est.fit(X_tr, y_tr)
+    score = est.score(X_te, y_te)
+    result = {}
+    result["estimator"] = est
+    result["test_scores"] = score
+    return result
+
+
+def _sample_pseudo_trials(X, y, n_trials=None):
+    rng = np.random.default_rng()
+    u_y, counts = np.unique(y, return_counts=True)
+    replace = False
+    if n_trials is not None:
+        counts = np.round(n_trials * counts / np.sum(counts)).astype(int)
+        replace = True
+    pop_new = []
+    y_new = []
+    for i, y_targ in enumerate(u_y):
+        m = y == y_targ
+        X_i = X[m]
+        if not replace:
+            inds = np.tile(np.arange(X_i.shape[0])[:, None], (1, X_i.shape[1]))
+            inds = rng.permuted(inds, axis=0)
+        else:
+            inds = rng.choice(np.arange(X_i.shape[0]), size=(counts[i], X_i.shape[1]))
+        X_i_new = X_i[inds, np.arange(X_i.shape[1])]
+        pop_new.append(X_i_new)
+        y_new.append(np.repeat(y_targ, counts[i]))
+    X_new = np.concatenate(pop_new, axis=0)
+    y_new = np.concatenate(y_new, axis=0)
+    return X_new, y_new
+
+
+def _pseudo_cv_wrapper(
+    m,
+    X,
+    y,
+    n_jobs=-1,
+    verbose=False,
+    n_trials=None,
+    pre_dispatch="2*n_jobs",
+    cv=None,
+    **kwargs,
+):
+    if cv is None:
+        cv = skms.ShuffleSplit()
+        indices = cv.split(X, y)
+    else:
+        indices = cv
+    parallel = skup.Parallel(n_jobs=n_jobs, verbose=verbose, pre_dispatch=pre_dispatch)
+    results = parallel(
+        skup.delayed(_fit_and_score_set)(
+            skb.clone(m),
+            *_sample_pseudo_trials(X[train], y[train], n_trials=n_trials),
+            *_sample_pseudo_trials(X[test], y[test], n_trials=n_trials),
+        )
+        for train, test in indices
+    )
+    results = u.aggregate_dictionary(results)
+    ret = {}
+    ret["test_score"] = results["test_scores"]
+    ret["estimator"] = results["estimator"]
+    return ret
+
+
 def cv_wrapper(
     model,
     X,
@@ -2001,6 +2068,7 @@ def cv_wrapper(
     return_projection=False,
     return_confusion=False,
     rng_seed=None,
+    pseudo_trials=None,
     **kwargs,
 ):
     rng = np.random.default_rng()
@@ -2034,7 +2102,12 @@ def cv_wrapper(
     cv_use = splitter.split(X, y_use_split)
 
     keep_ests = kwargs.pop("return_estimator", False)
-    out = skms.cross_validate(
+    if pseudo_trials is None:
+        cv_func = skms.cross_validate
+    else:
+        cv_func = _pseudo_cv_wrapper
+        kwargs["n_trials"] = pseudo_trials if isinstance(pseudo_trials, int) else None
+    out = cv_func(
         model,
         X,
         y,
@@ -2318,6 +2391,7 @@ def apply_estimators(estimators, pop, labels):
 
 def project_on_estimators(estimators, pop):
     out = np.zeros(estimators.shape + (pop.shape[1],))
+    print(pop.shape, estimators.shape)
     for i, j in u.make_array_ind_iterator(estimators.shape):
         est_ij = estimators[i, j]
         out[i, j] = est_ij.decision_function(pop[..., j].T)
@@ -2548,6 +2622,8 @@ def fold_skl_flat(
     return_confusion=False,
     rng_seed=None,
     time_generalization=False,
+    test_frac=None,
+    pseudo_trials=None,
     **model_kwargs,
 ):
     if test_prop is None:
@@ -2568,7 +2644,8 @@ def fold_skl_flat(
         **params,
     )
     if shuffle:
-        np.random.shuffle(labels)
+        rng = np.random.default_rng()
+        labels = rng.permutation(labels)
     if verbose:
         print("--")
         print(c_flat.shape)
@@ -2606,6 +2683,7 @@ def fold_skl_flat(
             return_confusion=return_confusion,
             rng_seed=rng_seed,
             time_generalization=time_generalization,
+            pseudo_trials=pseudo_trials,
         )
     return out
 

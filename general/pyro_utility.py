@@ -1,4 +1,3 @@
-
 import numpy as np
 import pyro
 import torch
@@ -10,19 +9,19 @@ from pyro import poutine
 
 
 def fit_model(
-        features,
-        targets,
-        model,
-        guide=None,
-        approach=None,
-        loss=None,
-        optim=None,
-        lr=.01,
-        n_steps=1000,
-        smoke_test=False,
-        show_logging=False,
-        n_samps=500,
-        block_vars=None,
+    features,
+    targets,
+    model,
+    guide=None,
+    approach=None,
+    loss=None,
+    optim=None,
+    lr=0.01,
+    n_steps=1000,
+    smoke_test=False,
+    show_logging=False,
+    n_samps=500,
+    block_vars=None,
 ):
     pyro.clear_param_store()
     if approach is None:
@@ -77,7 +76,10 @@ def fit_model(
 
 
 def sample_fit_model(
-        features, model, use_guide, n_samps=500,
+    features,
+    model,
+    use_guide,
+    n_samps=500,
 ):
     predictive = pyro.infer.Predictive(model, guide=use_guide, num_samples=n_samps)
     pred_samples = predictive(*features)
