@@ -106,7 +106,8 @@ def make_discrete_order_transform(k, n, order, use_pca=True):
     steps = [ohe, pf]
     if use_pca:
         pca = skd.PCA()
-        steps.append(pca)    
+        steps.append(pca)
+    
     pipe = sklpipe.make_pipeline(*steps)
     pipe = pipe.fit(binary)
     mask = np.var(pipe.transform(binary), axis=0) > 1e-10

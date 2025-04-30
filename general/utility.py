@@ -1664,14 +1664,14 @@ def distribute_imglogs(il_path, out_path):
 
 def aggregate_dictionary(d):
     """ cribbed from sklearn """
-    return {
-        key: (
-            np.asarray([score[key] for score in d])
-            if isinstance(d[0][key], numbers.Number)
-            else [score[key] for score in d]
-        )
-        for key in d[0]
-    }
+    out = {}
+    for key in d[0].keys():
+        try:
+            arr = np.stack([score[key] for score in d], axis=0)
+        except TypeError:
+            arr = [score[key] for score in d]
+        out[key] = arr
+    return out
 
 
 def iterate_function(func, args, kv_argdict):
