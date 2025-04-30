@@ -1208,6 +1208,7 @@ def plot_trace_werr(
     plot_outline=False,
     outline_color="k",
     outline_mult_width=1.5,
+    no_lines=False,
     marker="o",
     **kwargs,
 ):
@@ -1257,15 +1258,26 @@ def plot_trace_werr(
             new_lw = outline_mult_width * lw
             use_pe = [mpe.Stroke(foreground="k", linewidth=new_lw), mpe.Normal()]
             kwargs["path_effects"] = use_pe
-        trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha, **kwargs)
+        trl = None
+        if not no_lines:
+            trl = ax.plot(xs, tr, label=label, color=color, alpha=line_alpha, **kwargs)
 
-        if color is None:
+        if color is None and trl is not None:
             color = trl[0].get_color()
         if points:
-            ax.plot(xs, tr, marker=marker, color=color, alpha=line_alpha, **kwargs)
+            scat = ax.scatter(
+                xs, tr, marker=marker, color=color, **kwargs
+            )
+        if color is None and scat is not None:
+            color = scat.get_facecolors()[0]
+
         alpha = min(line_alpha, alpha)
+        if no_lines:
+            fmt = "none"
+        else:
+            fmt = ""
         if len(dat.shape) > 1 or jagged or err is not None:
-            if fill:
+            if fill and not no_lines:
                 ax.fill_between(
                     xs, tr + er[1, :], tr + er[0, :], color=color, alpha=alpha
                 )
@@ -1277,10 +1289,11 @@ def plot_trace_werr(
                     color=color,
                     elinewidth=elinewidth,
                     alpha=alpha,
+                    fmt=fmt,
                     **kwargs,
                 )
         if len(xs_orig.shape) > 1 or err_x is not None:
-            if fill:
+            if fill and not no_lines:
                 ax.fill_betweenx(
                     tr, xs + xs_er[1, :], xs + xs_er[0, :], color=color, alpha=alpha
                 )
@@ -1293,6 +1306,7 @@ def plot_trace_werr(
                     color=color,
                     elinewidth=elinewidth,
                     alpha=alpha,
+                    fmt=fmt,
                     **kwargs,
                 )
         ax.set_title(title)

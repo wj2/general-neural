@@ -441,7 +441,7 @@ class Dataset(object):
             binsize = end - begin
         if binstep is None:
             binstep = binsize
-        xs_reg = np.arange(begin + binsize/2, end + binsize/2 + 1e-10, binstep)
+        xs_reg = np.arange(begin + binsize / 2, end + binsize / 2 + 1e-10, binstep)
         print(end + binsize / 2)
         print(xs_reg)
         for i, psth_l in enumerate(psths):
@@ -454,7 +454,7 @@ class Dataset(object):
             else:
                 tz = np.zeros(n_trls)
             trl_sections = []
-            
+
             trl_sections = np.zeros((len(psth_l), psth_l[0].shape[0], len(xs_reg)))
             for j, trl in enumerate(psth_l):
                 xs_ij = xs.iloc[j] - tz[j]
@@ -1155,7 +1155,9 @@ class Dataset(object):
                 )
                 pop_m, xs = out_m
                 if rel_fields is not None:
-                    rvs_m = list(x.to_numpy() for x in cat_m[list(rel_fields)])
+                    rvs_m = list(
+                        x.to_numpy().astype(float) for x in cat_m[list(rel_fields)]
+                    )
                     if len(rvs_m[0].shape) == 1:
                         rvs_m = list(np.expand_dims(x, 1) for x in rvs_m)
                     rvs_m = list(np.expand_dims(x.T, 1) for x in rvs_m)
