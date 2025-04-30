@@ -437,6 +437,13 @@ class Dataset(object):
         verbose=False,
     ):
         outs = []
+        if binsize is None:
+            binsize = end - begin
+        if binstep is None:
+            binstep = binsize
+        xs_reg = np.arange(begin + binsize/2, end + binsize/2 + 1e-10, binstep)
+        print(end + binsize / 2)
+        print(xs_reg)
         for i, psth_l in enumerate(psths):
             n_trls = len(psth_l)
             xs = xs_all[i]
@@ -447,6 +454,8 @@ class Dataset(object):
             else:
                 tz = np.zeros(n_trls)
             trl_sections = []
+            
+            trl_sections = np.zeros((len(psth_l), psth_l[0].shape[0], len(xs_reg)))
             for j, trl in enumerate(psth_l):
                 xs_ij = xs.iloc[j] - tz[j]
                 l_diff = xs_ij.shape[0] - trl.shape[-1]
@@ -454,26 +463,10 @@ class Dataset(object):
                     xs_ij = xs_ij[:-l_diff]
                     if l_diff > 1 and verbose:
                         print("length difference: {}".format(l_diff))
-                tmask_ij = np.logical_and(xs_ij >= begin, xs_ij < end)
-                trl_section = trl[:, tmask_ij]
-                trl_sections.append(trl_section)
-                xs_reg = xs_ij[tmask_ij]
-            trl_sections = np.stack(trl_sections, axis=0)
-            ts_bs = np.median(np.diff(xs_reg))
-            if binsize is not None:
-                # assert (binsize % ts_bs) == 0
-                trl_sections, xs_reg = _convolve_psth(
-                    trl_sections, binsize / ts_bs, xs_reg, causal_xs=causal_timing
-                )
-            if binstep is not None:
-                xs_0 = xs_reg - xs_reg[0]
-                xs_rem = np.mod(xs_0, binstep)
-                xs_rem = np.concatenate(([binstep], xs_rem, [binstep]))
-                # print(xs_rem.astype(int))
-                # print(xs_reg.astype(int))
-                step_mask = sig.argrelmin(xs_rem)[0] - 1
-                xs_reg = xs_reg[step_mask]
-                trl_sections = trl_sections[..., step_mask]
+
+                mask = np.abs(xs_ij[:, None] - xs_reg[None]) <= binsize / 2
+                mask = mask / np.sum(mask, axis=0, keepdims=True)
+                trl_sections[j] = np.sum(mask[None] * trl[..., None], axis=1)
             if shuffle_trials:
                 rng = np.random.default_rng()
                 list(
