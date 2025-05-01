@@ -25,6 +25,7 @@ import pickle
 import sklearn.base as skb
 import sklearn.utils as sku
 import sklearn.utils.parallel as skup
+import sklearn.neighbors as skn
 import sklearn.multioutput as skout
 import imblearn.under_sampling as imb_us
 import joblib as jl
