@@ -2386,7 +2386,7 @@ class KNeighborsClassifierTwoClass(skn.KNeighborsClassifier):
 
     def decision_function(self, X, y=None, **kwargs):
         probs = self.predict_proba(X)
-        return probs[:, 0] - probs[:, 1]
+        return probs[:, 1] - probs[:, 0]
 
 
 def apply_estimators(estimators, pop, labels):
