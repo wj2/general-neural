@@ -2384,7 +2384,7 @@ def nominal_fold(
 
 class KNeighborsClassifierTwoClass(skn.KNeighborsClassifier):
 
-    def decision_function(X, y=None, **kwargs):
+    def decision_function(self, X, y=None, **kwargs):
         probs = self.predict_proba(X)
         return probs[:, 0] - probs[:, 1]
 
