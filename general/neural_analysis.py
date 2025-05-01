@@ -2381,6 +2381,13 @@ def nominal_fold(
     return out
 
 
+class KNeighborsClassifierTwoClass(skn.KNeighborsClassifier):
+
+    def decision_function(X, y=None, **kwargs):
+        probs = self.predict_proba(X)
+        return probs[:, 0] - probs[:, 1]
+
+
 def apply_estimators(estimators, pop, labels):
     out = np.zeros_like(estimators, dtype=float)
     for i, j in u.make_array_ind_iterator(estimators.shape):
@@ -2391,7 +2398,6 @@ def apply_estimators(estimators, pop, labels):
 
 def project_on_estimators(estimators, pop):
     out = np.zeros(estimators.shape + (pop.shape[1],))
-    print(pop.shape, estimators.shape)
     for i, j in u.make_array_ind_iterator(estimators.shape):
         est_ij = estimators[i, j]
         out[i, j] = est_ij.decision_function(pop[..., j].T)
