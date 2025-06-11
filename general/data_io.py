@@ -1004,7 +1004,7 @@ class Dataset(object):
             tend = list(np.ones(len(x)) * tend for x in spks)
         outs = []
         for i, spk_i in enumerate(spks):
-            out_i = np.zeros((len(spk_i), len(spk_i[0])))
+            out_i = np.zeros((len(spk_i), len(spk_i.iloc[0])))
             for j, spk_ij in enumerate(spk_i):
                 s_ij = np.array(tbeg[i])[j]
                 e_ij = np.array(tend[i])[j]
