@@ -936,7 +936,23 @@ def plot_highdim_points(*args, ms=5, **kwargs):
     return plot_highdim_trace(*args, **kwargs, plot_line=False, plot_points=True, ms=ms)
 
 
-def pcolormesh(*args, ax=None, diff_ind=0, append=True, equal_bins=False, **kwargs):
+def symmetric_bounds(data, **kwargs):
+    vmin = kwargs.get("vmin", np.nanmin(data))
+    vmax = kwargs.get("vmax", np.nanmax(data))
+    bounds = [vmin, vmax]
+    ind = np.argmax(np.abs(bounds))
+    return -bounds[ind], bounds[ind]
+
+
+def pcolormesh(
+    *args,
+    ax=None,
+    diff_ind=0,
+    append=True,
+    equal_bins=False,
+    symmetric_colors=False,
+    **kwargs,
+):
     if ax is None:
         f, ax = plt.subplots(1, 1)
     if len(args) < 3:
@@ -955,6 +971,8 @@ def pcolormesh(*args, ax=None, diff_ind=0, append=True, equal_bins=False, **kwar
         lens = [len(xs), len(ys)]
         dim = np.argmin(lens)
         data = np.repeat(np.expand_dims(data, dim), lens[dim], axis=dim).T
+    if symmetric_colors:
+        kwargs["vmin"], kwargs["vmax"] = symmetric_bounds(data, **kwargs)
     xs_ax = pcolormesh_axes(xs_bins, len(xs_bins), diff_ind=diff_ind, append=append)
     ys_ax = pcolormesh_axes(ys_bins, len(ys_bins), diff_ind=diff_ind, append=append)
     img = ax.pcolormesh(xs_ax, ys_ax, data, **kwargs)
@@ -1265,9 +1283,7 @@ def plot_trace_werr(
         if color is None and trl is not None:
             color = trl[0].get_color()
         if points:
-            scat = ax.scatter(
-                xs, tr, marker=marker, color=color, **kwargs
-            )
+            scat = ax.scatter(xs, tr, marker=marker, color=color, **kwargs)
         if color is None and scat is not None:
             color = scat.get_facecolors()[0]
 

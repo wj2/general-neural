@@ -17,6 +17,7 @@ class ResultSequence(object):
             self.val = x.val
         except AttributeError:
             self.val = list(x)
+        # self.val = list(pd.Series(x) for x in self.val)
 
     def mask(self, m):
         return ResultSequence(x[m[i]] for i, x in enumerate(self.val))
@@ -26,7 +27,12 @@ class ResultSequence(object):
         return hash(hashable)
 
     def _op(self, x, operator):
-        out = ResultSequence(pd.Series(operator(v, x), index=v.index) for v in self.val)
+        try:
+            out = ResultSequence(
+                pd.Series(operator(v, x), index=v.index) for v in self.val
+            )
+        except AttributeError:
+            out = ResultSequence(operator(v, x) for v in self.val)
         return out
 
     def _unary_op(self, operator):
@@ -104,6 +110,9 @@ class ResultSequence(object):
 
     def __add__(self, x):
         return self._op_dispatcher(x, np.add)
+
+    def __mul__(self, x):
+        return self._op_dispatcher(x, np.multiply)
 
 
 def combine_ntrls(*args):
@@ -196,6 +205,11 @@ class Dataset(object):
     def __len__(self):
         return len(self.data)
 
+    def index_session(self, ind):
+        return Dataset(
+            self.data.iloc[ind : ind + 1], seconds=self.seconds, sort=self.sort
+        )
+
     @property
     def session_keys(self):
         return self.data["data"].iloc[0].columns
@@ -219,7 +233,7 @@ class Dataset(object):
     def _center_spks(self, spks, tz, tzf):
         if tz is not None:
             spks = spks - tz
-        if tzf is not None:
+        elif tzf is not None:
             spks = spks - self[tzf]
         return spks
 
@@ -442,8 +456,6 @@ class Dataset(object):
         if binstep is None:
             binstep = binsize
         xs_reg = np.arange(begin + binsize / 2, end + binsize / 2 + 1e-10, binstep)
-        print(end + binsize / 2)
-        print(xs_reg)
         for i, psth_l in enumerate(psths):
             n_trls = len(psth_l)
             xs = xs_all[i]
@@ -980,6 +992,39 @@ class Dataset(object):
             out = out + (outs_gen,)
         return out
 
+    def get_bounded_firing_rates(
+            self, tbeg, tend, key="spikeTimes", mult=1000, regions=None, **kwargs
+    ):
+        if regions is not None:
+            regions_all = self["neur_regions"]
+        spks = self[key]
+        if not u.check_list(tbeg):
+            tbeg = list(np.ones(len(x)) * tbeg for x in spks)
+        if not u.check_list(tend):
+            tend = list(np.ones(len(x)) * tend for x in spks)
+        outs = []
+        for i, spk_i in enumerate(spks):
+            out_i = np.zeros((len(spk_i), len(spk_i[0])))
+            for j, spk_ij in enumerate(spk_i):
+                s_ij = np.array(tbeg[i])[j]
+                e_ij = np.array(tend[i])[j]
+                labels = np.concatenate(
+                    list(np.ones(len(x)) * i for i, x in enumerate(spk_ij))
+                )
+                spks_con_ij = np.concatenate(spk_ij)
+                mask = np.logical_and(spks_con_ij >= s_ij, spks_con_ij < e_ij)
+                lij = labels[mask]
+
+                counts, _ = np.histogram(lij, bins=np.arange(len(spk_ij) + 1))
+                out_i[j] = mult * counts / (e_ij - s_ij)
+            out_i[np.isnan(out_i)] = 0
+            if regions is not None:
+                regs = regions_all[i].iloc[0]
+                mask = np.isin(regs, regions)
+                out_i = out_i[:, mask]
+            outs.append(out_i[..., None])
+        return outs
+
     def get_neural_activity(
         self,
         winsize,
@@ -1134,10 +1179,7 @@ class Dataset(object):
                 t_mask = tz_i.rs_isnan().rs_not()
                 m = m.rs_and(t_mask)
                 cat_m = self.mask(m)
-                if tzs is not None:
-                    tz_i = tzs[i].mask(m)
-                else:
-                    tz_i = None
+                tz_i = tz_i.mask(m)
                 out_m = cat_m.get_neural_activity(
                     winsize,
                     begin,
@@ -1483,7 +1525,6 @@ class Dataset(object):
             time_mask = np.logical_and(beg_mask, end_mask)
         pop1, pop2, dec1, dec2 = pops
 
-        # print(pop1)
         if params is None:
             params = {
                 "class_weight": "balanced",

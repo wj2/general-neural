@@ -1662,12 +1662,12 @@ def distribute_imglogs(il_path, out_path):
             nomatch.append(il)
     return nomatch
 
-def aggregate_dictionary(d):
+def aggregate_dictionary(d, combine_axis=0, combine_func=np.stack):
     """ cribbed from sklearn """
     out = {}
     for key in d[0].keys():
         try:
-            arr = np.stack([score[key] for score in d], axis=0)
+            arr = combine_func([score[key] for score in d], axis=combine_axis)
         except TypeError:
             arr = [score[key] for score in d]
         out[key] = arr
