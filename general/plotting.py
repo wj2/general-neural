@@ -16,6 +16,54 @@ import colorsys
 from matplotlib import animation
 
 
+def plot_regional_analysis(
+    data,
+    func,
+    region_list=None,
+    axs=None,
+    region_key="neur_regions",
+    ax_layout="grid",
+    fwid=3,
+    include_all=True,
+    **kwargs,
+):
+    """
+    Parameters
+    ----------
+
+    data : Dataset
+        A dataset object from data_io
+    func : function
+        A function that will take in the dataset, a regions parameter, an axis, and any
+        kwargs then plot something on that axis for each session in the dataset
+    """
+    if region_list is None:
+        region_list = np.unique(list(x.iloc[0] for x in data[region_key]))
+        region_list = list((x,) for x in region_list)
+        if include_all:
+            region_list = [None] + region_list
+    if axs is None:
+        n_rs = len(region_list)
+        n_cols = int(np.ceil(np.sqrt(n_rs)))
+        n_rows = int(np.ceil(n_rs / n_cols))
+        _, axs = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(n_cols * fwid, n_rows * fwid),
+            sharex="all",
+            sharey="all",
+        )
+        axs = axs.flatten()
+    
+    for i, region in enumerate(region_list):
+        if region is None:
+            region_s = "all"
+        else:
+            region_s = "-".join(region)
+        func(data, regions=region, ax=axs[i], **kwargs)
+        axs[i].set_title(region_s)
+
+
 def set_ax_color(ax, color, sides=("bottom", "top", "left", "right")):
     for s in sides:
         ax.spines[s].set_color(color)

@@ -1175,6 +1175,11 @@ def make_stat_string(s, samps, perc=95):
     return s.format(low, high)
 
 
+def filter_nan(*args, ind=1):
+    mask = np.logical_not(np.isnan(args[ind]))
+    return list(x[mask] for x in args)
+
+
 # def load_bhvmat_imglog(
 #     path_bhv,
 #     path_log=None,
