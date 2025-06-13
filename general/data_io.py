@@ -91,7 +91,11 @@ class ResultSequence(object):
         return self._op_dispatcher(x, np.isin, use_rs=False)
 
     def rs_isnan(self):
-        return self._unary_op(np.isnan)
+        try:
+            out = self._unary_op(np.isnan)
+        except TypeError:
+            out = self._unary_op(pd.isna)
+        return out
 
     def rs_and(self, x):
         return self._op_dispatcher(x, np.logical_and)

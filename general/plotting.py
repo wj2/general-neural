@@ -17,8 +17,9 @@ from matplotlib import animation
 
 
 def plot_regional_analysis(
-    data,
     func,
+    data,
+    *args,
     region_list=None,
     axs=None,
     region_key="neur_regions",
@@ -30,12 +31,11 @@ def plot_regional_analysis(
     """
     Parameters
     ----------
-
-    data : Dataset
-        A dataset object from data_io
     func : function
         A function that will take in the dataset, a regions parameter, an axis, and any
         kwargs then plot something on that axis for each session in the dataset
+    data : Dataset
+        A dataset object from data_io
     """
     if region_list is None:
         region_list = np.unique(list(x.iloc[0] for x in data[region_key]))
@@ -60,7 +60,7 @@ def plot_regional_analysis(
             region_s = "all"
         else:
             region_s = "-".join(region)
-        func(data, regions=region, ax=axs[i], **kwargs)
+        func(data, *args, regions=region, ax=axs[i], **kwargs)
         axs[i].set_title(region_s)
 
 
