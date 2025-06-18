@@ -585,6 +585,15 @@ class Dataset(object):
             )
         return outs, xs_reg
 
+    def get_region_list(self, include_all=True, region_key="neur_regions"):
+        region_list = np.unique(
+            np.concatenate(list(x.iloc[0] for x in self[region_key]))
+        )
+        region_list = tuple((x,) for x in region_list)
+        if include_all:
+            region_list = (None,) + region_list
+        return region_list
+
     def get_psth_window(self, begin, end, **kwargs):
         psths, xs = self.get_psth(begin=begin, end=end, **kwargs)
         time_filt = np.logical_and(xs >= begin, xs < end)
@@ -997,7 +1006,7 @@ class Dataset(object):
         return out
 
     def get_bounded_firing_rates(
-            self, tbeg, tend, key="spikeTimes", mult=1000, regions=None, **kwargs
+        self, tbeg, tend, key="spikeTimes", mult=1000, regions=None, **kwargs
     ):
         if regions is not None:
             regions_all = self["neur_regions"]

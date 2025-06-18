@@ -1673,7 +1673,7 @@ def aggregate_dictionary(d, combine_axis=0, combine_func=np.stack):
     for key in d[0].keys():
         try:
             arr = combine_func([score[key] for score in d], axis=combine_axis)
-        except TypeError:
+        except (TypeError, ValueError):
             arr = [score[key] for score in d]
         out[key] = arr
     return out

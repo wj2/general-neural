@@ -26,6 +26,7 @@ def plot_regional_analysis(
     ax_layout="grid",
     fwid=3,
     include_all=True,
+    three_dims=False,
     **kwargs,
 ):
     """
@@ -38,20 +39,23 @@ def plot_regional_analysis(
         A dataset object from data_io
     """
     if region_list is None:
-        region_list = np.unique(list(x.iloc[0] for x in data[region_key]))
-        region_list = list((x,) for x in region_list)
-        if include_all:
-            region_list = [None] + region_list
+        region_list = data.get_region_list(include_all=include_all)
     if axs is None:
         n_rs = len(region_list)
         n_cols = int(np.ceil(np.sqrt(n_rs)))
         n_rows = int(np.ceil(n_rs / n_cols))
+        if three_dims:
+            subplot_kw = {"projection": "3d"}
+        else:
+            subplot_kw = {}
+
         _, axs = plt.subplots(
             n_rows,
             n_cols,
             figsize=(n_cols * fwid, n_rows * fwid),
             sharex="all",
             sharey="all",
+            subplot_kw=subplot_kw,
         )
         axs = axs.flatten()
     

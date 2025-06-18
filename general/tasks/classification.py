@@ -107,7 +107,7 @@ def make_discrete_order_transform(k, n, order, use_pca=True):
     if use_pca:
         pca = skd.PCA()
         steps.append(pca)
-    
+
     pipe = sklpipe.make_pipeline(*steps)
     pipe = pipe.fit(binary)
     mask = np.var(pipe.transform(binary), axis=0) > 1e-10
@@ -149,7 +149,6 @@ class DiscreteOrderTask(Task):
         return (proj + self.offset) > 0
 
 
-
 def make_strict_discrete_order_transform(k, n, order, retries=10, **kwargs):
     for i in range(retries):
         binary, labels = _label_stim(k, n, order, **kwargs)
@@ -177,7 +176,7 @@ def _label_stim(k, n, order, balanced=True, exclusion=None):
     combs_all = np.repeat(combs, n**order, axis=0)
 
     exclusion_mask = np.ones(len(combs_all), dtype=bool)
-    for (fs, vs) in exclusion:
+    for fs, vs in exclusion:
         fs_match = np.all(combs_all == np.array(fs)[None], axis=1)
         vs_match = np.all(sub_stim_all == np.array(vs)[None], axis=1)
         exclude = np.logical_and(fs_match, vs_match)
@@ -185,7 +184,7 @@ def _label_stim(k, n, order, balanced=True, exclusion=None):
 
     sub_stim_all = sub_stim_all[exclusion_mask]
     combs_all = combs_all[exclusion_mask]
-    
+
     rng = np.random.default_rng()
     shuff_inds = rng.permutation(len(combs_all))
     if balanced:
@@ -208,7 +207,10 @@ class DiscreteOrderTaskStrict(Task):
     def __init__(self, t_inds, order, n_vals=2, **kwargs):
         super().__init__(t_inds)
         self.trs, self.vec_dim = make_strict_discrete_order_transform(
-            len(self.t_inds), n_vals, order, **kwargs,
+            len(self.t_inds),
+            n_vals,
+            order,
+            **kwargs,
         )
 
     def __call__(self, x):
@@ -271,11 +273,16 @@ class ContextualTask(Task):
 
 
 def make_contextual_task(
-    t_inds, n_tasks=1, n_contexts=2, single_ind=False, c_inds=None
+    t_inds,
+    n_tasks=1,
+    n_contexts=2,
+    single_ind=False,
+    c_inds=None,
+    **kwargs,
 ):
     tasks = []
     for i in range(n_contexts):
-        task_i = LinearTask.make_task_group(n_tasks, t_inds)
+        task_i = LinearTask.make_task_group(n_tasks, t_inds, **kwargs)
         tasks.append(task_i)
     contask = ContextualTask(*tasks, single_ind=single_ind)
     return contask
