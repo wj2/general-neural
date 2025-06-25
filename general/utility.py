@@ -1179,8 +1179,8 @@ def filter_nan(*args, ind=1):
     mask = np.logical_not(np.isnan(args[ind]))
     out = []
     for x in args:
-        if u.check_list(x):
-            out.append(x[mask])
+        if check_list(x):
+            out.append(np.asarray(x)[mask])
         else:
             out.append(x)
     return out
