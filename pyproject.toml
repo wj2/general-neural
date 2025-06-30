@@ -25,39 +25,39 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-  "numpy~=1.26.4",
-  "scipy~=1.14.1",
+  "numpy>=1.26.4",
+  "scipy>=1.14.1",
   "matplotlib>=3.9.2",
   "scikit-learn>=1.5.1",
   "pandas>=2.2.2",
-  "neo~=0.13.0",
-  "quantities~=0.15.0",
-  "dPCA~=1.0.5",
+  "neo>=0.13.0",
+  "quantities>=0.15.0",
+  "dPCA>=1.0.5",
   "imbalanced-learn>=0.12.3",
-  "arviz~=0.20.0",
-  "joblib~=1.4.2",
-  "numexpr~=2.10.0",
-  "numba~=0.60.0",
+  "arviz>=0.20.0",
+  "joblib>=1.4.2",
+  "numexpr>=2.10.0",
+  "numba>=0.60.0",
 ]
 
 [project.optional-dependencies]
 tensorflow = [
-  "tensorboard~=2.16.2",
-  "tensorflow~=2.16.2",
-  "tensorflow-hub~=0.16.1",
-  "tensorflow-probability~=0.24.0",
-  "tf_keras~=2.16.0",
-  "keras-cv~=0.9.0",
-  "keras~=3.4.1",
+  "tensorboard>=2.16.2",
+  "tensorflow>=2.16.2",
+  "tensorflow-hub>=0.16.1",
+  "tensorflow-probability>=0.24.0",
+  "tf_keras>=2.16.0",
+  "keras-cv>=0.9.0",
+  "keras>=3.4.1",
 ]
 torch = [
-  "torch~=2.2.2",
-  "torchvision~=0.17.2",
-  "pyro-ppl~=1.9.0",
-  "neurogym @ git+https://github.com/neurogym/neurogym.git"  
+  "torch>=2.2.2",
+  "torchvision>=0.17.2",
+  "pyro-ppl>=1.9.0",
+  "neurogym",
 ]
 tasks = [
-  "neurogym @ git+https://github.com/neurogym/neurogym.git"
+  "neurogym",
 ]
 
 [project.urls]
