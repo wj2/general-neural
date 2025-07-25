@@ -322,6 +322,7 @@ def nearest_decoder(
     accumulate_time=True,
     scoring=None,
     generate_confusion=False,
+    n_jobs=-1,
     **kwargs,
 ):
     pipe = make_model_pipeline(model, norm=norm, pca=pre_pca)
@@ -348,7 +349,13 @@ def nearest_decoder(
         else:
             dec_pop = cats_all[..., i].T
         res = skms.cross_validate(
-            pipe, dec_pop, labels, cv=cv, return_estimator=True, scoring=scoring
+            pipe,
+            dec_pop,
+            labels,
+            cv=cv,
+            return_estimator=True,
+            scoring=scoring,
+            n_jobs=n_jobs,
         )
         if generate_confusion:
             if orig_scoring is None:
@@ -379,7 +386,14 @@ def apply_transform_tc(tc, trs):
 
 
 def skl_model_target_dim_tc(
-    m, data, target, func=skms.cross_validate, keep_keys=None, out=None, **kwargs
+    m,
+    data,
+    target,
+    func=skms.cross_validate,
+    keep_keys=None,
+    n_jobs=-1,
+    out=None,
+    **kwargs,
 ):
     if keep_keys is None and out is None:
         keep_keys = {"test_score": target.shape[-2], "estimator": target.shape[-2]}
@@ -393,6 +407,7 @@ def skl_model_target_dim_tc(
             func=func,
             out=out_j,
             keep_keys=keep_keys,
+            n_jobs=n_jobs,
             **kwargs,
         )
         for k, v in out_j.items():
@@ -401,7 +416,14 @@ def skl_model_target_dim_tc(
 
 
 def skl_model_target_tc(
-    m, data, target, func=skms.cross_validate, keep_keys=None, out=None, **kwargs
+    m,
+    data,
+    target,
+    func=skms.cross_validate,
+    n_jobs=-1,
+    keep_keys=None,
+    out=None,
+    **kwargs,
 ):
     if keep_keys is None and out is None:
         keep_keys = {"test_score": (data.shape[1],), "estimator": target.shape[-2]}
@@ -410,7 +432,7 @@ def skl_model_target_tc(
         if np.all(np.isnan(target[..., j])) or np.all(np.isnan(data)):
             out_j = {}
         else:
-            out_j = func(m, data, target[..., j], **kwargs)
+            out_j = func(m, data, target[..., j], n_jobs=n_jobs, **kwargs)
         for k in keep_keys.keys():
             v = out_j.get(k)
             if v is not None and k == "estimator":
@@ -2070,6 +2092,7 @@ def cv_wrapper(
     return_confusion=False,
     rng_seed=None,
     pseudo_trials=None,
+    n_jobs=-1,
     **kwargs,
 ):
     rng = np.random.default_rng()
@@ -2114,6 +2137,7 @@ def cv_wrapper(
         y,
         cv=cv_use,
         return_estimator=True,
+        n_jobs=n_jobs,
         **kwargs,
     )
     predictions = []
@@ -2512,7 +2536,7 @@ def cross_validate_wrapper(
     X,
     y,
     n_folds=10,
-    n_jobs=-1,
+    n_jobs=-5,
     verbose=False,
     cv=None,
     num_fields=("train_score", "test_score", "test_targ", "test_pred"),
@@ -2601,6 +2625,33 @@ def fold_skl_shape(
     if c_gen is not None:
         c_gen = np.swapaxes(c_gen, 0, 1)
     return fold_skl_flat(c_flat, labels, folds_n, c_gen=c_gen, **kwargs)
+
+
+class TrialStandardScaler:
+    def __init__(self, trial_width=20, **kwargs):
+        self.scaler = skp.StandardScaler(**kwargs)
+        self.trial_width = trial_width
+
+    def fit(self, X, y=None, trial_nums=None, sample_weight=None):
+        if trial_nums is None:
+            trial_nums = np.arange(len(X))
+        self.X_fit = X
+        self.trial_nums_fit = trial_nums
+        return self
+
+    def transform(self, X, y=None, trial_nums=None, sample_weight=None):
+        if trial_nums is None:
+            trial_nums = np.arange(len(X))
+        out = np.zeros_like(X)
+        for i, trl in enumerate(X):
+            mask = np.abs(trial_nums[i] - self.trial_nums_fit) < self.trial_width 
+            m_i = self.scaler.fit(self.X_fit[mask])
+            out[i] = m_i.transform(trl[None])
+        return out
+
+    def fit_transform(self, X, **kwargs):
+        self.fit(X, **kwargs)
+        return self.transform(X, **kwargs)
 
 
 def fold_skl_flat(

@@ -2,6 +2,8 @@ import numpy as np
 import os
 import scipy.stats as sts
 import sklearn.decomposition as skd
+import sklearn.gaussian_process as skgp
+import sklearn.preprocessing as skp
 import itertools as it
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -58,7 +60,7 @@ def plot_regional_analysis(
             subplot_kw=subplot_kw,
         )
         axs = axs.flatten()
-    
+
     for i, region in enumerate(region_list):
         if region is None:
             region_s = "all"
@@ -1923,6 +1925,45 @@ def digitize_vars(
             y_cents[i] = cent_func(ys[mask])
     return x_cents, y_cents
 
+
+@ax_adder()
+def plot_gp_scatter_average(
+    xs,
+    ys,
+    ax=None,
+    n_pts=100,
+    cent_func=np.nanmean,
+    use_max=None,
+    use_min=None,
+    return_xy=False,
+    kernel=None,
+    **kwargs,
+):
+    xs = np.array(xs)
+    ys = np.array(ys)
+    if use_min is None:
+        use_min = np.nanmin(xs)
+    if use_max is None:
+        use_max = np.nanmax(xs)
+    xs_plot = np.linspace(use_min, use_max, n_pts)
+    if kernel is None:
+        kernel = (
+            skgp.kernels.ConstantKernel() * skgp.kernels.RBF()
+            + skgp.kernels.WhiteKernel()
+        )
+
+    m = skgp.GaussianProcessRegressor(kernel=kernel)
+    ys = ys[:, None]
+    scaler = skp.StandardScaler().fit(ys)
+    m.fit(xs[:, None], scaler.transform(ys)[:, 0])
+    ys_plot = m.sample_y(xs_plot[:, None], n_samples=1000).T
+    ys_plot = scaler.inverse_transform(ys_plot.reshape((-1, 1))).reshape(ys_plot.shape)
+    plot_trace_werr(xs_plot, ys_plot, ax=ax, confstd=True, **kwargs)
+    
+    out = None
+    if return_xy:
+        out = (xs_plot, ys_plot)
+    return out
 
 def plot_scatter_average(
     xs,
