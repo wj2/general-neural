@@ -427,9 +427,15 @@ class Dataset(object):
                     if u.check_list(fs_ijk):
                         use_len = len(fs_ijk)
                         break
+                    if isinstance(fs_ijk, np.ndarray):
+                        use_len = len(fs_ijk[None][0])
+                        break
                 fs_ij_new = np.zeros((len(fs_ij), use_len))
                 for k, fs_ijk in enumerate(fs_ij):
-                    fs_ij_new[k] = fs_ijk
+                    try:
+                        fs_ij_new[k] = fs_ijk
+                    except ValueError:
+                        fs_ij_new[k] = fs_ijk[None][0]
                 ts_i.append(fs_ij_new)
             ts.append(ts_i)
         ts = ResultSequence(ts)

@@ -61,6 +61,20 @@ def make_trs_matrix(m, n, corr_groups=None):
     return trs_mat
 
 
+def make_periodic_features(X, axis=1, periodic_inds=None):
+    arr = []
+    if periodic_inds is None:
+        periodic_inds = range(X.shape[1])
+    for i in range(X.shape[axis]):
+        use = np.take(X, i, axis=axis)
+        if i in periodic_inds:
+            x_i = np.stack((np.sin(use), np.cos(use)), axis=1)
+        else:
+            x_i = np.expand_dims(use, axis)
+        arr.append(x_i)
+    return np.concatenate(arr, axis=axis)
+    
+
 def format_samps_sirange(samps, axis=0, withmean=True, perc=95, **kwargs):
     high, low = conf_interval(samps, perc=perc, axis=axis, withmean=withmean)[:, 0]
     return format_sirange(high, low, **kwargs)
@@ -349,6 +363,16 @@ def check_list(x):
         ret = not isinstance(x, str)
     except TypeError:
         ret = False
+    return ret
+
+
+def check_zero_list(x):
+    ret = check_list(x)
+    if not ret:
+        try:
+            ret = check_list(x[None][0])
+        except IndexError:
+            ret = False
     return ret
 
 
