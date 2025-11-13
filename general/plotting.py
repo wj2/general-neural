@@ -626,6 +626,21 @@ def add_hlines(pos, ax, use_lim=None, **kwargs):
     ax.set_xlim(xl)
 
 
+def add_identity_line(ax, plot_lim, use_xlim=None, use_ylim=None, **kwargs):
+    if use_xlim is None:
+        use_xlim = ax.get_xlim()
+    if use_ylim is None:
+        use_ylim = ax.get_ylim()
+    ax.plot(plot_lim, plot_lim, **kwargs)
+    ax.set_xlim(use_xlim)
+    ax.set_ylim(use_ylim)
+
+
+def add_xl_identity_line(ax, **kwargs):
+    add_identity_line(ax, ax.get_xlim(), **kwargs)
+def add_yl_identity_line(ax, **kwargs):
+    add_identity_line(ax, ax.get_ylim(), **kwargs)
+
 def gen_circle_pts(n, r=1):
     angs = np.linspace(0, 2 * np.pi, n)
     pts = np.stack((np.cos(angs), np.sin(angs)), axis=1)
@@ -1175,12 +1190,13 @@ def plot_trace_wpts(x, data, ax=None, color=None, **kwargs):
 
 
 def make_linear_cmap(b1, b2=None, name=""):
+    b1 = mpl.colors.to_rgba(b1)
     if b2 is None:
         b_start = (1,) * len(b1)
         b_end = b1
     else:
         b_start = b1
-        b_end = b2
+        b_end = mpl.colors.to_rgba(b2)
     cmap = mpl.colors.LinearSegmentedColormap.from_list(name, [b_start, b_end])
     return cmap
 
@@ -1248,6 +1264,42 @@ def add_color_value(color, amt):
         np.stack((np.zeros_like(hsv[..., -2]), hsv[..., -2]), axis=0), axis=0
     )
     return hls_to_rgb(hsv)
+
+
+@ax_adder()
+def plot_trace_ends(
+    *to_plot,
+    ax=None,
+    ms=1,
+    facecolor=(1, 1, 1),
+    color=None,
+    progressive_color=True,
+    **kwargs,
+):
+    if color is None:
+        color = "r"
+    cmap = make_linear_cmap(color)
+    if progressive_color:
+        plot_colored_line(*to_plot, cmap=cmap, ax=ax, **kwargs)
+    else:
+        l_ = ax.plot(*to_plot, **kwargs)
+        color = kwargs.pop("color", l_[0].get_color())
+
+    ax.plot(
+        *list(x[..., 0] for x in to_plot),
+        markerfacecolor=facecolor,
+        marker="o",
+        color=color,
+        ms=ms,
+        **kwargs,
+    )
+    ax.plot(
+        *list(x[..., -1] for x in to_plot),
+        marker="o",
+        color=color,
+        ms=ms,
+        **kwargs,
+    )
 
 
 def plot_trace_werr(
@@ -1873,7 +1925,7 @@ def clean_3d_plot(ax):
     ax.zaxis._axinfo["grid"]["color"] = pc
 
 
-def clean_plot(ax, i, max_i=None, ticks=True, spines=True, horiz=True):
+def clean_plot(ax, i=0, max_i=None, ticks=True, spines=True, horiz=True):
     if spines:
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -1959,11 +2011,12 @@ def plot_gp_scatter_average(
     ys_plot = m.sample_y(xs_plot[:, None], n_samples=1000).T
     ys_plot = scaler.inverse_transform(ys_plot.reshape((-1, 1))).reshape(ys_plot.shape)
     plot_trace_werr(xs_plot, ys_plot, ax=ax, confstd=True, **kwargs)
-    
+
     out = None
     if return_xy:
         out = (xs_plot, ys_plot)
     return out
+
 
 def plot_scatter_average(
     xs,
@@ -2003,22 +2056,30 @@ def make_xaxis_scale_bar(
     ax,
     magnitude=None,
     double=True,
-    anchor=0,
+    anchor=None,
     bottom=True,
     true_scale=False,
     label="",
     text_buff=0.22,
     fontsize="medium",
+    bar_len=.2,
+    round=10,
+    anchor_offset=.2,
     **kwargs,
 ):
     xl = ax.get_xlim()
     yl = ax.get_ylim()
-    if magnitude is None:
-        ext = np.abs(xl[1] - xl[0])
-        if double:
-            magnitude = ext / 4
+    ext = np.abs(xl[1] - xl[0])
+    if anchor is None:
+        if 0 > yl[0] and 0 < yl[1]:
+            anchor = 0
         else:
-            magnitude = ext / 2
+            anchor = np.round((ext * anchor_offset + yl[0]) / round) * round
+    if magnitude is None:
+        if double:
+            magnitude = max(np.round(ext * bar_len / (2 * round)) * round, round)
+        else:
+            magnitude = max(np.round(ext * bar_len / round) * round, round)
     if double:
         new_ticks = [-magnitude + anchor, anchor, anchor + magnitude]
     else:
@@ -2241,21 +2302,30 @@ def make_yaxis_scale_bar(
     ax,
     magnitude=None,
     double=True,
-    anchor=0,
+    anchor=None,
     left=True,
     label="",
     text_buff=0.15,
     fontsize="medium",
+    bar_len=.1,
+    round=10,
+    anchor_loc="bottom",
+    anchor_offset=.2,
     **kwargs,
 ):
     xl = ax.get_xlim()
     yl = ax.get_ylim()
-    if magnitude is None:
-        ext = np.abs(yl[1] - yl[0])
-        if double:
-            magnitude = ext / 4
+    ext = np.abs(yl[1] - yl[0])
+    if anchor is None:
+        if 0 > yl[0] and 0 < yl[1]:
+            anchor = 0
         else:
-            magnitude = ext / 2
+            anchor = np.round((ext * anchor_offset + yl[0]) / round) * round
+    if magnitude is None:
+        if double:
+            magnitude = max(np.round(ext * bar_len / (2 * round)) * round, round)
+        else:
+            magnitude = max(np.round(ext * bar_len / round) * round, round)
     if double:
         new_ticks = [-magnitude + anchor, anchor, anchor + magnitude]
     else:

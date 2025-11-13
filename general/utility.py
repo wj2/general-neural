@@ -1697,6 +1697,7 @@ def distribute_imglogs(il_path, out_path):
             nomatch.append(il)
     return nomatch
 
+
 def aggregate_dictionary(d, combine_axis=0, combine_func=np.stack):
     """ cribbed from sklearn """
     out = {}
@@ -1847,6 +1848,17 @@ def discretize_group(
         for i, arg in enumerate(args):
             other_mus[i].append(func(arg[mask], **kwargs))
     return split_mus, other_mus
+
+
+def bootstrap_args(func, *args, exclude_inds=None, n=1000):
+    out = np.zeros(n)
+    rng = np.random.default_rng()
+    n_entries = len(args[0])
+    for i in range(n):
+        inds = rng.choice(n_entries, n_entries)
+        args_i = list(x if i in exclude_inds else x[inds] for i, x in enumerate(args))
+        out[i] = func(*args_i)
+    return out
 
 
 def bootstrap_list(l_, func, n=1000, out_shape=None, ret_sem=False):

@@ -417,12 +417,23 @@ class Dataset(object):
 
     def get_field_timeseries(self, fields, timing_key="video_frames", **kwargs):
         fs = self[list(fields)]
-        xs_all = self[timing_key]
+        if timing_key is None:
+            xs_all = []
+            for f in fs:
+                g = []
+                for i in range(len(f)):
+                    g.append(np.arange(len(f[fields[0]].iloc[i])))
+                xs_all.append(pd.Series(g))
+                    
+            xs_all = ResultSequence(xs_all)
+        else:
+            xs_all = self[timing_key]
         ts = []
         for i, fs_i in enumerate(fs):
             fs_i = fs_i.to_numpy()
             ts_i = []
             for j, fs_ij in enumerate(fs_i):
+                use_len = None
                 for fs_ijk in fs_ij:
                     if u.check_list(fs_ijk):
                         use_len = len(fs_ijk)
@@ -430,6 +441,8 @@ class Dataset(object):
                     if isinstance(fs_ijk, np.ndarray):
                         use_len = len(fs_ijk[None][0])
                         break
+                if use_len is  None:
+                    use_len = len(xs_all[i].iloc[j])
                 fs_ij_new = np.zeros((len(fs_ij), use_len))
                 for k, fs_ijk in enumerate(fs_ij):
                     try:
@@ -445,7 +458,6 @@ class Dataset(object):
         self,
         psths,
         xs_all,
-        timing_key=None,
         binsize=None,
         begin=0,
         end=500,
@@ -487,8 +499,8 @@ class Dataset(object):
                         print("length difference: {}".format(l_diff))
 
                 mask = np.abs(xs_ij[:, None] - xs_reg[None]) <= binsize / 2
-                mask = mask / np.sum(mask, axis=0, keepdims=True)
-                trl_sections[j] = np.sum(mask[None] * trl[..., None], axis=1)
+                mask = mask / np.nansum(mask, axis=0, keepdims=True)
+                trl_sections[j] = np.nansum(mask[None] * trl[..., None], axis=1)
             if shuffle_trials:
                 rng = np.random.default_rng()
                 list(

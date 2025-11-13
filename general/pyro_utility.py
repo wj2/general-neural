@@ -1,10 +1,7 @@
-import numpy as np
 import pyro
 import torch
 import logging
 
-import pyro.distributions.constraints as constraints
-import pyro.distributions as dist
 from pyro import poutine
 
 
@@ -17,7 +14,7 @@ def fit_model(
     loss=None,
     optim=None,
     lr=0.01,
-    n_steps=1000,
+    n_steps=5000,
     smoke_test=False,
     show_logging=False,
     n_samps=500,
@@ -27,12 +24,14 @@ def fit_model(
     if approach is None:
         approach = pyro.infer.SVI
     if loss is None:
-        loss = pyro.infer.Trace_ELBO()
+        loss_func = pyro.infer.Trace_ELBO()
+    else:
+        loss_func = loss
     if guide is None:
         guide = pyro.infer.autoguide.AutoNormal
     if optim is None:
         optim = pyro.optim.Adam({"lr": lr})
-    if block_vars:
+    if block_vars is not None:
         blocked_model = poutine.block(model, hide=block_vars)
     else:
         blocked_model = model
@@ -50,7 +49,7 @@ def fit_model(
         render_distributions=True,
         render_params=True,
     )
-    optimizer = approach(model, use_guide, optim, loss)
+    optimizer = approach(model, use_guide, optim, loss_func)
 
     losses = []
     for step in range(n_steps if not smoke_test else 2):
@@ -78,9 +77,18 @@ def fit_model(
 def sample_fit_model(
     features,
     model,
-    use_guide,
+    posterior_samples=None,
+    use_guide=None,
     n_samps=500,
 ):
-    predictive = pyro.infer.Predictive(model, guide=use_guide, num_samples=n_samps)
+    if posterior_samples is not None:
+        posterior_samples = {k: torch.tensor(v) for k, v in posterior_samples.items()}
+        use_guide = None
+    predictive = pyro.infer.Predictive(
+        model,
+        posterior_samples=posterior_samples,
+        guide=use_guide,
+        num_samples=n_samps,
+    )
     pred_samples = predictive(*features)
-    return pred_samples["obs"]
+    return pred_samples["obs"].numpy()

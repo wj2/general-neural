@@ -63,9 +63,15 @@ class CompositeTask:
 
 
 class ParityTask(Task):
+    def __init__(self, t_inds, sign=None):
+        super().__init__(t_inds)
+        if sign is None:
+            sign = np.sign(sts.norm(0, 1).rvs(1))
+        self.sign = sign
+        
     def __call__(self, x):
         stim = x[:, self.t_inds]
-        return parity(stim)
+        return self.sign * parity(stim)
 
 
 class IdentityTask(Task):
@@ -75,10 +81,12 @@ class IdentityTask(Task):
 
 
 class ColoringTask(Task):
-    def __init__(self, t_inds, coloring=None, n_coloring=None, merger=np.sum):
+    def __init__(
+        self, t_inds, coloring=None, n_coloring=None, n_values=2, merger=np.sum
+    ):
         super().__init__(t_inds)
         if n_coloring is None:
-            n_coloring = 2 ** (len(t_inds) - 1)
+            n_coloring = n_values ** (len(self.t_inds) - 1)
         self.merger = merger
         if coloring is None:
             coloring = generate_many_colorings(n_coloring, len(self.t_inds))
@@ -228,6 +236,7 @@ class LinearTask(Task):
         offset_var=0,
         center=0.5,
         scale=2,
+        centered_targets=False,
     ):
         super().__init__(t_inds)
         if task_vec is None:
@@ -239,11 +248,16 @@ class LinearTask(Task):
         self.offset = offset
         self.center = center
         self.scale = scale
+        self.centered_targets = centered_targets
 
     def __call__(self, x):
         stim = self.scale * (x[:, self.t_inds] - self.center)
         proj = np.sum(self.task_vec * stim, axis=1, keepdims=True)
-        return (proj + self.offset) > 0
+        t = (proj + self.offset) > 0
+        if self.centered_targets:
+            t = 2 * (t - .5)
+        return t
+    
 
 
 class ContextualTask(Task):
@@ -264,11 +278,10 @@ class ContextualTask(Task):
             task_inds = x[:, self.c_inds]
         else:
             task_inds = np.argmax(x[:, self.c_inds], axis=1)
+        task_inds = np.squeeze(task_inds)
         outs_all = np.stack(list(t(x) for t in self.tasks), axis=0)
 
-        targets = np.zeros_like(outs_all[0])
-        for i in range(x.shape[0]):
-            targets[i] = outs_all[task_inds[i], i]
+        targets = outs_all[task_inds, range(len(x))]
         return targets
 
 
@@ -288,10 +301,10 @@ def make_contextual_task(
     return contask
 
 
-def generate_many_colorings(n_colorings, n_g):
+def generate_many_colorings(n_colorings, n_g, n_values=2):
     rng = np.random.default_rng()
-    inds = rng.choice(2**n_g, n_colorings, replace=False)
-    out = np.array(list(it.product((0, 1), repeat=n_g)))[inds]
+    inds = rng.choice(n_values**n_g, n_colorings, replace=False)
+    out = np.array(list(it.product(tuple(range(n_values)), repeat=n_g)))[inds]
     return out
 
 

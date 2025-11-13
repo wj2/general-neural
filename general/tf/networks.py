@@ -17,6 +17,7 @@ def train_network(
     train_targ,
     epochs=15,
     batch_size=100,
+    use_minibatches=True,
     use_early_stopping=True,
     es_patience=2,
     es_field="val_loss",
@@ -50,6 +51,11 @@ def train_network(
             rep_callback = gtfc.TrackReps(model, n_rep_samps=2000)
         cb.append(rep_callback)
         kwargs["callbacks"] = cb
+    if not use_minibatches:
+        data_x = tf.data.Dataset.from_tensor_slices((train_x, train_targ))
+        train_x = data_x.batch(len(train_x))
+        batch_size = None
+        train_targ = None
 
     out = model.model.fit(
         x=train_x, y=train_targ, epochs=epochs, batch_size=batch_size, **kwargs
@@ -206,22 +212,43 @@ class GenericPretrainedNetwork:
         return rep
 
 
+class XYInputGenerator:
+    def __init__(self, X, y):
+        self.X = X
+        self.y = y
+        self.rng = np.random.default_rng()
+
+    @property
+    def output_dim(self):
+        return self.X.shape[1]
+
+    def sample_reps(self, n_samps=1000):
+        inds = self.rng.choice(len(self.X), n_samps, replace=True)
+        return self.X[inds], self.y[inds]
+
+
 class GenericFFNetwork:
     def __init__(
         self,
         input_generator,
         n_rep,
         tasks=None,
-        noise=0.1,
+        out_dim=None,
+        noise=0,
+        inp_noise=0,
         **kwargs,
     ):
+        if tasks is None and out_dim is None:
+            raise IOError("one of tasks or out_dim must be specified, both are None")
+        out_dim = len(tasks) if tasks is not None else out_dim
         self.input_generator = input_generator
         self.tasks = tasks
         out = make_ff_network(
             (input_generator.output_dim,),
             n_rep,
-            len(tasks),
+            out_dim,
             noise=noise,
+            inp_noise=inp_noise,
             **kwargs,
         )
         self.layer_reps = out[1]
@@ -232,9 +259,15 @@ class GenericFFNetwork:
         self.n_layers = len(self.layer_reps)
         self.noise_std = noise
 
+    @classmethod
+    def from_xy(cls, X, y, n_rep, **kwargs):
+        inp_gen = XYInputGenerator(X, y)
+        return GenericFFNetwork(inp_gen, n_rep, out_dim=y.shape[1], **kwargs)
+
     def _compile(self, optimizer=None, loss=None, ignore_nan=True, lr=1e-3):
         if optimizer is None:
             optimizer = tf.optimizers.Adam(learning_rate=lr)
+            # optimizer = tf.optimizers.SGD(learning_rate=lr)
         if loss is None:
             if ignore_nan:
                 loss = gtfl.mse_nanloss
@@ -274,38 +307,54 @@ class GenericFFNetwork:
     def get_target(self, inp):
         return self.tasks(inp)
 
-    def sample_targs(self, n_samps=1000):
-        stim, input_rep = self.input_generator.sample_reps(n_samps)
+    def sample_targs(self, n_samps=1000, sample_all=False):
+        if sample_all:
+            stim, input_rep = self.input_generator.get_all_stim()
+        else:
+            stim, input_rep = self.input_generator.sample_reps(n_samps)
         targ = self.get_target(stim)
         return stim, input_rep, targ
 
-    def fit(
+    def fit_xy(
         self,
-        n_train=2 * 10**4,
+        X,
+        y,
+        val_set=None,
         epochs=20,
-        batch_size=200,
-        n_val=10**3,
         verbose=False,
+        optimizer=None,
+        use_minibatches=True,
+        lr=1e-3,
         **kwargs,
     ):
         if not self.compiled:
-            self._compile()
-
-        _, x, y = self.sample_targs(n_train)
-        _, eval_x, eval_y = self.sample_targs(n_val)
-
-        val_set = (eval_x, eval_y)
-
+            self._compile(optimizer=optimizer, lr=lr)
         out = train_network(
             self,
-            x,
+            X,
             y,
             epochs=epochs,
             validation_data=val_set,
             verbose=verbose,
+            use_minibatches=use_minibatches,
             **kwargs,
         )
         return out
+
+    def fit(
+        self,
+        n_train=2 * 10**4,
+        n_val=10**3,
+        sample_all=False,
+        **kwargs,
+    ):
+        _, x, y = self.sample_targs(n_train, sample_all=sample_all)
+        _, eval_x, eval_y = self.sample_targs(n_val, sample_all=sample_all)
+
+        val_set = (eval_x, eval_y)
+        return self.fit_xy(
+            x, y, val_set=val_set, use_minibatches=not sample_all, **kwargs
+        )
 
 
 class IdentityNetwork(GenericFFNetwork):

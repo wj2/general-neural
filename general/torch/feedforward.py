@@ -85,7 +85,7 @@ class FeedForwardNetwork(any.GenericModule):
         return self.net(X)
 
     def _setup_outsider(self, inp):
-        return torch.tensor(inp).to(self.device).float()
+        return torch.tensor(inp, dtype=torch.float).to(self.device)
 
     def fit(
         self,
