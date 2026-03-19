@@ -6,6 +6,7 @@ import sklearn.preprocessing as skp
 import quantities as pq
 import neo
 import scipy.signal as sig
+import ragged
 
 import general.utility as u
 import general.neural_analysis as na
@@ -151,7 +152,40 @@ def _format_for_svm(pops):
     return neur_pop, neur_mins
 
 
-class Dataset(object):
+class AbstractDataset:
+    
+    def from_dict(cls, **kwargs):
+        raise NotImplementedError("from_dict is not implemented")
+
+
+class NWBDataset(AbstractDataset):
+    def __init__(self, dframe, seconds=False, sort=True):
+        self.data = dframe
+        try:
+            self.session_fields = self.data["data"].iloc[0].columns
+        except KeyError as e:
+            if len(self.data["data"]) == 0:
+                raise IOError("no data available")
+            else:
+                raise e
+        self.n_sessions = len(self.data)
+        self.sort = sort
+        if sort:
+            self.data = self.data.sort_values("date", ignore_index=True)
+            self.data = self.data.sort_values("animal", ignore_index=True)
+        else:
+            self.data = self.data.reset_index(drop=True)
+        self.seconds = seconds
+        self.population_cache = {}
+        self.mask_pop_cache = {}
+
+    
+        
+class HomegrownSpikeHandling:
+    
+
+
+class Dataset(HomegrownTCHandling):
     def __init__(self, dframe, seconds=False, sort=True):
         self.data = dframe
         try:
@@ -415,7 +449,9 @@ class Dataset(object):
     def get_psth(self, **kwargs):
         return self._get_psth_timeseries(self["psth"], self["psth_timing"], **kwargs)
 
-    def get_field_timeseries(self, fields, timing_key="video_frames", **kwargs):
+    def get_field_timeseries(
+        self, fields, timing_key="video_frames", jagged=False, **kwargs
+    ):
         fs = self[list(fields)]
         if timing_key is None:
             xs_all = []
@@ -424,7 +460,6 @@ class Dataset(object):
                 for i in range(len(f)):
                     g.append(np.arange(len(f[fields[0]].iloc[i])))
                 xs_all.append(pd.Series(g))
-                    
             xs_all = ResultSequence(xs_all)
         else:
             xs_all = self[timing_key]
@@ -441,7 +476,7 @@ class Dataset(object):
                     if isinstance(fs_ijk, np.ndarray):
                         use_len = len(fs_ijk[None][0])
                         break
-                if use_len is  None:
+                if use_len is None:
                     use_len = len(xs_all[i].iloc[j])
                 fs_ij_new = np.zeros((len(fs_ij), use_len))
                 for k, fs_ijk in enumerate(fs_ij):
@@ -452,7 +487,11 @@ class Dataset(object):
                 ts_i.append(fs_ij_new)
             ts.append(ts_i)
         ts = ResultSequence(ts)
-        return self._get_generic_timeseries(ts, xs_all, **kwargs)
+        if jagged:
+            out = self._get_generic_jagged_timeseries(ts, xs_all, **kwargs)
+        else:
+            out = self._get_generic_timeseries(ts, xs_all, **kwargs)
+        return out
 
     def _get_generic_timeseries(
         self,
@@ -511,6 +550,68 @@ class Dataset(object):
                 trl_sections = np.expand_dims(np.swapaxes(trl_sections, 0, 1), 1)
             outs.append(trl_sections)
         return outs, xs_reg
+
+    def _get_generic_jagged_timeseries(
+        self,
+        psths,
+        xs_all,
+        binsize=200,
+        before=0,
+        after=0,
+        binstep=None,
+        accumulate=False,
+        tzf1=None,
+        tzf2=None,
+        repl_nan=False,
+        ret_no_spk=False,
+        causal_timing=False,
+        shuffle_trials=False,
+        xs_from="begin",
+        verbose=False,
+    ):
+        outs = []
+        xs_out = []
+        if binstep is None:
+            binstep = binsize
+        tz1 = self[tzf1]
+        tz2 = self[tzf2]
+        for i, psth_l in enumerate(psths):
+            xs = xs_all[i]
+            begin = tz1[i].to_numpy()
+            end = tz2[i].to_numpy()
+
+            trl_sections = []
+            xs_sections = []
+            for j, trl in enumerate(psth_l):
+                if xs_from == "begin":
+                    tz = begin[j]
+                elif xs_from == "end":
+                    tz = end[j]
+                else:
+                    raise ValueError("unexpected value for xs_from: {}".format(xs_from))
+                xs_ij = xs.iloc[j] - tz
+                b_ij = begin[j] - tz + before
+                e_ij = end[j] - tz + after
+                xs_reg = na.compute_xs(binsize, b_ij, e_ij, binstep)
+                l_diff = xs_ij.shape[0] - trl.shape[-1]
+                if l_diff > 0:
+                    xs_ij = xs_ij[:-l_diff]
+                    if l_diff > 1 and verbose:
+                        print("length difference: {}".format(l_diff))
+
+                mask = np.abs(xs_ij[:, None] - xs_reg[None]) <= binsize / 2
+                mask = mask / np.nansum(mask, axis=0, keepdims=True)
+                trl_sections.append(np.nansum(mask[None] * trl[..., None], axis=1))
+                xs_sections.append(xs_reg)
+            if shuffle_trials:
+                rng = np.random.default_rng()
+                list(
+                    rng.shuffle(trl_sections[:, i])
+                    for i in range(trl_sections.shape[1])
+                )
+            outs.append(ragged.array(trl_sections))
+            xs_out.append(ragged.array(xs_sections))
+        return outs, xs_out
 
     def _get_psth_timeseries(
         self,
@@ -670,6 +771,99 @@ class Dataset(object):
             out = outs
         return out
 
+    def get_jagged_populations(self, *args, cache=False, **kwargs):
+        key = args + tuple(kwargs.values())
+        if cache and key in self.population_cache.keys():
+            out = self.population_cache[key]
+        else:
+            out = self._get_jagged_populations(*args, **kwargs)
+        if cache:
+            self.population_cache[key] = out
+        return out
+
+    def _get_jagged_populations(
+        self,
+        binsize,
+        tzf1,
+        tzf2,
+        before=0,
+        after=0,
+        xs_from="begin",
+        binstep=None,
+        skl_axes=False,
+        accumulate=False,
+        repl_nan=False,
+        regions=None,
+        ret_no_spk=False,
+        shuffle_trials=False,
+        use_new=False,
+        causal_timing=False,
+    ):
+        spks = self["spikeTimes"]
+        if xs_from == "begin":
+            center_tzf = tzf1
+        elif xs_from == "end":
+            center_tzf = tzf2
+        else:
+            raise IOError("unrecognized value for xs_from: {}".format(xs_from))
+        spks = self._center_spks(spks, None, center_tzf)
+        starts = self[tzf1] - self[center_tzf] + before
+        ends = self[tzf2] - self[center_tzf] + after
+        if regions is not None:
+            regions_all = self["neur_regions"]
+        outs = []
+        xs_all = []
+        n_trls = []
+        no_spks = []
+        for i, spk in enumerate(spks):
+            if len(spk) == 0:
+                xs = na.compute_xs(
+                    binsize,
+                    before,
+                    after,
+                    binstep,
+                    causal_timing=causal_timing,
+                )
+                resp_arr = np.zeros((0, self.get_nneurs()[i], len(xs)))
+                out = (resp_arr, xs, np.ones_like(resp_arr, dtype=bool))
+            else:
+                spk_stack = np.stack(spk, axis=0)
+                if regions is not None:
+                    regs = regions_all[i].iloc[0]
+                    mask = np.isin(regs, regions)
+                    spk_stack = spk_stack[:, mask]
+                s_i = starts[i]
+                e_i = ends[i]
+                resp_trs = []
+                xs_trs = []
+                no_spk_trs = []
+                for j, spk_j in enumerate(spk_stack):
+                    out = self._get_spikerates(
+                        spk_j[None],
+                        binsize,
+                        (s_i.iloc[j], e_i.iloc[j]),
+                        binstep,
+                        accumulate=accumulate,
+                        convert_seconds=not self.seconds,
+                        use_new=use_new,
+                        causal_timing=causal_timing,
+                    )
+                    resp_ij, xs_ij, no_spk_ij = out
+                    resp_trs.append(resp_ij[0])
+                    xs_trs.append(xs_ij)
+                    no_spk_trs.append(no_spk_ij)
+                out = list(ragged.array(x) for x in (resp_trs, xs_trs, no_spk_trs))
+            resp_arr, xs, no_spk_mask = out
+            xs_all.append(xs)
+            n_trls.append(len(resp_arr))
+            outs.append(resp_arr)
+            no_spks.append(no_spk_mask)
+        if ret_no_spk:
+            out = (outs, xs_all, no_spks)
+        else:
+            out = (outs, xs_all)
+        return out
+
     # @ft.lru_cache(maxsize=10)
     def get_populations(self, *args, cache=False, **kwargs):
         key = args + tuple(kwargs.values())
@@ -736,10 +930,6 @@ class Dataset(object):
                     causal_timing=causal_timing,
                 )
             resp_arr, xs, no_spk_mask = out
-            # if regions is not None and len(resp_arr) > 0:
-            #     regs = regions_all[i].iloc[0]
-            #     mask = np.isin(regs, regions)
-            #     resp_arr = resp_arr[:, mask]
             if repl_nan:
                 resp_arr[no_spk_mask] = np.nan
             n_trls.append(resp_arr.shape[0])

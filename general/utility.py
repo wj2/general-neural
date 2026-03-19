@@ -14,7 +14,6 @@ import configparser
 import sklearn.decomposition as skd
 import sklearn.preprocessing as skp
 import sklearn.utils as sku
-import numbers
 import matplotlib.pyplot as plt
 import joblib as jl
 
@@ -32,6 +31,20 @@ monthdict = {
     "11": "Nov",
     "12": "Dec",
 }
+
+
+def combine_dimensions(x, d1, d2):
+    """combine dimensions of an array into a single dimension through concatenation
+    x : array
+    d1 : int, first dimension (will be the preserved dimension)
+    d2 : int, second dimension (will be eliminated)
+    """
+    arr = np.concatenate(list(np.take(x, i, d2) for i in range(x.shape[d2])), axis=d1)
+    return arr
+    
+
+def uncombine_dimensions(x, d1, d2, size):
+    return np.stack(np.split(x, size, axis=d1), axis=d2)
 
 
 def make_eye(n, thickness=1, dtype=bool):
@@ -74,6 +87,15 @@ def make_periodic_features(X, axis=1, periodic_inds=None):
         arr.append(x_i)
     return np.concatenate(arr, axis=axis)
     
+
+def format_pvalue(pval, min_pvalue=.001):
+    precision = "{{:.{}f}}".format(int(-np.log10(min_pvalue)))
+    if pval < min_pvalue:
+        pv = "\(p <\) {}".format(min_pvalue)
+    else:
+        pv = "\(p =\) {}".format(precision).format(pval)
+    return pv
+
 
 def format_samps_sirange(samps, axis=0, withmean=True, perc=95, **kwargs):
     high, low = conf_interval(samps, perc=perc, axis=axis, withmean=withmean)[:, 0]
@@ -754,6 +776,17 @@ def strict_dim(samps, eps=1e-10):
 def pr_only(pvs):
     pr = np.sum(pvs) ** 2 / np.sum(pvs**2)
     return pr
+
+
+def combine_jagged_list(arrs, pad_val=np.nan, stack_axis=0):
+    shapes = np.stack(list(arr.shape for arr in arrs), axis=0)
+    shapes_max = np.max(shapes, axis=0)
+    new_arrs = []
+    for i, arr in enumerate(arrs):
+        pad = shapes_max - shapes[i]
+        pad_full = list(zip(np.zeros(len(pad), dtype=int), pad.astype(int)))
+        new_arrs.append(np.pad(arr, pad_full, constant_values=pad_val))
+    return np.stack(new_arrs, axis=stack_axis)
 
 
 def make_unit_vector(v, squeeze=True, dim=-1):

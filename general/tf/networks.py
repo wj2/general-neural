@@ -83,8 +83,8 @@ def make_ff_network(
     out_act=tf.nn.sigmoid,
     hidden=(),
     hidden_same_reg=True,
-    noise=0.1,
-    inp_noise=0.01,
+    noise=0,
+    inp_noise=0,
     kernel_reg_type=tfk.regularizers.L2,
     kernel_reg_weight=0,
     act_reg_type=tfk.regularizers.l2,
@@ -235,7 +235,6 @@ class GenericFFNetwork:
         tasks=None,
         out_dim=None,
         noise=0,
-        inp_noise=0,
         **kwargs,
     ):
         if tasks is None and out_dim is None:
@@ -248,7 +247,6 @@ class GenericFFNetwork:
             n_rep,
             out_dim,
             noise=noise,
-            inp_noise=inp_noise,
             **kwargs,
         )
         self.layer_reps = out[1]
@@ -267,7 +265,6 @@ class GenericFFNetwork:
     def _compile(self, optimizer=None, loss=None, ignore_nan=True, lr=1e-3):
         if optimizer is None:
             optimizer = tf.optimizers.Adam(learning_rate=lr)
-            # optimizer = tf.optimizers.SGD(learning_rate=lr)
         if loss is None:
             if ignore_nan:
                 loss = gtfl.mse_nanloss

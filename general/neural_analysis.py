@@ -13,6 +13,7 @@ import sklearn.impute as skimp
 import sklearn.naive_bayes as sknb
 import sklearn.linear_model as sklm
 import sklearn.svm as sksvm
+import sklearn.base as skb
 
 import arviz as az
 from dPCA.dPCA import dPCA
@@ -23,16 +24,65 @@ import string
 import os
 import pickle
 
-import sklearn.base as skb
 import sklearn.utils as sku
 import sklearn.utils.parallel as skup
 import sklearn.neighbors as skn
 import sklearn.multioutput as skout
 import imblearn.under_sampling as imb_us
+import imblearn.over_sampling as imb_os
+import imblearn.pipeline as imbpipe
 import joblib as jl
+import ragged
+import awkward as ak
 
 import general.utility as u
 import general.nested_cv as ncv
+
+
+class RaggedPipelineTC:
+    def __init__(self, *args, **kwargs):
+        self.pipe = make_model_pipeline(*args, **kwargs)
+
+    def collapse_arr(self, arr):
+        arr_list = list(ak.to_numpy(x) for x in arr)
+        out_arr = np.concatenate(arr_list, axis=-1).T
+        lengths = list(x.shape[-1] for x in arr_list)
+        return out_arr, lengths
+
+    def uncollapse_arr(self, arr, lengths):
+        arrs = []
+        for length in lengths:
+            arrs.append(arr[:length].T)
+            arr = arr[length:]
+        return ragged.array(arrs)
+
+    def _prepare_xy(self, X, y=None, return_lengths=False):
+        if y is not None and len(y.shape) == 1:
+            y = ragged.ones_like(X) * y[:, None, None]
+            y, _ = self.collapse_arr(y)
+        X, lengths = self.collapse_arr(X)
+        if return_lengths:
+            out = (X, y, lengths)
+        else:
+            out = (X, y)
+        return out
+
+    def fit(self, X, y=None, **kwargs):
+        """
+        X : N x D x T where T is a ragged dimension
+        """
+        X, y = self._prepare_xy(X, y)
+        self.pipe.fit(X, y, **kwargs)
+        return self
+
+    def transform(self, X, **kwargs):
+        X, y, lengths = self._prepare_xy(X, return_lengths=True)
+        out = self.pipe.transform(X)
+        return self.uncollapse_arr(out, lengths)
+        
+    def fit_transform(self, X, y=None, **kwargs):
+        self.fit(X, y, **kwargs)
+        return self.transform(X)            
 
 
 class JaggedArray:
@@ -137,10 +187,18 @@ class BalancedShuffleSplit:
 def zscore_tc_shape(
     pop,
     scaler=skp.StandardScaler,
+    fit_pop=None,
 ):
     new_pop = np.zeros_like(pop)
+    if fit_pop is not None:
+        scale = scaler().fit(fit_pop[..., 0])
+    else:
+        scale = None
     for i in range(pop.shape[-1]):
-        new_pop[..., i] = scaler().fit_transform(pop[..., i])
+        if scale is not None:
+            new_pop[..., i] = scale.transform(pop[..., i])
+        else:
+            new_pop[..., i] = scaler().fit_transform(pop[..., i])
     return new_pop
 
 
@@ -179,34 +237,47 @@ def make_data_labels(*data):
     return data_all, labels_all
 
 
-class ModelPipelineCombinedTC:
-    def __init__(self, *args, pipe=None, **kwargs):
-        self.args = args
+class ModelPipelineCombinedTC(skb.BaseEstimator):
+    def __init__(self, model=None, pipe=None, **kwargs):
+        self.model = model
         self.kwargs = kwargs
         if pipe is None:
-            pipe = _make_model_pipeline(*self.args, **self.kwargs)
-        self.pipe = pipe 
+            pipe = _make_model_pipeline(self.model, **self.kwargs)
+        self.pipe = pipe
 
-    def fit(self, X, y=None, **kwargs):
-        n_ts = X.shape[-1]
-        X_tr = np.concatenate(list(X[..., i] for i in range(n_ts)), axis=0)
+    def _format_y(self, X, y=None):
         if y is None:
             y_tr = None
+        elif len(y.shape) > 1 and y.shape[-1] == X.shape[-1]:
+            y_tr = u.combine_dimensions(y, 0, -1)
         else:
-            y_tr = np.tile(y, (n_ts,))
+            y_tr = u.combine_dimensions(np.ones_like(X) * y[:, None, None], 0, -1)
+        return y_tr
+
+    def _format_x(self, X):
+        return u.combine_dimensions(X, 0, -1)
+
+    def _unformat_x(self, X, use_len):
+        return u.uncombine_dimensions(X, 0, -1, use_len)
+        
+
+    def fit(self, X, y=None, **kwargs):
+        X_tr = self._format_x(X)
+        y_tr = self._format_y(X, y)
         pipe = self.pipe.fit(X_tr, y_tr, **kwargs)
-        out = ModelPipelineCombinedTC(*self.args, pipe=pipe, **self.kwargs)
+        out = ModelPipelineCombinedTC(self.model, pipe=pipe, **self.kwargs)
         self.pipe = pipe
         return out
+
+    def fit_predict(self, X, **kwargs):
+        X_use = self._format_x(X)
+        return self._unformat_x(self.pipe.fit_predict(X_use), X.shape[-1])
 
     def transform(self, X, **kwargs):
         if self.pipe is None:
             raise IOError("the model has not been fit")
-        trs = []
-        for i in range(X.shape[-1]):
-            trs_i = self.pipe.transform(X[..., i], **kwargs)
-            trs.append(trs_i)
-        out = np.stack(trs, axis=-1)
+        out_shape = self.pipe.transform(self._format_x(X), **kwargs)
+        out = self._unformat_x(out_shape, X.shape[-1])
         return out
 
     def fit_transform(self, X, y=None, **kwargs):
@@ -214,7 +285,12 @@ class ModelPipelineCombinedTC:
         return self.transform(X)
 
     def score(self, X, y=None):
-        return self.pipe.score(X, y)
+        if self.pipe is None:
+            raise IOError("the model has not been fit")
+        X_use = self._format_x(X)
+        y_use = self._format_y(X, y)
+        score = self.pipe.score(X_use, y_use)
+        return score
 
 
 class ModelPipelineTC:
@@ -268,9 +344,9 @@ def make_model_pipeline(*args, single_tc=False, tc=False, **kwargs):
     return out
 
 
-class MultiOutputClassifierWrapper:
-    def __init__(self, model, **kwargs):
-        self.moc = skout.MultiOutputClassifier(model, **kwargs)
+class MultiOutputWrapper:
+    def __init__(self, model, moc, **kwargs):
+        self.moc = moc(model, **kwargs)
         self.is_fitted = False
 
     @property
@@ -308,6 +384,16 @@ class MultiOutputClassifierWrapper:
         return np.stack(dfs, axis=1)
 
 
+class MultiOutputClassifierWrapper(MultiOutputWrapper):
+    def __init__(self, model, **kwargs):
+        super().__init__(model, skout.MultiOutputClassifier, **kwargs)
+
+
+class MultiOutputRegressorWrapper(MultiOutputWrapper):
+    def __init__(self, model, **kwargs):
+        super().__init__(model, skout.MultiOutputRegressor, **kwargs)
+
+
 def _make_model_pipeline(
     model=None,
     norm=True,
@@ -319,12 +405,18 @@ def _make_model_pipeline(
     ica_iter=2000,
     imputer=skimp.SimpleImputer,
     multioutput=False,
+    oversample=False,
+    oversampler=imb_os.RandomOverSampler,
+    undersample=False,
+    undersampler=imb_us.RandomUnderSampler,
+    regression=False,
     **kwargs,
 ):
     if use_ica:
         decomp = ft.partial(skd.FastICA, max_iter=ica_iter)
     else:
         decomp = skd.PCA
+    make_func = sklpipe.make_pipeline
     pipe_steps = []
     if norm:
         pipe_steps.append(skp.StandardScaler(with_std=with_std))
@@ -334,13 +426,22 @@ def _make_model_pipeline(
         pipe_steps.append(decomp(pca))
     if post_norm:
         pipe_steps.append(skp.StandardScaler())
+    if oversample:
+        pipe_steps.append(oversampler())
+        make_func = imbpipe.make_pipeline
+    if undersample:
+        pipe_steps.append(undersampler())
+        make_func = imbpipe.make_pipeline
     if model is not None:
         if multioutput:
-            m = MultiOutputClassifierWrapper(model(**kwargs))
+            if regression:
+                m = MultiOutputRegressorWrapper(model(**kwargs))
+            else:
+                m = MultiOutputClassifierWrapper(model(**kwargs))
         else:
             m = model(**kwargs)
         pipe_steps.append(m)
-    pipe = sklpipe.make_pipeline(*pipe_steps)
+    pipe = make_func(*pipe_steps)
     return pipe
 
 
@@ -1097,48 +1198,6 @@ def roc(samples1, samples2):
         p_fa[i] = np.sum(samples2 > c) / len(samples2)
     auc = -np.trapz(p_hit, p_fa)
     return auc
-
-
-# ### HMM ###
-# def _hmm_pop_format(pop):
-#     """
-#     a typical pop is neurons x trials x timepoints
-#     for hmmlearn, need trials*timepoints x neurons and a list of
-#     all timepoint lengths
-#     """
-#     spop = np.swapaxes(pop, 0, 1)
-#     pop_flat = np.concatenate(spop, axis=1).T
-#     len_arr = np.ones(pop.shape[1], dtype=int)*pop.shape[2]
-#     return pop_flat, len_arr
-
-# def _hmm_trial_format(states, lens):
-#     n_trls = int(states.shape[0]/lens[0])
-#     trls = np.reshape(states, (n_trls, lens[0]))
-#     return trls
-
-# def fit_hmm_pops(pops, n_components, n_fits=1, min_size=2, print_pop=False):
-#     models = {}
-#     for k, pop in pops.items():
-#         if pop.shape[0] > min_size:
-#             pop_flat, len_arr = _hmm_pop_format(pop)
-#             if print_pop:
-#                 print('pop {}'.format(k))
-#             pop_fits = []
-#             scores = []
-#             all_states = []
-#             for i in range(n_fits):
-#                 m = hmm.GaussianHMM(n_components=n_components)
-#                 fit_obj = m.fit(pop_flat, len_arr)
-#                 pop_fits.append(fit_obj)
-#                 score = fit_obj.score(pop_flat)
-#                 scores.append(score)
-#                 states = fit_obj.predict(pop_flat)
-#                 trl_states = _hmm_trial_format(states, len_arr)
-#                 all_states.append(trl_states)
-#             models[k] = (pop_fits, scores, all_states)
-#     return models
-
-### SVM ###
 
 
 def sample_trials_svm(dims, n, with_replace=False, pop=False, sample_with=None):
@@ -1988,7 +2047,7 @@ def _fit_model_preds(data, labels, estimators):
     out_shape = (len(estimators), data.shape[0])
     if len(labels.shape) > 1:
         out_shape = out_shape + (labels.shape[1],)
-    out = np.zeros(out_shape)
+    out = np.zeros(out_shape, dtype=labels.dtype)
     for i, est in enumerate(estimators):
         scores = est.predict(data)
         out[i] = scores
@@ -1997,8 +2056,12 @@ def _fit_model_preds(data, labels, estimators):
 
 def _fit_model_proj(data, labels, estimators):
     out_shape = (len(estimators), data.shape[0])
+    u_labels = np.unique(labels)
     if len(labels.shape) > 1:
         out_shape = out_shape + (labels.shape[1],)
+    elif len(u_labels) > 2:
+        out_shape = out_shape + (len(u_labels),)
+        
     out = np.zeros(out_shape)
     for i, est in enumerate(estimators):
         projs = est.decision_function(data)
@@ -2031,6 +2094,7 @@ class BalancedCV:
         balance_test=False,
         cv_type=skms.ShuffleSplit,
         cv_use=None,
+        oversample=False,
         **kwargs,
     ):
         if cv_use is None:
@@ -2151,11 +2215,6 @@ def cv_wrapper(
     n_jobs=-1,
     **kwargs,
 ):
-    rng = np.random.default_rng()
-    if rng_seed is not None:
-        rand_state = rng_seed
-    else:
-        rand_state = rng.integers(2**32 - 1)
     if balance_rel_fields:
         if rel_var is None:
             raise IOError("told to balance rel_fields but did not provide rel_fields")
@@ -2177,8 +2236,7 @@ def cv_wrapper(
         else:
             cv_type = skms.ShuffleSplit
             cv_kwarg = {"test_size": test_frac}
-    splitter = cv_type(n_folds, random_state=rand_state, **cv_kwarg)
-    extra_splitter = cv_type(n_folds, random_state=rand_state, **cv_kwarg)
+    splitter = cv_type(n_folds, **cv_kwarg)
     cv_use = splitter.split(X, y_use_split)
 
     keep_ests = kwargs.pop("return_estimator", False)
@@ -2194,6 +2252,7 @@ def cv_wrapper(
         cv=cv_use,
         return_estimator=True,
         return_train_score=True,
+        return_indices=True,
         n_jobs=n_jobs,
         **kwargs,
     )
@@ -2204,10 +2263,8 @@ def cv_wrapper(
     test_inds = []
     confusion = []
     u_labels = np.unique(y, axis=0)
-    # print(out["estimator"])
-    for i, (_, te_inds) in enumerate(extra_splitter.split(X, y_use_split)):
+    for i, te_inds in enumerate(out["indices"]["test"]):
         est = out["estimator"][i]
-        # print(sku.validation.check_is_fitted(est))
         pred = est.predict(X[te_inds])
         targ = y[te_inds]
         predictions.append(pred)
@@ -2221,9 +2278,11 @@ def cv_wrapper(
         test_inds.append(te_inds)
     out["predictions"] = np.array(predictions)
     out["targets"] = np.array(targets)
+    out["test_targ"] = np.array(targets)
     out["test_inds"] = np.array(test_inds)
     if return_projection:
         out["projection"] = np.array(proj)
+        out["test_proj"] = np.array(proj)
     if rel_var is not None:
         out["rel_vars"] = np.array(rel_vars)
     if return_confusion:
@@ -2234,6 +2293,19 @@ def cv_wrapper(
 
 
 rand_splitter = skms.ShuffleSplit
+
+
+def fold_skl_continuous_shape(
+    c_flat,
+    labels,
+    folds_n,
+    c_gen=None,
+    **kwargs,
+):
+    c_flat = np.swapaxes(c_flat, 0, 1)
+    if c_gen is not None:
+        c_gen = np.swapaxes(c_gen, 0, 1)
+    return fold_skl_continuous(c_flat, labels, folds_n, c_gen=c_gen, **kwargs)
 
 
 def fold_skl_continuous(
@@ -2249,13 +2321,23 @@ def fold_skl_continuous(
     verbose=False,
     time_accumulate=False,
     gen_cs=None,
+    c_gen=None,
+    l_gen=None,
     test_prop=None,
     mean=True,
     time_generalization=False,
+    norm_targets=True,
     **model_kwargs,
 ):
     if test_prop is None:
         test_prop = 1 / folds_n
+    if norm_targets:
+        oned = len(labels.shape) == 1
+        if oned:
+            labels = labels[:, None]
+        labels = skp.StandardScaler().fit_transform(labels)
+        if oned:
+            labels = labels[:, 0]
 
     if params is None:
         params = model_kwargs
@@ -2263,11 +2345,16 @@ def fold_skl_continuous(
         model_kwargs.update(params)
         params = model_kwargs
 
-    pipe = make_model_pipeline(model, pca=pre_pca, norm=norm, **params)
+    pipe = make_model_pipeline(
+        model,
+        pca=pre_pca,
+        norm=norm,
+        multioutput=len(labels.shape) > 1,
+        regression=True,
+        **params,
+    )
     if gen_cs is not None:
         c_gen, l_gen = gen_cs
-    else:
-        c_gen, l_gen = None, None
 
     if shuffle:
         np.random.shuffle(labels)
@@ -2327,6 +2414,7 @@ def nominal_fold(
     return_projection=False,
     return_confusion=False,
     time_generalization=False,
+    label_tc=False,
     **kwargs,
 ):
     x_len = c_flat.shape[-1]
@@ -2335,6 +2423,11 @@ def nominal_fold(
     else:
         scoring = None
     outs = []
+    if not label_tc:
+        labels = np.stack((labels,) * x_len, axis=-1)
+        if c_gen is not None:
+            l_gen = np.stack((l_gen,) * x_len, axis=-1)
+
     for j in range(x_len):
         if time_accumulate:
             in_list = list(c_flat[..., k] for k in range(j + 1))
@@ -2344,7 +2437,7 @@ def nominal_fold(
         out_j = cv_wrapper(
             pipe,
             in_data,
-            labels,
+            labels[..., j],
             n_folds=folds_n,
             test_frac=test_frac,
             n_jobs=n_jobs,
@@ -2362,14 +2455,14 @@ def nominal_fold(
             else:
                 gen_data = c_gen[..., j].T
             out_j["predictions_gen"] = _fit_model_preds(
-                gen_data, l_gen, out_j["estimator"]
+                gen_data, l_gen[..., j], out_j["estimator"]
             )
             out_j["projection_gen"] = _fit_model_proj(
-                gen_data, l_gen, out_j["estimator"]
+                gen_data, l_gen[..., j], out_j["estimator"]
             )
             out_j["score_gen"] = _eval_fit_models(
                 gen_data,
-                l_gen,
+                l_gen[..., j],
                 out_j["estimator"],
                 scoring=scoring,
             )
@@ -2377,7 +2470,7 @@ def nominal_fold(
             for k in range(x_len):
                 out_j["time_generalization"] = _eval_fit_models(
                     c_flat[..., k].T,
-                    labels,
+                    labels[..., k],
                     out_j["estimator"],
                     scoring=scoring,
                     use_inds=out_j["test_inds"],
@@ -2385,7 +2478,7 @@ def nominal_fold(
                 if c_gen is not None:
                     out_j["time_generalization_gen"] = _eval_fit_models(
                         c_gen[..., k].T,
-                        l_gen,
+                        l_gen[..., k],
                         out_j["estimator"],
                         scoring=scoring,
                     )
@@ -2436,7 +2529,15 @@ def apply_estimators_discrete(estimators, *pops):
 
 
 def _fit_and_score_collapse_tc(
-    est, X_tc, y, tr_inds, te_inds, time_mask=None, return_estimator=True, **kwargs
+    est,
+    X_tc,
+    y,
+    tr_inds,
+    te_inds,
+    time_mask=None,
+    return_estimator=True,
+    label_tc=False,
+    **kwargs,
 ):
     X_tr = X_tc[tr_inds]
     y_tr = y[tr_inds]
@@ -2449,12 +2550,35 @@ def _fit_and_score_collapse_tc(
 
     X_tr_time = X_tr[..., time_mask]
     X_tr_flat = np.concatenate(list(X_tr_time[..., j] for j in range(x_tr_len)), axis=0)
-    y_tr_flat = np.tile(y_tr, x_tr_len)
+    if label_tc:
+        y_tr_flat = np.concatenate(list(y_tr[..., j] for j in range(x_tr_len)), axis=0)
+    else:
+        y_tr_flat = np.tile(y_tr, x_tr_len)
+        y_te = np.stack((y_te,) * x_len, axis=-1)
+        y_tr = np.stack((y_tr,) * x_len, axis=-1)
     est.fit(X_tr_flat, y_tr_flat)
 
-    test_scores = np.array(list(est.score(X_te[..., j], y_te) for j in range(x_len)))
-    train_scores = np.array(list(est.score(X_tr[..., j], y_tr) for j in range(x_len)))
-    out_dict = {"test_score": test_scores, "train_score": train_scores}
+    test_scores = np.array(
+        list(est.score(X_te[..., j], y_te[..., j]) for j in range(x_len))
+    )
+    train_scores = np.array(
+        list(est.score(X_tr[..., j], y_tr[..., j]) for j in range(x_len))
+    )
+    test_proj = np.array(
+        list(est.decision_function(X_te[..., j]) for j in range(x_len))
+    )
+    train_proj = np.array(
+        list(est.decision_function(X_tr[..., j]) for j in range(x_len))
+    )
+    out_dict = {
+        "test_score": test_scores,
+        "train_score": train_scores,
+        "test_proj": test_proj,
+        "train_proj": train_proj,
+        "test_targ": y_te,
+        "train_targ": y_tr,
+        "indices": {"train": tr_inds, "test": te_inds},
+    }
     if return_estimator:
         out_dict["estimator"] = est
     return out_dict
@@ -2663,6 +2787,7 @@ def _time_collapsed_fold(
     time_mask=None,
     test_frac=None,
     split_gen=True,
+    label_tc=False,
 ):
     if test_frac is None:
         splitter = skms.KFold(n_folds)
@@ -2686,6 +2811,7 @@ def _time_collapsed_fold(
         time_mask=time_mask,
         cv=splitter,
         n_folds=n_folds,
+        label_tc=label_tc,
     )
     tcs = out["test_score"]
     if c_gen is not None:
@@ -2699,7 +2825,8 @@ def _time_collapsed_fold(
     if mean:
         tcs = np.mean(tcs, axis=0)
         tcs_gen = np.mean(tcs_gen, axis=0)
-    out = {"score": tcs}
+        out["score"] = tcs
+    out["score"] = tcs
     if c_gen is not None:
         out["score_gen"] = tcs_gen
     return out
@@ -2730,6 +2857,23 @@ class TrialStandardScaler:
     def fit_transform(self, X, **kwargs):
         self.fit(X, **kwargs)
         return self.transform(X, **kwargs)
+
+
+def generalize_skl_shape(c_flat, targ_labels, cond_labels, folds_n, **kwargs):
+    u_cls = np.unique(cond_labels)
+    outs = []
+    for cl in u_cls:
+        mask = cond_labels == cl
+        c_tr = c_flat[mask]
+        targ_tr = targ_labels[mask]
+        c_gen = c_flat[np.logical_not(mask)]
+        l_gen = targ_labels[np.logical_not(mask)]
+        outs.append(
+            fold_skl_shape(c_tr, targ_tr, folds_n, c_gen=c_gen, l_gen=l_gen, **kwargs)
+        )
+    full_dict = u.aggregate_dictionary(outs)
+    full_dict["conditioned_label"] = u_cls
+    return full_dict
 
 
 def fold_skl_shape(
@@ -2773,8 +2917,9 @@ def fold_skl_flat(
     return_confusion=False,
     rng_seed=None,
     time_generalization=False,
-    test_frac=None,
     pseudo_trials=None,
+    oversample=False,
+    label_tc=False,
     **model_kwargs,
 ):
     if test_prop is None:
@@ -2791,7 +2936,8 @@ def fold_skl_flat(
         norm=norm,
         impute_missing=impute_missing,
         pca=pre_pca,
-        multioutput=len(labels.shape) > 1,
+        multioutput=len(labels.shape) > 1 and not label_tc,
+        oversample=oversample,
         **params,
     )
     if shuffle:
@@ -2813,8 +2959,9 @@ def fold_skl_flat(
             mean=mean,
             time_mask=time_mask,
             test_frac=test_prop,
+            label_tc=label_tc,
         )
-    else:
+    elif c_flat.shape[0] > 0:
         out = nominal_fold(
             c_flat,
             labels,
@@ -2835,7 +2982,16 @@ def fold_skl_flat(
             rng_seed=rng_seed,
             time_generalization=time_generalization,
             pseudo_trials=pseudo_trials,
+            label_tc=label_tc,
         )
+    else:
+        if mean:
+            score = np.nan * np.ones(c_flat.shape[-1])
+        else:
+            score = np.nan * np.ones((folds_n, c_flat.shape[-1]))
+        out = {"score": score}
+        if c_gen is not None:
+            out["score_gen"] = score
     return out
 
 

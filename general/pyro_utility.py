@@ -43,12 +43,15 @@ def fit_model(
         render_distributions=True,
         render_params=True,
     )
-    guide_render = pyro.render_model(
-        use_guide,
-        model_args=all_inp,
-        render_distributions=True,
-        render_params=True,
-    )
+    try:
+        guide_render = pyro.render_model(
+            use_guide,
+            model_args=all_inp,
+            render_distributions=True,
+            render_params=True,
+        )
+    except AttributeError:
+        guide_render = None
     optimizer = approach(model, use_guide, optim, loss_func)
 
     losses = []

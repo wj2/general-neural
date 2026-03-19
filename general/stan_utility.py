@@ -71,7 +71,7 @@ def fit_model(data_dict, model_path, max_treedepth=10, adapt_delta=.8,
 def get_stan_params(mf, param, mask=None, skip_end=1):
     names = mf.flatnames
     means = mf.get_posterior_mean()[:-skip_end]
-    param = '\A' + param
+    param = '\\A' + param
     par_mask = np.array(list([re.match(param, x) is not None for x in names]))
     par_means = means[par_mask]
     if mask is not None:

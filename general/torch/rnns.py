@@ -148,7 +148,7 @@ class EmbodiedCTRNN(nn.Module):
             h_new: tensor of shape (batch, hidden_size),
                 network activity at the next time step
         """
-        
+
         h_new = self.transfer_function(
             self.input2h(input) + self.h2h(hidden) + self.b2h(body)
         )
@@ -170,9 +170,7 @@ class EmbodiedCTRNN(nn.Module):
 
         # Loop through time
         shape = input.shape[:-1]
-        hidden_output = torch.zeros(shape + (self.hidden_size,)).to(
-            input.device
-        )
+        hidden_output = torch.zeros(shape + (self.hidden_size,)).to(input.device)
         body_output = torch.zeros(shape + (self.body_size,)).to(input.device)
         steps = range(input.size(0))
         for i in steps:
@@ -199,20 +197,41 @@ class EmbodiedRecurrent(nn.Module):
 
 
 class SimpleRecurrent(nn.Module):
-    def __init__(self, inp_size, num_h, out_size, net_type=nn.RNN):
+    def __init__(
+        self,
+        inp_size,
+        num_h,
+        out_size,
+        net_type=nn.RNN,
+        batch_first=True,
+        output_trs=None,
+    ):
         super(SimpleRecurrent, self).__init__()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.hidden_dim = num_h
         self.out_dim = out_size
         self.in_dim = inp_size
-        self.recurrent_net = net_type(inp_size, num_h, device=self.device)
+        self.recurrent_net = net_type(
+            inp_size, num_h, batch_first=True, device=self.device
+        )
         self.linear = nn.Linear(num_h, out_size, device=self.device)
+        self.output_trs = output_trs()
 
     def forward(self, x, hidden=None):
-        rnn_out, _ = self.recurrent_net(x, hidden=hidden)
+        rnn_out, _ = self.recurrent_net(x, hx=hidden)
         x = self.linear(rnn_out)
+        if self.output_trs is not None:
+            x = self.output_trs(x)
         return x, rnn_out
+
+    def get_representation(self, x, hidden=None):
+        x_formatted = torch.from_numpy(x).type(torch.float).to(self.device)
+        if hidden is not None:
+            hidden_formatted = (
+                torch.from_numpy(hidden).type(torch.float).to(self.device)
+            )
+        return self.forward(x_formatted, hidden=hidden_formatted)
 
 
 class SimpleCTRNN(SimpleRecurrent):

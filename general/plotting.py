@@ -423,6 +423,35 @@ def ax_adder(include_fig=False, three_dim=False):
     return ax_adder_wrap
 
 
+@ax_adder(three_dim=True)
+def visualize_pipeline(
+    pipe,
+    X,
+    y=None,
+    ax=None,
+    use_colors=None,
+    trl_labels=None,
+    cmap="hsv",
+    c_bounds=(0.1, 0.9),
+    **kwargs,
+):
+    # pipe.fit(X, y)
+    # X_tr = pipe.transform(X)
+    X_tr = pipe.fit_predict(X)
+    if y is not None:
+        trl_labels = y
+    if trl_labels is None:
+        trl_labels = np.arange(len(X_tr))
+    u_labels, inds = np.unique(trl_labels, return_inverse=True)
+    if use_colors is None:
+        cm = plt.get_cmap(cmap)
+        use_colors = cm(np.linspace(*c_bounds, len(u_labels)))
+    colors = use_colors[inds]
+    dims = 3 if ax.name == "3d" else 2
+    for i, X_tr_i in enumerate(X_tr):
+        ax.plot(X_tr_i[:dims], color=colors[i], **kwargs)
+
+
 def plot_population_average(
     xs,
     sus,
@@ -531,11 +560,13 @@ def plot_collection_views(
     return fs
 
 
-def sem(dat, axis=0, sub=1, n_obs=None):
+def sem(dat, axis=0, sub=1, n_obs=None, withmean=False):
     if n_obs is None:
         n_obs = dat.shape[axis]
     err_1d = np.nanstd(dat, axis=axis) / np.sqrt(n_obs - sub)
     err = np.vstack((err_1d, -err_1d))
+    if withmean:
+        err = err + np.nanmean(dat, axis=axis)
     return err
 
 
@@ -1835,6 +1866,11 @@ def clean_plot_bottom(ax, keeplabels=False, keepticks=False):
         if not keepticks:
             ax.xaxis.set_tick_params(size=0)
         plt.setp(ax.get_xticklabels(), visible=False)
+
+
+def clean_plot_all(ax, **kwargs):
+    clean_plot(ax, 1, **kwargs)
+    clean_plot_bottom(ax, **kwargs)
 
 
 def remove_ticks_3d(ax):
