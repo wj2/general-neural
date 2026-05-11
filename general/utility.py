@@ -16,6 +16,7 @@ import sklearn.preprocessing as skp
 import sklearn.utils as sku
 import matplotlib.pyplot as plt
 import joblib as jl
+import awkward as ak
 
 monthdict = {
     "01": "Jan",
@@ -41,7 +42,7 @@ def combine_dimensions(x, d1, d2):
     """
     arr = np.concatenate(list(np.take(x, i, d2) for i in range(x.shape[d2])), axis=d1)
     return arr
-    
+
 
 def uncombine_dimensions(x, d1, d2, size):
     return np.stack(np.split(x, size, axis=d1), axis=d2)
@@ -53,7 +54,7 @@ def make_eye(n, thickness=1, dtype=bool):
         out = out + np.eye(n, k=i)
         out = out + np.eye(n, k=-i)
     return out > 0
-        
+
 
 def make_trs_matrix(m, n, corr_groups=None):
     """m is output domain, n is input"""
@@ -86,14 +87,14 @@ def make_periodic_features(X, axis=1, periodic_inds=None):
             x_i = np.expand_dims(use, axis)
         arr.append(x_i)
     return np.concatenate(arr, axis=axis)
-    
 
-def format_pvalue(pval, min_pvalue=.001):
+
+def format_pvalue(pval, min_pvalue=0.001):
     precision = "{{:.{}f}}".format(int(-np.log10(min_pvalue)))
     if pval < min_pvalue:
-        pv = "\(p <\) {}".format(min_pvalue)
+        pv = "\\(p <\\) {}".format(min_pvalue)
     else:
-        pv = "\(p =\) {}".format(precision).format(pval)
+        pv = "\\(p =\\) {}".format(precision).format(pval)
     return pv
 
 
@@ -146,7 +147,7 @@ def download_runinds(
     needed = all_
     if len(needed) > 0:
         includes = list("--include=*{}*/".format(ri) for ri in needed)
-        includes = includes 
+        includes = includes
         exclude = "--exclude=*/"
 
         cmd = (
@@ -194,9 +195,9 @@ def load_runinds(folder, axis_keys, data_keys, *patterns, sub_key=None, **kwargs
         else:
             args = data
         ax_pt = []
-        for ak in axis_keys:
-            all_axes[ak].append(args[ak])
-            ax_pt.append(args[ak])
+        for ax_k in axis_keys:
+            all_axes[ax_k].append(args[ax_k])
+            ax_pt.append(args[ax_k])
         ax_pt = tuple(ax_pt)
         for dk in data_keys:
             out_data[dk][ax_pt] = np.array(data[dk])
@@ -243,6 +244,41 @@ def folder_regex_generator(
             nth_file = nth_file + 1
 
 
+def collect_same_trial_over_folds(folds, indices, ragged=False):
+    collection_dict = {}
+    for i, fold in enumerate(folds):
+        inds = indices[i]
+        for j, ind in enumerate(inds):
+            c_i = collection_dict.get(ind, [])
+            trl_ij = fold[j]
+            if ragged:
+                trl_ij = ak.to_numpy(trl_ij)
+            c_i.append(trl_ij)
+            collection_dict[ind] = c_i
+    return {ind: np.stack(x, axis=0) for ind, x in collection_dict.items()}
+
+
+def ragged_to_padded(arr, pad_beginning=False, axis=-1, const=None):
+    arrs = []
+    flex_len = 0
+    for i in range(len(arr)):
+        arr_i = ak.to_numpy(arr[i])
+        arrs.append(arr_i)
+        flex_len = max(flex_len, arr_i.shape[axis])
+
+    padded_arrs = []
+    for arr in arrs:
+        len_diff = flex_len - arr.shape[axis]
+        if pad_beginning:
+            pad_tuple = (len_diff, 0)
+        else:
+            pad_tuple = (0, len_diff)
+        pad_size = {axis: pad_tuple}
+        pad_arr = np.pad(arr.astype(float), pad_size, constant_values=const)
+        padded_arrs.append(pad_arr)
+    return np.stack(padded_arrs, axis=0)
+
+
 def load_folder_regex_generator(
     folder,
     *patterns,
@@ -261,7 +297,7 @@ def load_folder_regex_generator(
     )
     for load_path, gd in gen:
         if open_file:
-            try: 
+            try:
                 inp = open(load_path, open_str)
             except FileNotFoundError:
                 print("could not find {}".format(load_path))
@@ -430,8 +466,10 @@ class ConfigParserColor(configparser.ConfigParser):
 
     def getlist(self, *args, typefunc=None, splitchar=",", **kwargs):
         if typefunc is None:
+
             def typefunc(x):
                 return x
+
         string = self.get(*args, **kwargs)
         if string is not None:
             vals = string.split(splitchar)
@@ -1732,7 +1770,7 @@ def distribute_imglogs(il_path, out_path):
 
 
 def aggregate_dictionary(d, combine_axis=0, combine_func=np.stack):
-    """ cribbed from sklearn """
+    """cribbed from sklearn"""
     out = {}
     for key in d[0].keys():
         try:
@@ -1797,7 +1835,7 @@ def index_func(a, b, axis=0):
     return ind
 
 
-def conf_interval(dat, axis=0, perc=95, withmean=False):
+def conf_interval(dat, axis=0, perc=95, withmean=False, n_obs=None):
     lower = (100 - perc) / 2.0
     upper = lower + perc
     lower_err = np.nanpercentile(dat, lower, axis=axis)
@@ -1851,8 +1889,10 @@ def bootstrap_diff(a, b, func=np.nanmean, n=1000, geometric=False):
 
 def bootstrap_tc(tc, func, axis=0, n=1000):
     new_shape = tc.shape[:axis] + tc.shape[axis + 1 :]
+
     def func_ax(x):
         return func(x, axis=axis)
+
     return bootstrap_list(tc, func_ax, n=n, out_shape=new_shape)
 
 
@@ -1974,7 +2014,7 @@ def gen_img_list(
 
 def get_img_names(
     codes,
-    famfolder="/Users/wjj/Dropbox/research/uc/freedman/" "pref_looking/famimgs",
+    famfolder="/Users/wjj/Dropbox/research/uc/freedman/pref_looking/famimgs",
     if_ns=25,
     n_ns=50,
 ):
@@ -2098,6 +2138,7 @@ def evoked_st_cumdist(spkts, t, lam):
 def empirical_fs_cumdist(spkts, t):
     def spk_before(x):
         return np.any(x < t) or (x.size == 0)
+
     successes = np.sum(map(spk_before, spkts))
     return successes / float(len(spkts))
 
@@ -2105,6 +2146,7 @@ def empirical_fs_cumdist(spkts, t):
 def get_spks_window(dat, begwin, endwin):
     def makecut(x):
         return np.sum(np.logical_and(begwin <= x, x <= endwin)) / (endwin - begwin)
+
     stuff = map(makecut, dat)
     return stuff
 
@@ -2117,11 +2159,15 @@ def get_code_time(trl, code, codenumfield="code_numbers", codetimefield="code_ti
 def estimate_latency(neurspks, backgrd_window, latenwindow, integstep=0.5):
     bckgrd_spks = get_spks_window(neurspks, backgrd_window[0], backgrd_window[1])
     bgd_est = np.mean(bckgrd_spks)
+
     def expect_func(x):
         return 1 - evoked_st_cumdist(neurspks, x, bgd_est)
+
     est_lat = euler_integrate(expect_func, latenwindow[0], latenwindow[1], integstep)
+
     def sm_func(x):
         return 2 * x * (1 - evoked_st_cumdist(neurspks, x, bgd_est))
+
     sm_latency = euler_integrate(sm_func, latenwindow[0], latenwindow[1], integstep)
     est_std = np.sqrt(sm_latency - est_lat**2)
     return est_lat, est_std
@@ -2142,7 +2188,7 @@ def get_trls_with_neurnum(dat, neurnum, neurfield="spike_times", drunfield="data
         else:
             count_neurs = count_neurs + new_neurs
     raise Exception(
-        "only {} neurons in this dataset, which is less " "than {}".format(
+        "only {} neurons in this dataset, which is less than {}".format(
             count_neurs, neurnum
         )
     )

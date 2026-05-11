@@ -38,6 +38,8 @@ dependencies = [
   "joblib>=1.4.2",
   "numexpr>=2.10.0",
   "numba>=0.60.0",
+  "awkward>=2",
+  "ragged>=0.2",
 ]
 
 [project.optional-dependencies]

@@ -151,123 +151,11 @@ def _format_for_svm(pops):
     neur_mins = np.array(neur_mins).astype(int)
     return neur_pop, neur_mins
 
-
-class AbstractDataset:
-    
-    def from_dict(cls, **kwargs):
-        raise NotImplementedError("from_dict is not implemented")
-
-
-class NWBDataset(AbstractDataset):
-    def __init__(self, dframe, seconds=False, sort=True):
-        self.data = dframe
-        try:
-            self.session_fields = self.data["data"].iloc[0].columns
-        except KeyError as e:
-            if len(self.data["data"]) == 0:
-                raise IOError("no data available")
-            else:
-                raise e
-        self.n_sessions = len(self.data)
-        self.sort = sort
-        if sort:
-            self.data = self.data.sort_values("date", ignore_index=True)
-            self.data = self.data.sort_values("animal", ignore_index=True)
-        else:
-            self.data = self.data.reset_index(drop=True)
-        self.seconds = seconds
-        self.population_cache = {}
-        self.mask_pop_cache = {}
-
-    
         
-class HomegrownSpikeHandling:
+# class PynappleTCHandling:
     
 
-
-class Dataset(HomegrownTCHandling):
-    def __init__(self, dframe, seconds=False, sort=True):
-        self.data = dframe
-        try:
-            self.session_fields = self.data["data"].iloc[0].columns
-        except KeyError as e:
-            if len(self.data["data"]) == 0:
-                raise IOError("no data available")
-            else:
-                raise e
-        self.n_sessions = len(self.data)
-        self.sort = sort
-        if sort:
-            self.data = self.data.sort_values("date", ignore_index=True)
-            self.data = self.data.sort_values("animal", ignore_index=True)
-        else:
-            self.data = self.data.reset_index(drop=True)
-        self.seconds = seconds
-        self.population_cache = {}
-        self.mask_pop_cache = {}
-
-    def reload(self):
-        return Dataset(self.data, seconds=self.seconds, sort=self.sort)
-
-    @classmethod
-    def from_dict(cls, sort_by=None, sort=True, seconds=False, **inputs):
-        df = pd.DataFrame(data=inputs)
-        already_sorted = sort_by is not None
-        if already_sorted:
-            df = df.sort_values(by=sort_by)
-            df = df.reset_index(drop=True)
-        return cls(df, seconds=seconds, sort=(not already_sorted and sort))
-
-    def resort_sessions(self, sort_by):
-        new_data = self.data.sort_values(by=sort_by)
-        new_data = new_data.reset_index(drop=True)
-        return Dataset(new_data, seconds=self.seconds, sort=False)
-
-    @classmethod
-    def from_readfunc(cls, read_func, *args, seconds=False, sort_by=None, **kwargs):
-        super_df = read_func(*args, **kwargs)
-        return cls.from_dict(seconds=seconds, sort_by=sort_by, **super_df)
-
-    def __getitem__(self, key):
-        try:
-            out = self.data[key]
-        except KeyError:
-            out = ResultSequence(dd[key] for dd in self.data["data"])
-        return out
-
-    def __contains__(self, key):
-        top_level = key in self.data.keys()
-        session_level = key in self.data["data"].iloc[0].columns
-        return top_level or session_level
-
-    def __len__(self):
-        return len(self.data)
-
-    def index_session(self, ind):
-        return Dataset(
-            self.data.iloc[ind : ind + 1], seconds=self.seconds, sort=self.sort
-        )
-
-    @property
-    def session_keys(self):
-        return self.data["data"].iloc[0].columns
-
-    def session_mask(self, mask):
-        assert len(mask) == len(self.data)
-        return Dataset(self.data[mask], seconds=self.seconds, sort=self.sort)
-
-    def mask(self, mask):
-        df = {}
-        for c in self.data.columns:
-            df[c] = self.data[c]
-        dlist = []
-
-        for i, m in enumerate(mask):
-            d = self.data["data"][i][m]
-            dlist.append(d)
-        df["data"] = dlist
-        return Dataset.from_dict(**df, seconds=self.seconds, sort=self.sort)
-
+class HomegrownTCHandling:
     def _center_spks(self, spks, tz, tzf):
         if tz is not None:
             spks = spks - tz
@@ -428,9 +316,6 @@ class Dataset(HomegrownTCHandling):
             out = out + (save_inds,)
         return out
 
-    def get_nneurs(self):
-        return self["n_neurs"]
-
     def clear_cache(self):
         self.population_cache = {}
 
@@ -526,16 +411,19 @@ class Dataset(HomegrownTCHandling):
                 tz = self[time_zero_field][i].to_numpy()
             else:
                 tz = np.zeros(n_trls)
-            trl_sections = []
 
             trl_sections = np.zeros((len(psth_l), psth_l[0].shape[0], len(xs_reg)))
             for j, trl in enumerate(psth_l):
                 xs_ij = xs.iloc[j] - tz[j]
                 l_diff = xs_ij.shape[0] - trl.shape[-1]
-                if l_diff > 0:
-                    xs_ij = xs_ij[:-l_diff]
-                    if l_diff > 1 and verbose:
+                if l_diff != 0:
+                    if l_diff < 0:
+                        trl = trl[..., :l_diff]
+                    else:
+                        xs_ij = xs_ij[:-l_diff]
+                    if np.abs(l_diff) > 1 and verbose:
                         print("length difference: {}".format(l_diff))
+                
 
                 mask = np.abs(xs_ij[:, None] - xs_reg[None]) <= binsize / 2
                 mask = mask / np.nansum(mask, axis=0, keepdims=True)
@@ -596,8 +484,10 @@ class Dataset(HomegrownTCHandling):
                 l_diff = xs_ij.shape[0] - trl.shape[-1]
                 if l_diff > 0:
                     xs_ij = xs_ij[:-l_diff]
-                    if l_diff > 1 and verbose:
-                        print("length difference: {}".format(l_diff))
+                elif l_diff < 0:
+                    trl = trl[..., :l_diff]
+                if np.abs(l_diff) > 1 and verbose:
+                    print("length difference: {}".format(l_diff))
 
                 mask = np.abs(xs_ij[:, None] - xs_reg[None]) <= binsize / 2
                 mask = mask / np.nansum(mask, axis=0, keepdims=True)
@@ -703,16 +593,7 @@ class Dataset(HomegrownTCHandling):
                 outs, n_trls_l, min_trials_pseudo, resample_pseudos
             )
         return outs, xs_reg
-
-    def get_region_list(self, include_all=True, region_key="neur_regions"):
-        region_list = np.unique(
-            np.concatenate(list(x.iloc[0] for x in self[region_key]))
-        )
-        region_list = tuple((x,) for x in region_list)
-        if include_all:
-            region_list = (None,) + region_list
-        return region_list
-
+    
     def get_psth_window(self, begin, end, **kwargs):
         psths, xs = self.get_psth(begin=begin, end=end, **kwargs)
         time_filt = np.logical_and(xs >= begin, xs < end)
@@ -946,6 +827,103 @@ class Dataset(HomegrownTCHandling):
         else:
             out = (outs, xs)
         return out
+
+
+class Dataset(HomegrownTCHandling):
+    def __init__(self, dframe, seconds=False, sort=True):
+        self.data = dframe
+        try:
+            self.session_fields = self.data["data"].iloc[0].columns
+        except KeyError as e:
+            if len(self.data["data"]) == 0:
+                raise IOError("no data available")
+            else:
+                raise e
+        self.n_sessions = len(self.data)
+        self.sort = sort
+        if sort:
+            self.data = self.data.sort_values("date", ignore_index=True)
+            self.data = self.data.sort_values("animal", ignore_index=True)
+        else:
+            self.data = self.data.reset_index(drop=True)
+        self.seconds = seconds
+        self.population_cache = {}
+        self.mask_pop_cache = {}
+
+    def reload(self):
+        return Dataset(self.data, seconds=self.seconds, sort=self.sort)
+
+    @classmethod
+    def from_dict(cls, sort_by=None, sort=True, seconds=False, **inputs):
+        df = pd.DataFrame(data=inputs)
+        already_sorted = sort_by is not None
+        if already_sorted:
+            df = df.sort_values(by=sort_by)
+            df = df.reset_index(drop=True)
+        return cls(df, seconds=seconds, sort=(not already_sorted and sort))
+
+    def resort_sessions(self, sort_by):
+        new_data = self.data.sort_values(by=sort_by)
+        new_data = new_data.reset_index(drop=True)
+        return Dataset(new_data, seconds=self.seconds, sort=False)
+
+    @classmethod
+    def from_readfunc(cls, read_func, *args, seconds=False, sort_by=None, **kwargs):
+        super_df = read_func(*args, **kwargs)
+        return cls.from_dict(seconds=seconds, sort_by=sort_by, **super_df)
+
+    def __getitem__(self, key):
+        try:
+            out = self.data[key]
+        except KeyError:
+            out = ResultSequence(dd[key] for dd in self.data["data"])
+        return out
+
+    def __contains__(self, key):
+        top_level = key in self.data.keys()
+        session_level = key in self.data["data"].iloc[0].columns
+        return top_level or session_level
+
+    def __len__(self):
+        return len(self.data)
+
+    def index_session(self, ind):
+        return Dataset(
+            self.data.iloc[ind : ind + 1], seconds=self.seconds, sort=self.sort
+        )
+
+    @property
+    def session_keys(self):
+        return self.data["data"].iloc[0].columns
+
+    def session_mask(self, mask):
+        assert len(mask) == len(self.data)
+        return Dataset(self.data[mask], seconds=self.seconds, sort=self.sort)
+
+    def get_nneurs(self):
+        return self["n_neurs"]
+
+    def mask(self, mask):
+        df = {}
+        for c in self.data.columns:
+            df[c] = self.data[c]
+        dlist = []
+
+        for i, m in enumerate(mask):
+            d = self.data["data"][i][m]
+            dlist.append(d)
+        df["data"] = dlist
+        return Dataset.from_dict(**df, seconds=self.seconds, sort=self.sort)
+
+    def get_region_list(self, include_all=True, region_key="neur_regions"):
+        region_list = np.unique(
+            np.concatenate(list(x.iloc[0] for x in self[region_key]))
+        )
+        region_list = tuple((x,) for x in region_list)
+        if include_all:
+            region_list = (None,) + region_list
+        return region_list
+
 
     def get_ntrls(self):
         return list(len(o) for o in self["data"])

@@ -24,10 +24,12 @@ import string
 import os
 import pickle
 
+import scipy.linalg as spla
 import sklearn.utils as sku
 import sklearn.utils.parallel as skup
 import sklearn.neighbors as skn
 import sklearn.multioutput as skout
+import sklearn.compose as skcomp
 import imblearn.under_sampling as imb_us
 import imblearn.over_sampling as imb_os
 import imblearn.pipeline as imbpipe
@@ -39,50 +41,312 @@ import general.utility as u
 import general.nested_cv as ncv
 
 
-class RaggedPipelineTC:
-    def __init__(self, *args, **kwargs):
-        self.pipe = make_model_pipeline(*args, **kwargs)
+def _cross_validate(
+    model,
+    X,
+    y,
+    func,
+    cv=None,
+    n_splits=10,
+    test_prop=0.1,
+    n_jobs=-1,
+    pre_dispatch="2*n_jobs",
+    verbose=False,
+    **kwargs,
+):
+    if cv is None:
+        cv = skms.ShuffleSplit(n_splits, test_size=test_prop)
+    indices = cv.split(X, y)
+    parallel = skup.Parallel(n_jobs=n_jobs, verbose=verbose, pre_dispatch=pre_dispatch)
+    results = parallel(
+        skup.delayed(func)(skb.clone(model), X, y, train, test, **kwargs)
+        for train, test in indices
+    )
+    return u.aggregate_dictionary(results)
 
-    def collapse_arr(self, arr):
-        arr_list = list(ak.to_numpy(x) for x in arr)
-        out_arr = np.concatenate(arr_list, axis=-1).T
-        lengths = list(x.shape[-1] for x in arr_list)
-        return out_arr, lengths
 
-    def uncollapse_arr(self, arr, lengths):
-        arrs = []
-        for length in lengths:
-            arrs.append(arr[:length].T)
-            arr = arr[length:]
-        return ragged.array(arrs)
+def fit_and_score_jagged(model, X, y, train, test, masking_variables=None, **kwargs):
+    X_tr, y_tr = X[train], y[train]
+    X_te, y_te = X[test], y[test]
+    if masking_variables is not None:
+        m_tr = masking_variables[train]
+        m_te = masking_variables[test]
+        te_kw = {"masking_variables": m_te}
+        tr_kw = {"masking_variables": m_tr}
+    else:
+        te_kw = {}
+        tr_kw = {}
+    out = {}
+    model.fit(X_tr, y_tr, **tr_kw)
+    out["test_score"] = model.score(X_te, y_te, **te_kw)
+    out["test_predictions"] = model.predict(X_te, **te_kw)
+    try:
+        out["test_decision_function"] = model.decision_function(X_te, **te_kw)
+    except AttributeError:
+        out["test_decision_function"] = model.predict(X_te, **te_kw)
+    out["test_targets"] = y_te
+    out["test_indices"] = test
+    out["estimator"] = model
+    return out
 
-    def _prepare_xy(self, X, y=None, return_lengths=False):
-        if y is not None and len(y.shape) == 1:
-            y = ragged.ones_like(X) * y[:, None, None]
-            y, _ = self.collapse_arr(y)
-        X, lengths = self.collapse_arr(X)
-        if return_lengths:
-            out = (X, y, lengths)
-        else:
-            out = (X, y)
-        return out
 
-    def fit(self, X, y=None, **kwargs):
-        """
-        X : N x D x T where T is a ragged dimension
-        """
-        X, y = self._prepare_xy(X, y)
-        self.pipe.fit(X, y, **kwargs)
+def cross_validate_jagged(*args, **kwargs):
+    return _cross_validate(*args, fit_and_score_jagged, **kwargs)
+
+
+class EmptyPipe:
+    def __init__(self):
+        pass
+
+    def transform(self, X, y=None):
+        return X
+
+
+class GenericStackingPipeline(skb.BaseEstimator):
+    def __init__(self):
+        self.is_fitted = False
+
+    def __sklearn_is_fitted__(self):
+        return self.is_fitted
+
+    def transform(self, X, y=None):
+        X, y = self.prepare_xy(X, y)
+        return self.pipe.transform(X, y)
+
+    def predict(self, X):
+        X, _ = self.prepare_xy(X)
+        return self.pipe.predict(X)
+
+    def decision_function(self, X):
+        X, _ = self.prepare_xy(X)
+        return self.pipe.decision_function(X)
+
+    def score(self, X, y):
+        X, y = self.prepare_xy(X, y)
+        return self.pipe.score(X, y)
+
+    def fit_transform(self, X, y=None):
+        self.fit(X, y)
+        return self.transform(X)
+
+    def fit(self, X, y=None):
+        X, y = self.prepare_xy(X, y)
+        self.pipe.fit(X, y)
+        self.is_fitted = True
         return self
 
-    def transform(self, X, **kwargs):
-        X, y, lengths = self._prepare_xy(X, return_lengths=True)
-        out = self.pipe.transform(X)
-        return self.uncollapse_arr(out, lengths)
-        
-    def fit_transform(self, X, y=None, **kwargs):
-        self.fit(X, y, **kwargs)
-        return self.transform(X)            
+
+class OppositePCA(skb.BaseEstimator):
+    def __init__(self, n_components=None, model=skd.PCA):
+        super().__init__()
+        self.n_components = n_components
+        self.model = model
+        self.use_model = model(n_components)
+        self.fitted = False
+
+    def __sklearn_is_fitted__(self):
+        return self.fitted
+
+    def fit(self, X, y=None):
+        self.use_model.fit(X, y)
+        self.trs = spla.null_space(self.use_model.components_)
+        self.fitted = True
+        return self
+
+    def transform(self, X, y=None):
+        return X @ self.trs
+
+    def fit_transform(self, X, y=None):
+        self.fit(X, y)
+        return self.transform(X)
+
+
+class MaskingPipe(skb.BaseEstimator):
+    def __init__(self, mask_func, pipe=None):
+        self.mask_func = mask_func
+        if pipe is None:
+            pipe = EmptyPipe()
+        self.pipe = pipe
+        super().__init__()
+
+    def prepare_xy(self, X, y=None, masking_variables=None):
+        if masking_variables is not None:
+            mask = self.mask_func(masking_variables)
+        else:
+            mask = np.ones(len(X), dtype=bool)
+        X = X[mask]
+        if y is not None:
+            y = y[mask]
+        return X, y
+
+
+class SequenceAugmentorRaggedTC(GenericStackingPipeline):
+    def __init__(self, pipe=None, n_steps=2, preceding=True):
+        self.n_steps = n_steps
+        self.preceding = preceding
+        if pipe is None:
+            pipe = EmptyPipe()
+        self.pipe = pipe
+        super().__init__()
+
+    def prepare_xy(self, X, y=None):
+        X_collection = []
+        y_collection = []
+        for i, xi in enumerate(X):
+            X_coll_i = []
+            xi = ak.to_numpy(xi)
+            for j in range(self.n_steps):
+                X_coll_i.append(xi[:, j : -self.n_steps + j])
+            X_collection.append(np.concatenate(X_coll_i, axis=0))
+            if y is not None:
+                if self.preceding:
+                    y_collection.append(ak.to_numpy(y[i])[self.n_steps :])
+                else:
+                    y_collection.append(ak.to_numpy(y[i])[: -self.n_steps])
+
+        X = ragged.array(X_collection)
+        if y is not None:
+            y = ragged.array(y_collection)
+        return X, y
+
+
+class MaskingRaggedPipelineTC(skb.BaseEstimator):
+    def __init__(self, masking_func, pipe=None):
+        self.masking_func = masking_func
+        if pipe is None:
+            pipe = EmptyPipe()
+        self.pipe = pipe
+        self.is_fitted = False
+        super().__init__()
+
+    def __sklearn_is_fitted__(self):
+        return self.is_fitted
+
+    def prepare_xy(self, X, y=None, masking_variables=None):
+        X_tr = np.concatenate(list(ak.to_numpy(x).T for x in X), axis=0)
+        if y is not None:
+            y_tr = np.concatenate(
+                list(ak.to_numpy(y[i]) for i in range(len(y))), axis=0
+            )
+        else:
+            y_tr = None
+        if masking_variables is not None:
+            masking_variables = np.concatenate(
+                list(ak.to_numpy(mv).T for mv in masking_variables), axis=0
+            )
+            mask = self.masking_func(masking_variables)
+            X_tr = X_tr[mask]
+            if y_tr is not None:
+                y_tr = y_tr[mask]
+        return X_tr, y_tr
+
+    def fit(self, X, y=None, masking_variables=None):
+        X, y = self.prepare_xy(X, y, masking_variables)
+        self.pipe.fit(X, y)
+        self.is_fitted = True
+        return self
+
+    def score(self, X, y, masking_variables=None):
+        X, y = self.prepare_xy(X, y, masking_variables)
+        return self.pipe.score(X, y)
+
+    def _method_application(self, X, method, masking_variables=None):
+        trs_all = []
+        for i, X_i in enumerate(X):
+            trs = method(ak.to_numpy(X_i).T).T
+            if masking_variables is not None:
+                mask = self.masking_func(ak.to_numpy(masking_variables[i]).T)
+                trs[~mask] = np.nan
+            trs_all.append(trs)
+        return ragged.array(trs_all)
+
+    def transform(self, X, masking_variables=None):
+        return self._method_application(
+            X, self.pipe.transform, masking_variables=masking_variables
+        )
+
+    def decision_function(self, X, masking_variables=None):
+        return self._method_application(
+            X, self.pipe.decision_function, masking_variables=masking_variables
+        )
+
+    def predict(self, X, masking_variables=None):
+        return self._method_application(
+            X, self.pipe.predict, masking_variables=masking_variables
+        )
+
+
+class RaggedPipelineTC(GenericStackingPipeline):
+    def __init__(self, pipe=None):
+        super().__init__()
+        if pipe is None:
+            pipe = EmptyPipe()
+        self.pipe = pipe
+
+    def prepare_xy(self, X, y=None):
+        X_l = list(ak.to_numpy(x).T for x in X)
+        X_tr = np.concatenate(X_l, axis=0)
+        if y is not None:
+            if len(y.shape) == 1:
+                y_tr = np.concatenate(
+                    list(np.ones(X_l[i].shape[0]) * y_i for i, y_i in enumerate(y)),
+                    axis=0,
+                )
+            else:
+                y_tr = np.concatenate(
+                    list(ak.to_numpy(y[i]) for i in range(len(y))), axis=0
+                )
+        else:
+            y_tr = None
+        return X_tr, y_tr
+
+    def transform(self, X):
+        trs_all = []
+        for i, X_i in enumerate(X):
+            trs = self.pipe.transform(ak.to_numpy(X_i).T).T
+            trs_all.append(trs)
+        return ragged.array(trs_all)
+
+    def decision_function(self, X):
+        trs_all = []
+        for i, X_i in enumerate(X):
+            trs = self.pipe.decision_function(ak.to_numpy(X_i).T).T
+            trs_all.append(trs)
+        return ragged.array(trs_all)
+
+    def predict(self, X):
+        trs_all = []
+        for i, X_i in enumerate(X):
+            trs = self.pipe.predict(ak.to_numpy(X_i).T).T
+            trs_all.append(trs)
+        return ragged.array(trs_all)
+
+
+class FactorRemover(skb.BaseEstimator):
+    def __init__(self, model=sklm.Ridge, **kwargs):
+        super().__init__()
+        self.pre_norm = skp.StandardScaler()
+        self.model = skcomp.TransformedTargetRegressor(
+            model(**kwargs), transformer=skp.StandardScaler()
+        )
+        self.post_norm = skp.StandardScaler()
+
+    def fit(self, X, y):
+        self.pre_norm = self.pre_norm.fit(X)
+        X_zs = self.pre_norm.transform(X)
+        self.model = self.model.fit(X_zs, y)
+        vec = self.model.regressor_.coef_
+        self.null_mat = spla.null_space(vec[None])
+        self.post_norm = self.post_norm.fit(X_zs @ self.null_mat)
+        return self
+
+    def transform(self, X, y=None):
+        X = self.pre_norm.transform(X)
+        return self.post_norm.transform(X @ self.null_mat)
+
+    def fit_transform(self, X, y=None):
+        self.fit(X, y)
+        return self.transform(X, y)
 
 
 class JaggedArray:
@@ -259,7 +523,6 @@ class ModelPipelineCombinedTC(skb.BaseEstimator):
 
     def _unformat_x(self, X, use_len):
         return u.uncombine_dimensions(X, 0, -1, use_len)
-        
 
     def fit(self, X, y=None, **kwargs):
         X_tr = self._format_x(X)
@@ -410,6 +673,8 @@ def _make_model_pipeline(
     undersample=False,
     undersampler=imb_us.RandomUnderSampler,
     regression=False,
+    kernel_approximator=None,
+    kernel_kwargs=None,
     **kwargs,
 ):
     if use_ica:
@@ -432,6 +697,10 @@ def _make_model_pipeline(
     if undersample:
         pipe_steps.append(undersampler())
         make_func = imbpipe.make_pipeline
+    if kernel_approximator is not None:
+        if kernel_kwargs is None:
+            kernel_kwargs = {}
+        pipe_steps.append(kernel_approximator(**kernel_kwargs))
     if model is not None:
         if multioutput:
             if regression:
@@ -443,6 +712,14 @@ def _make_model_pipeline(
         pipe_steps.append(m)
     pipe = make_func(*pipe_steps)
     return pipe
+
+
+def simple_make_pipeline(*args, trial_sampler=False):
+    if trial_sampler:
+        make_func = imbpipe.make_pipeline
+    else:
+        make_func = sklpipe.make_pipeline
+    return make_func(*args)
 
 
 def confusion_scorer(clf, X, y, additional_scores=None, n_classes=None):
@@ -2061,7 +2338,7 @@ def _fit_model_proj(data, labels, estimators):
         out_shape = out_shape + (labels.shape[1],)
     elif len(u_labels) > 2:
         out_shape = out_shape + (len(u_labels),)
-        
+
     out = np.zeros(out_shape)
     for i, est in enumerate(estimators):
         projs = est.decision_function(data)

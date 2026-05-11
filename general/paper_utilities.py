@@ -8,13 +8,19 @@ import re
 
 
 def split_gridspec(n_rows, start, end, spacing):
+    if u.check_list(n_rows):
+        props = np.array(n_rows) / np.sum(n_rows)
+        n_rows = len(n_rows)
+    else:
+        props = np.ones(n_rows) / n_rows
     free_space = (end - start) - (n_rows - 1) * spacing
-    hei = np.floor(free_space / n_rows)
+    hei = np.floor(props * free_space)
     out = np.zeros((n_rows, 2))
     for i in range(n_rows):
-        top = start + i * hei + i * spacing
-        bottom = top + hei
+        top = start 
+        bottom = top + hei[i]
         out[i] = (top, bottom)
+        start = bottom + spacing
     return out.astype(int)
 
 
@@ -92,7 +98,7 @@ class Figure:
         plot_polars=None,
         all_polar=False,
         share_ax_y=None,
-        **all_ax_kwargs
+        **all_ax_kwargs,
     ):
         grid_arr = np.array(grids)
         if len(grid_arr.shape) == 1:
@@ -148,12 +154,12 @@ class Figure:
         pass
 
     def save(
-            self,
-            file_=None,
-            bbox_inches="tight",
-            transparent=True,
-            dpi=300,
-            use_bf=None,
+        self,
+        file_=None,
+        bbox_inches="tight",
+        transparent=True,
+        dpi=300,
+        use_bf=None,
     ):
         if file_ is None:
             file_ = self.fig_key

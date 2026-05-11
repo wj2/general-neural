@@ -582,7 +582,7 @@ def biased_sem(dat, axis=0, **kwargs):
 
 
 def conf95_interval(dat, axis=0, **kwargs):
-    return u.conf_interval(dat, axis=0, perc=95)
+    return u.conf_interval(dat, axis=0, perc=95, **kwargs)
 
 
 def plot_trial_structure(
@@ -1220,10 +1220,13 @@ def plot_trace_wpts(x, data, ax=None, color=None, **kwargs):
         ax.plot(x, data_i, "o", color=l_[0].get_color(), **kwargs)
 
 
-def make_linear_cmap(b1, b2=None, name=""):
+def make_linear_cmap(b1, b2=None, name="", progress_alpha=False):
     b1 = mpl.colors.to_rgba(b1)
     if b2 is None:
-        b_start = (1,) * len(b1)
+        if progress_alpha:
+            b_start = b1[:3] + (0,)
+        else:
+            b_start = (1,) * len(b1)
         b_end = b1
     else:
         b_start = b1
@@ -1419,7 +1422,7 @@ def plot_trace_werr(
 
         if color is None and trl is not None:
             color = trl[0].get_color()
-        if points:
+        if points or no_lines:
             scat = ax.scatter(xs, tr, marker=marker, color=color, **kwargs)
         if color is None and scat is not None:
             color = scat.get_facecolors()[0]
