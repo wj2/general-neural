@@ -17,6 +17,7 @@ import sklearn.utils as sku
 import matplotlib.pyplot as plt
 import joblib as jl
 import awkward as ak
+import ragged
 
 monthdict = {
     "01": "Jan",
@@ -242,6 +243,22 @@ def folder_regex_generator(
                     load_path = os.path.join(folder, fl)
                 yield load_path, gd
             nth_file = nth_file + 1
+
+
+def make_ragged_projection_array_over_folds(
+    xs, folds, indices, fill_value=0.0, correct_only=False
+):
+    proj_dict = collect_same_trial_over_folds(folds, indices, ragged=True)
+    trls = []
+    for i, xs_i in enumerate(xs):
+        t_i = proj_dict.get(i)
+        if t_i is not None:
+            r_i = np.mean(t_i, axis=0, keepdims=True)
+        else:
+            r_i = np.ones((1, len(xs_i))) * fill_value
+        trls.append(r_i)
+
+    return ragged.array(trls)
 
 
 def collect_same_trial_over_folds(folds, indices, ragged=False):

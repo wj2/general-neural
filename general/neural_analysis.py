@@ -3176,7 +3176,7 @@ def fold_skl_flat(
     norm=True,
     shuffle=False,
     pre_pca=0.99,
-    n_jobs=-1,
+    n_jobs=-4,
     mean=True,
     impute_missing=False,
     verbose=False,
