@@ -1,5 +1,7 @@
 import torch
-import torch.nn as nn
+from torch import nn
+
+import general.torch.utility as gtu
 
 
 def sample_model_responses(task, model, n_samples=1000):
@@ -43,6 +45,7 @@ class CTRNN(nn.Module):
         **kwargs,
     ):
         super().__init__()
+        self.device = gtu.determine_device()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.tau = tau
@@ -53,12 +56,15 @@ class CTRNN(nn.Module):
             alpha = dt / self.tau
         self.alpha = alpha
 
-        self.input2h = nn.Linear(input_size, hidden_size)
-        self.h2h = nn.Linear(hidden_size, hidden_size)
+        self.input2h = nn.Linear(input_size, hidden_size, device=self.device)
+        self.h2h = nn.Linear(hidden_size, hidden_size, device=self.device)
 
     def init_hidden(self, input_shape):
-        batch_size = input_shape[1]
-        return torch.zeros(batch_size, self.hidden_size)
+        if len(input_shape) == 3:
+            h_size = (input_shape[1], self.hidden_size)
+        else:
+            h_size = self.hidden_size
+        return torch.zeros(h_size)
 
     def recurrence(self, input, hidden):
         """Run network for one time step.
@@ -106,11 +112,16 @@ class EmbodiedCTRNN(nn.Module):
         dynamics_sigma=0,
         **kwargs,
     ):
+        self.device = gtu.determine_device()
         super().__init__()
         if body_dynamics is None:
-            body_dynamics = torch.arange(body_size, requires_grad=False)
+            body_dynamics = torch.arange(
+                body_size, dtype=torch.int, requires_grad=False
+            )
         else:
-            body_dynamics = torch.tensor(body_dynamics, requires_grad=False)
+            body_dynamics = torch.tensor(
+                body_dynamics, dtype=torch.int, requires_grad=False
+            )
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.body_size = body_size
@@ -122,11 +133,11 @@ class EmbodiedCTRNN(nn.Module):
             alpha = dt / self.tau
         self.alpha = alpha
 
-        self.input2h = nn.Linear(input_size, hidden_size)
-        self.h2h = nn.Linear(hidden_size, hidden_size)
-        self.h2b = nn.Linear(hidden_size, body_size)
-        self.b2h = nn.Linear(body_size, hidden_size)
-        self.body_mask = torch.zeros(body_size, requires_grad=False)
+        self.input2h = nn.Linear(input_size, hidden_size, device=self.device)
+        self.h2h = nn.Linear(hidden_size, hidden_size, device=self.device)
+        self.h2b = nn.Linear(hidden_size, body_size, device=self.device)
+        self.b2h = nn.Linear(body_size, hidden_size, device=self.device)
+        self.body_mask = torch.zeros(body_size, requires_grad=False, device=self.device)
         self.body_mask[body_dynamics] = 1
 
     def init_hidden(self, input_shape):
@@ -183,8 +194,8 @@ class EmbodiedCTRNN(nn.Module):
 
 class EmbodiedRecurrent(nn.Module):
     def __init__(self, inp_size, num_h, out_size, net_type=EmbodiedCTRNN, **kwargs):
-        super(EmbodiedRecurrent, self).__init__()
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        super().__init__()
+        self.device = gtu.determine_device()
 
         self.hidden_dim = num_h
         self.out_dim = out_size
@@ -205,21 +216,24 @@ class SimpleRecurrent(nn.Module):
         net_type=nn.RNN,
         batch_first=True,
         output_trs=None,
+        **kwargs,
     ):
-        super(SimpleRecurrent, self).__init__()
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        super().__init__()
+        self.device = gtu.determine_device()
 
         self.hidden_dim = num_h
         self.out_dim = out_size
         self.in_dim = inp_size
         self.recurrent_net = net_type(
-            inp_size, num_h, batch_first=True, device=self.device
+            inp_size, num_h, batch_first=True, device=self.device, **kwargs,
         )
         self.linear = nn.Linear(num_h, out_size, device=self.device)
-        self.output_trs = output_trs()
+        self.output_trs = output_trs
+        if self.output_trs is not None:
+            self.output_trs = output_trs()
 
     def forward(self, x, hidden=None):
-        rnn_out, _ = self.recurrent_net(x, hx=hidden)
+        rnn_out, _ = self.recurrent_net(x, hidden=hidden)
         x = self.linear(rnn_out)
         if self.output_trs is not None:
             x = self.output_trs(x)
@@ -236,19 +250,19 @@ class SimpleRecurrent(nn.Module):
 
 class SimpleCTRNN(SimpleRecurrent):
     def __init__(self, *args, **kwargs):
-        super(SimpleCTRNN, self).__init__(*args, **kwargs, net_type=CTRNN)
+        super().__init__(*args, **kwargs, net_type=CTRNN)
 
 
 class SimpleRNN(SimpleRecurrent):
     def __init__(self, *args, **kwargs):
-        super(SimpleRNN, self).__init__(*args, **kwargs, net_type=nn.RNN)
+        super().__init__(*args, **kwargs, net_type=nn.RNN)
 
 
 class SimpleLSTM(SimpleRecurrent):
     def __init__(self, *args, **kwargs):
-        super(SimpleLSTM, self).__init__(*args, **kwargs, net_type=nn.LSTM)
+        super().__init__(*args, **kwargs, net_type=nn.LSTM)
 
 
 class SimpleGRU(SimpleRecurrent):
     def __init__(self, *args, **kwargs):
-        super(SimpleGRU, self).__init__(*args, **kwargs, net_type=nn.GRU)
+        super().__init__(*args, **kwargs, net_type=nn.GRU)

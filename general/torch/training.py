@@ -1,8 +1,9 @@
-import numpy as np
-
-import torch
-import torch.nn as nn
 import neurogym as ngym
+import numpy as np
+import torch
+from torch import nn
+
+import general.utility as u
 
 
 def make_model_for_task(model_type, task, *args, **kwargs):
@@ -101,7 +102,7 @@ def _train_model_epochs(
             running_loss += loss.item()
         # print statistics
         if verbose:
-            print("{:d} loss: {:0.5f}".format(i + 1, running_loss))
+            print(f"{i + 1:d} loss: {running_loss:0.5f}")
         running_loss = 0.0
         if val_dataset is not None:
             inputs_val, labels_val = val_dataset
@@ -110,19 +111,18 @@ def _train_model_epochs(
                 val_loss = criterion(pred_val, labels_val)
                 val_losses.append(val_loss)
                 if verbose:
-                    print("{:d} validation loss: {:0.5f}".format(i + 1, val_loss))
+                    print(f"{i + 1:d} validation loss: {val_loss:0.5f}")
 
     out_dict = {
         "dataset": dataset,
         "loss": np.array(losses),
     }
     if val_dataset is not None:
-        out_dict["pred_val"] = pred_val.detach().numpy(),
-        out_dict["targ_val"] = labels_val.detach().numpy(),
+        out_dict["pred_val"] = (pred_val.detach().numpy(),)
+        out_dict["targ_val"] = (labels_val.detach().numpy(),)
         out_dict["loss_val"] = np.array(val_losses)
         out_dict["dataset_val"] = val_dataset
     return out_dict
-
 
 
 def train_model_on_task(
@@ -130,9 +130,22 @@ def train_model_on_task(
     task,
     batch_size=16,
     seq_len=None,
+    validation_seq_len=None,
+    validation_batch_size=None,
+    include_validation=False,
     **kwargs,
 ):
     dataset = ngym.Dataset(task, batch_size=batch_size, seq_len=seq_len)
+    if include_validation:
+        if validation_batch_size is None:
+            validation_batch_size = batch_size
+
+        if validation_seq_len is None:
+            validation_seq_len = seq_len
+        val_dataset = ngym.Dataset(
+            task, batch_size=validation_batch_size, seq_len=validation_seq_len
+        )
+        kwargs["val_dataset"] = val_dataset
     return _train_model(model, dataset, **kwargs)
 
 
@@ -145,6 +158,9 @@ def _train_model(
     loss_func=None,
     print_interval=200,
     num_epochs=10,
+    verbose=False,
+    tracker_funcs=None,
+    tracker_interval=100,
     **kwargs,
 ):
     if loss_func is None:
@@ -154,8 +170,17 @@ def _train_model(
     criterion = loss_func(**kwargs)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     running_loss = 0.0
-    losses = []
-    val_losses = []
+    losses = torch.zeros(num_steps)
+    if val_dataset is not None:
+        inputs_val, labels_val = val_dataset()
+        inputs_val = torch.tensor(inputs_val, dtype=torch.float, device=device)
+        labels_val = torch.tensor(labels_val, dtype=torch.float, device=device)
+        val_losses = torch.zeros(num_steps)
+        pred_vals = torch.zeros((num_steps,) + labels_val.shape[:2] + (model.out_dim,))
+
+    tracking = tracker_funcs is not None
+    tracker_res = []
+    tracker_points = []
     for i in range(num_steps):
         inputs, labels = dataset()
         inputs = torch.from_numpy(inputs).type(torch.float).to(device)
@@ -171,24 +196,39 @@ def _train_model(
         loss.backward()
         optimizer.step()
 
-        losses.append(loss.detach())
+        losses[i] = loss.detach()
         if val_dataset is not None:
             with torch.no_grad():
-                inputs_val, labels_val = val_dataset()
-                pred_val = model(inputs_val)
+                pred_val, _ = model(inputs_val)
+                pred_vals[i] = pred_val
                 val_loss = criterion(pred_val, labels_val)
-                val_losses.append(val_loss)
+                val_losses[i] = val_loss
 
-        # print statistics
         running_loss += loss.item()
-        if i % print_interval == print_interval - 1:
-            print("{:d} loss: {:0.5f}".format(i + 1, running_loss / 200))
+        if verbose and i % print_interval == print_interval - 1:
+            print(f"{i + 1:d} loss: {running_loss / 200:0.5f}")
             running_loss = 0.0
+        if tracking and i % tracker_interval == 0:
+            tracks = {}
+            with torch.no_grad():
+                for name, func in tracker_funcs.items():
+                    tracks[name] = func(model)
+            tracker_res.append(tracks)
+            tracker_points.append(i)
+            
     out_dict = {
         "dataset": dataset,
         "loss": losses,
     }
+    if tracking:
+        track_dict = u.aggregate_dictionary(tracker_res)
+        track_dict["steps"] = np.array(tracker_points)
+        out_dict["tracking"] = track_dict
     if val_dataset is not None:
         out_dict["loss_val"] = val_losses
-        out_dict["dataset_val"] = val_dataset
+        out_dict["dataset_val"] = (
+            inputs_val.detach().cpu().numpy(),
+            labels_val.detach().cpu().numpy(),
+            pred_vals,
+        )
     return out_dict

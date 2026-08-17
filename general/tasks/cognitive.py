@@ -1,13 +1,14 @@
-import numpy as np
-import neurogym as ngym
-from neurogym import spaces
-import pandas as pd
 import copy
+
+import neurogym as ngym
+import numpy as np
+import pandas as pd
+from neurogym.utils import ngym_random, spaces
 
 import general.utility as u
 
 
-class Task(ngym.TrialEnv):    
+class Task(ngym.core.TrialEnv):    
     def sample_trials(self, n_trls, **kwargs):
         info = []
         inputs = []
@@ -26,7 +27,7 @@ class Task(ngym.TrialEnv):
 class CuedContinuousReportTask(Task):
     """Retrospectively cued task with report of a continuous stimulus."""
 
-    metadata = {
+    metadata = {  # noqa: RUF012
         "paper_link": "https://www.nature.com/articles/s41586-021-03390-w",
         "paper_name": """Shared mechanisms underlie the control of working
         memory and attention""",
@@ -63,9 +64,9 @@ class CuedContinuousReportTask(Task):
         self.timing = {
             "fixation": 500,
             "stimulus": 500,
-            "delay1": ngym.random.TruncExp(600, 500, 1000),
+            "delay1": ngym_random.TruncExp(600, 500, 1000),
             "cue": 300,
-            "delay2": ngym.random.TruncExp(600, 500, 700),
+            "delay2": ngym_random.TruncExp(600, 500, 700),
             "decision": 500,
         }
         if timing is not None:
@@ -127,13 +128,11 @@ class CuedContinuousReportTask(Task):
         if trial["cue"] == 1:
             self.add_ob(1, period="cue", where="cue_1")
             tc_sin, tc_cos = u.radian_to_sincos(color1)
-            dc_sin, dc_cos = u.radian_to_sincos(color2)
             trial["target_color"] = color1
             trial["distractor_color"] = color2
         else:
             self.add_ob(1, period="cue", where="cue_2")
             tc_sin, tc_cos = u.radian_to_sincos(color2)
-            dc_sin, dc_cos = u.radian_to_sincos(color1)
             trial["target_color"] = color2
             trial["distractor_color"] = color1
 
@@ -157,11 +156,11 @@ class CuedContinuousReportTask(Task):
         elif self.in_period("decision"):
             if action_dev > self.resp_thr:  # broke fixation
                 new_trial = True
-                if np.sqrt(np.sum((action - gt) ** 2)) < self.reward_thr:
-                    reward = self.rewards["correct"]
-                    self.performance = 1
+            if np.sqrt(np.sum((action - gt) ** 2)) < self.reward_thr:
+                reward = self.rewards["correct"]
+                self.performance = 1
 
-        return ob, reward, False, {"new_trial": new_trial, "gt": gt}
+        return ob, reward, False, False, {"new_trial": new_trial, "gt": gt}
 
 
 class RetrospectiveContinuousReportTask(CuedContinuousReportTask):
@@ -203,7 +202,7 @@ class DelayedMatchTask(Task):
         self.timing = {
             "fixation": 500,
             "sample": 500,
-            "delay": ngym.random.TruncExp(600, 500, 1000),
+            "delay": ngym_random.TruncExp(600, 500, 1000),
             "test": 500,
         }
         if timing is not None:
@@ -283,11 +282,11 @@ class DelayedMatchTask(Task):
         elif self.in_period("decision"):
             if action_dev > self.resp_thr:  # broke fixation
                 new_trial = True
-                if np.sqrt(np.sum((action - gt) ** 2)) < self.reward_thr:
-                    reward = self.rewards["correct"]
-                    self.performance = 1
+            if np.sqrt(np.sum((action - gt) ** 2)) < self.reward_thr:
+                reward = self.rewards["correct"]
+                self.performance = 1
 
-        return ob, reward, False, {"new_trial": new_trial, "gt": gt}
+        return ob, reward, False, False, {"new_trial": new_trial, "gt": gt}
 
 
 class DelayedMatchToSample(DelayedMatchTask):

@@ -1,21 +1,21 @@
-import numpy as np
+import colorsys
+import itertools as it
 import os
+
+import matplotlib as mpl
+import matplotlib.patheffects as mpe
+import matplotlib.pyplot as plt
+import numpy as np
 import scipy.stats as sts
 import sklearn.decomposition as skd
 import sklearn.gaussian_process as skgp
 import sklearn.preprocessing as skp
-import itertools as it
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import general.utility as u
-import general.neural_analysis as na
+from matplotlib import animation, patches, tri
 from matplotlib.collections import LineCollection
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-import matplotlib.patches as patches
-import matplotlib.tri as tri
-import matplotlib.patheffects as mpe
-import colorsys
-from matplotlib import animation
+
+import general.neural_analysis as na
+import general.utility as u
 
 
 def plot_regional_analysis(
@@ -312,7 +312,7 @@ def plot_single_units(
             for i, c in enumerate(sus):
                 plot_trace_werr(
                     xs,
-                    sus[i][k],
+                    c[k],
                     colors[i],
                     label=labels[i],
                     show=False,
@@ -1368,6 +1368,7 @@ def plot_trace_werr(
     outline_mult_width=1.5,
     no_lines=False,
     marker="o",
+    clean_plot=True,
     **kwargs,
 ):
     if conf95:
@@ -1388,8 +1389,8 @@ def plot_trace_werr(
         else:
             dat = np.array(dat)
         if jagged:
-            tr = np.array(list(central_tendency(d) for d in dat))
-            er = np.array(list(error_func(d)[:, 0] for d in dat)).T
+            tr = np.array([central_tendency(d) for d in dat])
+            er = np.array([error_func(d)[:, 0] for d in dat]).T
         elif len(dat.shape) > 1:
             tr = central_tendency(dat, axis=0)
             er = error_func(dat, axis=0, n_obs=sem_n)
@@ -1466,7 +1467,8 @@ def plot_trace_werr(
                     **kwargs,
                 )
         ax.set_title(title)
-        if not polar:
+        if clean_plot and not polar:
+            clean_plot(ax)
             ax.spines["right"].set_visible(False)
             ax.spines["top"].set_visible(False)
         if len(label) > 0 and legend:
@@ -1976,10 +1978,9 @@ def clean_plot(ax, i=0, max_i=None, ticks=True, spines=True, horiz=True):
                 plt.setp(ax.get_yticklabels(), visible=False)
                 ax.yaxis.set_tick_params(size=0)
     else:
-        if max_i is not None and i < max_i:
-            if ticks:
-                plt.setp(ax.get_xticklabels(), visible=False)
-                ax.xaxis.set_tick_params(size=0)
+        if ticks and max_i is not None and i < max_i:
+            plt.setp(ax.get_xticklabels(), visible=False)
+            ax.xaxis.set_tick_params(size=0)
 
 
 def digitize_vars(
@@ -2191,9 +2192,9 @@ def get_corr_conf95(
 def _get_pval(bs, comp_pt, comparator=np.greater):
     p = 1 - np.sum(comparator(bs, comp_pt)) / len(bs)
     if p == 0:
-        pt = "p < {}".format(1 / len(bs))
+        pt = f"p < {1 / len(bs)}"
     else:
-        pt = "p = {}".format(p)
+        pt = f"p = {p}"
     return pt
 
 
@@ -2213,9 +2214,7 @@ def print_sig_fraction(
     p_comp = 1 - p_thr / factor
     prop = np.sum(func(boot_arr), axis=1) / n_samps
     n_sig = np.sum(prop > p_comp)
-    s = "{} {}: {:0.2f}% ({}/{})".format(
-        subj, text, 100 * n_sig / n_feats, n_sig, n_feats
-    )
+    s = f"{subj} {text}: {100 * n_sig / n_feats:0.2f}% ({n_sig}/{n_feats})"
     print(s)
     return s
 
@@ -2236,9 +2235,7 @@ def print_corr_conf95(
         as_list, bs_list, n_boots=n_boots, func=func, confounders=confounders
     )
     pt = _get_pval(cc, comp_pt, comparator)
-    s = "{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}".format(
-        subj, text, cent, lower, upper, pt
-    )
+    s = f"{subj} {text}: {cent:0.2f} [{lower:0.2f}, {upper:0.2f}], {pt}"
     print(s)
     return s
 
@@ -2252,7 +2249,7 @@ def _get_sem_from_bound(err, use_lower=True, p_thr=0.05):
 
 def print_proportion(num, denom, subj, text, *args):
     perc = 100 * num / denom
-    rep_str = "{:0.2f}% ({}/{})".format(perc, num, denom)
+    rep_str = f"{perc:0.2f}% ({num}/{denom})"
     s = text.format(subj, rep_str, *args)
     print(s)
     return s
@@ -2287,7 +2284,7 @@ def print_mean_conf95(
             lower = cent + err[1]
             sem = err[1] / factor
         p = sts.norm(cent, np.sqrt(sem**2)).cdf(comp_pt)
-        pt = "p = {}".format(p)
+        pt = f"p = {p}"
     else:
         bs_list = np.array(bs_list)
         if preboot:
@@ -2300,9 +2297,7 @@ def print_mean_conf95(
         upper = cent + interv[0, 0]
         lower = cent + interv[1, 0]
         pt = _get_pval(bs, comp_pt, comparator)
-    s = "{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}".format(
-        subj, text, cent, lower, upper, pt
-    )
+    s = f"{subj} {text}: {cent:0.2f} [{lower:0.2f}, {upper:0.2f}], {pt}"
     print(s)
     return s
 
@@ -2330,9 +2325,7 @@ def print_diff_conf95(
     upper = cent + interv[0, 0]
     lower = cent + interv[1, 0]
     pt = _get_pval(diff, comp_pt, comparator)
-    s = "{} {}: {:0.2f} [{:0.2f}, {:0.2f}], {}".format(
-        subj, text, cent, lower, upper, pt
-    )
+    s = f"{subj} {text}: {cent:0.2f} [{lower:0.2f}, {upper:0.2f}], {pt}"
     print(s)
     return s
 
