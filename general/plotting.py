@@ -1368,7 +1368,7 @@ def plot_trace_werr(
     outline_mult_width=1.5,
     no_lines=False,
     marker="o",
-    clean_plot=True,
+    clean_ax=True,
     **kwargs,
 ):
     if conf95:
@@ -1467,7 +1467,7 @@ def plot_trace_werr(
                     **kwargs,
                 )
         ax.set_title(title)
-        if clean_plot and not polar:
+        if clean_ax and not polar:
             clean_plot(ax)
             ax.spines["right"].set_visible(False)
             ax.spines["top"].set_visible(False)
