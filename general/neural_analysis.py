@@ -37,7 +37,6 @@ from sklearn.decomposition import PCA
 
 import general.nested_cv as ncv
 import general.utility as u
-import general.stan_analysis as sa
 
 def _cross_validate(
     model,
