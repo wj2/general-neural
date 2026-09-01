@@ -1,45 +1,43 @@
-import numpy as np
-import scipy.stats as sts
-import scipy.signal as sig
-import sklearn.preprocessing as skp
-from sklearn import svm, linear_model
-from sklearn import discriminant_analysis as da
-import sklearn.pipeline as sklpipe
-from sklearn.decomposition import PCA
-import sklearn.decomposition as skd
-import sklearn.model_selection as skms
-import sklearn.metrics as skm
-import sklearn.impute as skimp
-import sklearn.naive_bayes as sknb
-import sklearn.linear_model as sklm
-import sklearn.svm as sksvm
-import sklearn.base as skb
-
-import arviz as az
-from dPCA.dPCA import dPCA
-import warnings
-import itertools as it
 import functools as ft
-import string
+import itertools as it
 import os
 import pickle
+import string
+import warnings
 
-import scipy.linalg as spla
-import sklearn.utils as sku
-import sklearn.utils.parallel as skup
-import sklearn.neighbors as skn
-import sklearn.multioutput as skout
-import sklearn.compose as skcomp
-import imblearn.under_sampling as imb_us
+import awkward as ak
 import imblearn.over_sampling as imb_os
 import imblearn.pipeline as imbpipe
+import imblearn.under_sampling as imb_us
 import joblib as jl
+import numpy as np
 import ragged
-import awkward as ak
+import scipy.linalg as spla
+import scipy.signal as sig
+import scipy.stats as sts
+import sklearn.base as skb
+import sklearn.compose as skcomp
+import sklearn.decomposition as skd
+import sklearn.impute as skimp
+import sklearn.linear_model as sklm
+import sklearn.metrics as skm
+import sklearn.model_selection as skms
+import sklearn.multioutput as skout
+import sklearn.naive_bayes as sknb
+import sklearn.neighbors as skn
+import sklearn.pipeline as sklpipe
+import sklearn.preprocessing as skp
+import sklearn.svm as sksvm
+import sklearn.utils as sku
+import sklearn.utils.parallel as skup
+from dPCA.dPCA import dPCA
+from sklearn import discriminant_analysis as da
+from sklearn import linear_model, svm
+from sklearn.decomposition import PCA
 
-import general.utility as u
 import general.nested_cv as ncv
-
+import general.utility as u
+import general.stan_analysis as sa
 
 def _cross_validate(
     model,
@@ -356,7 +354,7 @@ class JaggedArray:
                n-element list of the different elements of the array
         """
         if len(args) == 0:
-            raise IOError("must supply more than one element")
+            raise OSError("must supply more than one element")
         self.args = args
         self.concatenate_axis = concatenate_axis
 
@@ -379,7 +377,7 @@ class JaggedArray:
     def _sample_array(self, n_concat=10, upsample=False):
         if not upsample and n_concat > self.maximum_length:
             e = "desired trials of {} would exclude all groups, with lengths {}"
-            raise IOError(e.format(n_concat, self.lengths))
+            raise OSError(e.format(n_concat, self.lengths))
         samples = tuple([] for i in range(self.group_length))
         for group in self.args:
             if upsample or len(group[0]) >= n_concat:
@@ -538,7 +536,7 @@ class ModelPipelineCombinedTC(skb.BaseEstimator):
 
     def transform(self, X, **kwargs):
         if self.pipe is None:
-            raise IOError("the model has not been fit")
+            raise OSError("the model has not been fit")
         out_shape = self.pipe.transform(self._format_x(X), **kwargs)
         out = self._unformat_x(out_shape, X.shape[-1])
         return out
@@ -549,7 +547,7 @@ class ModelPipelineCombinedTC(skb.BaseEstimator):
 
     def score(self, X, y=None):
         if self.pipe is None:
-            raise IOError("the model has not been fit")
+            raise OSError("the model has not been fit")
         X_use = self._format_x(X)
         y_use = self._format_y(X, y)
         score = self.pipe.score(X_use, y_use)
@@ -574,11 +572,11 @@ class ModelPipelineTC:
 
     def transform(self, X, **kwargs):
         if self.pipes is None:
-            raise IOError("the model has not been fit")
+            raise OSError("the model has not been fit")
         elif X.shape[-1] != len(self.pipes):
-            raise IOError(
+            raise OSError(
                 "the fit data had a different number of time points "
-                "{} than the new data {}".format(len(self.pipes), X.shape[-1])
+                f"{len(self.pipes)} than the new data {X.shape[-1]}"
             )
         trs = []
         n_feats = []
@@ -787,9 +785,9 @@ def nearest_decoder(
             if orig_scoring is None:
                 out[:, i] = res["test_accuracy"]
             else:
-                out[:, i] = res["test_{}".format(list(scoring.keys())[0])]
+                out[:, i] = res[f"test_{list(scoring.keys())[0]}"]
             for j, k in it.product(range(len(cats)), repeat=2):
-                out_confusion[:, i, j, k] = res["test_({}, {})".format(j, k)]
+                out_confusion[:, i, j, k] = res[f"test_({j}, {k})"]
         else:
             out[:, i] = res["test_score"]
         out_info[i] = res
@@ -1147,7 +1145,7 @@ def organize_spiking_data(
                     neurs[key][k, :] = psth
                     if bhv_extract_func is not None:
                         bhv_vals[key][k] = val
-            for key in neurs.keys():
+            for key in neurs:
                 all_psth = neurs[key]
                 mask = np.logical_not(np.all(np.isnan(all_psth), axis=1))
                 keep_psth = all_psth[mask]
@@ -1275,7 +1273,7 @@ def organize_spiking_data_pop(
             dnums[dn] = dnums[dn] + (v,)
             if bhv_extract_func is not None:
                 bhvs[dn] = bhv[i][(dn, s)]
-        for dn in dnums.keys():
+        for dn in dnums:
             dnums[dn] = np.array(dnums[dn])
         dnums_conds.append(dnums)
         bhvs_conds.append(bhvs)
@@ -1628,7 +1626,7 @@ def model_decode_tc(
     percent_corr = np.zeros(pc_shape)
     percent_corr_gen = np.zeros(pc_shape)
     svs = np.zeros((test.shape[2], test.shape[0]))
-    inter = np.zeros((test.shape[2]))
+    inter = np.zeros(test.shape[2])
     steps = []
     if norm:
         steps.append(skp.StandardScaler())
@@ -1659,163 +1657,6 @@ def model_decode_tc(
     if gen_samp is not None:
         out = out + (percent_corr_gen,)
     return out
-
-
-def svm_regression(
-    ds,
-    r,
-    leave_out=1,
-    require_trials=15,
-    resample=100,
-    with_replace=False,
-    shuff_labels=False,
-    stability=False,
-    penalty=1,
-    format_=True,
-    model=svm.SVR,
-    kernel="rbf",
-    collapse_time=False,
-    max_iter=1000,
-    gamma="scale",
-    pop=False,
-    min_population=1,
-    multi_cond=False,
-    **kwargs,
-):
-    spec_params = {"C": penalty, "max_iter": max_iter, "gamma": gamma, "kernel": kernel}
-    if pop:
-        pseudopop = False
-        ds_dict = ds
-        r_dict = r
-    else:
-        pseudopop = True
-        ds_dict = tuple({"all": ds_i} for ds_i in ds)
-        r_dict = tuple({"all": r_i} for r_i in r)
-    out = pop_regression(
-        ds_dict,
-        r_dict,
-        leave_out=leave_out,
-        multi_cond=multi_cond,
-        require_trials=require_trials,
-        resample=resample,
-        with_replace=with_replace,
-        shuff_labels=shuff_labels,
-        stability=stability,
-        params=spec_params,
-        format_=format_,
-        model=model,
-        pseudopop=pseudopop,
-        collapse_time=collapse_time,
-        **kwargs,
-    )
-    return out
-
-
-def pop_regression_timestan(
-    pop,
-    reg_vals,
-    model=None,
-    norm=True,
-    pre_pca=None,
-    impute_missing=False,
-    pre_rescale=False,
-    **model_params,
-):
-    x_len = pop.shape[-1]
-    steps = []
-    if norm:
-        steps.append(skp.StandardScaler())
-    if impute_missing:
-        steps.append(skimp.SimpleImputer())
-    if pre_pca is not None:
-        steps.append(skd.PCA(n_components=pre_pca))
-    pipe = sklpipe.make_pipeline(*steps)
-    pop_flat = np.concatenate(tuple(pop[:, i] for i in range(pop.shape[1])), axis=1)
-    shuff_inds = np.random.choice(reg_vals.shape[0], reg_vals.shape[0], replace=False)
-    reg_shuff = np.array(reg_vals)[shuff_inds]
-    pop_list = []
-    reg_list = []
-    reg_shuff_list = []
-    time_list = []
-    for j in range(x_len):
-        if pre_rescale:
-            skss = skp.StandardScaler()
-            pfj = skss.fit_transform(pop_flat[..., j].T).T
-            pop_list.append(pfj)
-        else:
-            pop_list.append(pop_flat[..., j])
-        reg_list.append(reg_vals)
-        reg_shuff_list.append(reg_shuff)
-        time_list.append(np.ones(len(reg_vals), dtype=int) * (j + 1))
-    pop_full = np.concatenate(pop_list, axis=1)
-    reg_full = np.concatenate(reg_list, axis=0)
-    reg_shuff_full = np.concatenate(reg_shuff_list, axis=0)
-    time_full = np.concatenate(time_list, axis=0)
-
-    pop_proc = pipe.fit_transform(pop_full.T)
-    m1 = model(**model_params)
-    m1.fit(pop_proc, reg_full, time_full)
-    m2 = model(**model_params)
-    m2.fit(pop_proc, reg_shuff_full, time_full)
-    comp = az.compare(dict(m=m1.get_arviz(), m_shuff=m2.get_arviz()))
-    for j in range(x_len):
-        pop_t_proc = pipe.transform(pop_flat[..., j].T)
-        scores = m1.score(pop_t_proc, reg_vals, time_list[j])
-        scores_shuff = m2.score(pop_t_proc, reg_vals, time_list[j])
-        if j == 0:
-            tcs = np.zeros((scores.shape[0], x_len))
-            tcs_shuff = np.zeros((scores.shape[0], x_len))
-        tcs[:, j] = 1 - scores
-        tcs_shuff[:, j] = 1 - scores_shuff
-    return tcs, tcs_shuff, (m1, m2), comp
-
-
-def pop_regression_stan(
-    pop,
-    reg_vals,
-    model=None,
-    norm=True,
-    pre_pca=0.99,
-    impute_missing=False,
-    do_arviz=False,
-    **model_params,
-):
-    x_len = pop.shape[-1]
-    comps = []
-    steps = []
-    if norm:
-        steps.append(skp.StandardScaler())
-    if impute_missing:
-        steps.append(skimp.SimpleImputer())
-    if pre_pca is not None:
-        steps.append(skd.PCA(n_components=pre_pca))
-    pipe = sklpipe.make_pipeline(*steps)
-    pop_flat = np.concatenate(tuple(pop[:, i] for i in range(pop.shape[1])), axis=1)
-    shuff_inds = np.random.choice(reg_vals.shape[0], reg_vals.shape[0], replace=False)
-    reg_shuff = np.array(reg_vals)[shuff_inds]
-    m1s = []
-    m2s = []
-    for j in range(x_len):
-        pop_proc = pipe.fit_transform(pop_flat[..., j].T)
-        m1 = model(**model_params)
-        m1.fit(pop_proc, reg_vals)
-        m2 = model(**model_params)
-        m2.fit(pop_proc, reg_shuff)
-        if do_arviz:
-            comp = az.compare(dict(m=m1.get_arviz(), m_shuff=m2.get_arviz()))
-        else:
-            comp = np.nan
-        scores = m1.score(pop_proc, reg_vals)
-        scores_shuff = m2.score(pop_proc, reg_vals)
-        if j == 0:
-            tcs = np.zeros((scores.shape[0], x_len))
-            tcs_shuff = np.zeros((scores.shape[0], x_len))
-        tcs[:, j] = 1 - scores
-        tcs_shuff[:, j] = 1 - scores_shuff
-        m1s.append(m1)
-        m2s.append(m2)
-        comps.append(comp)
-    return tcs, tcs_shuff, (m1s, m2s), comps
 
 
 def pop_regression_skl(
@@ -1911,7 +1752,7 @@ def pop_regression(
         r_f = np.array(r_pop, dtype=object)
         n_neurs = ds_f.shape[0]
         if n_neurs >= min_population:
-            print("session {}".format(k))
+            print(f"session {k}")
             folds_n, leave_out = _compute_folds_n(
                 ds_f.shape[1] * use_trials, leave_out, equal_fold
             )
@@ -2494,7 +2335,7 @@ def cv_wrapper(
 ):
     if balance_rel_fields:
         if rel_var is None:
-            raise IOError("told to balance rel_fields but did not provide rel_fields")
+            raise OSError("told to balance rel_fields but did not provide rel_fields")
         y_use_split = rel_var
         cv_type = BalancedCV
         if test_frac is None:
@@ -4381,7 +4222,7 @@ def pca_trajectories(data, pca, n_comp=None, comps=(0, 1)):
     all_traj = np.zeros((data.shape[0], len(comps), data.shape[2]))
     mean_traj = pca.transform(np.nanmean(data, axis=0).T).T[comps, :]
     for i, d in enumerate(data):
-        all_traj[i] = pca.transform(data[i].T).T[comps, :]
+        all_traj[i] = pca.transform(d.T).T[comps, :]
     return mean_traj, all_traj
 
 
@@ -4599,104 +4440,13 @@ def fit_glms_with_perm(
     ps = np.min(np.stack((lower, higher), axis=0), axis=0)
     return mp, cp, ps, null_cp
 
-
-def fit_glms(data, conds, use_stan=False, demean=False, z_score=False, alpha=None):
-    model_pop = []
-    if demean:
-        coeff_add = 0
-    else:
-        coeff_add = 1
-    coeffs_pop = np.zeros((data.shape[1], data.shape[0], conds.shape[2] + coeff_add))
-    for i, neur in enumerate(conds):
-        if use_stan:
-            print("neur {} / {}".format(i + 1, len(conds)))
-        ms, cs = generalized_linear_model(
-            data[:, i, :],
-            neur,
-            use_stan=use_stan,
-            demean=demean,
-            z_score=z_score,
-            alpha=alpha,
-        )
-        model_pop.append(ms)
-        coeffs_pop[i] = cs
-    return model_pop, coeffs_pop
-
-
-stan_file_trunk = "general/stan_models/"
-stan_file_glm_mean = os.path.join(stan_file_trunk, "glm_fitting.pkl")
-stan_file_glm_nomean = os.path.join(stan_file_trunk, "glm_fitting_nomean.pkl")
-stan_file_glm_modu_nomean = os.path.join(stan_file_trunk, "glm_fitting_m_nm.pkl")
-stan_file_glm_nomean_cv = os.path.join(stan_file_trunk, "glm_fitting_nm_mvar.pkl")
-stan_file_glm_modu_nomean_cv = os.path.join(
-    stan_file_trunk, "glm_fitting_m_nm_mvar.pkl"
-)
-
-stan_file_glm_nomean_pop = os.path.join(stan_file_trunk, "glm_fitting_nm_pop.pkl")
-stan_file_glm_modu_nomean_pop = os.path.join(
-    stan_file_trunk, "glm_fitting_m_nm_pop.pkl"
-)
-stan_file_glm_nomean_cv_pop = os.path.join(
-    stan_file_trunk, "glm_fitting_nm_mvar_pop.pkl"
-)
-stan_file_glm_modu_nomean_cv_pop = os.path.join(
-    stan_file_trunk, "glm_fitting_m_nm_mvar_pop.pkl"
-)
-stan_logit_path = os.path.join(stan_file_trunk, "logit.pkl")
-stan_unif_resp_path = os.path.join(stan_file_trunk, "unif_resp.pkl")
-glm_arviz = {
-    "observed_data": "y",
-    "log_likelihood": {"y": "log_lik"},
-    "posterior_predictive": "err_hat",
-}
-glm_pop_arviz = {
-    "observed_data": "y",
-    "log_likelihood": {"y": "log_lik"},
-    "posterior_predictive": "err_hat",
-    "dims": {"beta": ["neur_inds"], "sigma": ["neur_inds"]},
-}
-
-
-def fit_logit(
-    measured,
-    outcome,
-    manifest=glm_arviz,
-    model_path=stan_logit_path,
-    null_model_path=stan_unif_resp_path,
-    stan_iters=500,
-    stan_chains=4,
-    prior_width=5,
-    norm=True,
-):
-    if norm:
-        measured_m = np.mean(measured)
-        measured_v = np.std(measured - measured_m)
-        measured = (measured - measured_m) / measured_v
-    measured = np.expand_dims(measured, 1)
-    stan_data = {
-        "N": len(measured),
-        "K": 1,
-        "y": outcome,
-        "x": measured,
-        "prior_width": prior_width,
-    }
-    sm_logit = pickle.load(open(model_path, "rb"))
-    m_logit = sm_logit.sampling(data=stan_data, iter=stan_iters, chains=stan_chains)
-    m_logit_az = az.from_pystan(posterior=m_logit, **manifest)
-    sm_null = pickle.load(open(null_model_path, "rb"))
-    m_null = sm_null.sampling(data=stan_data, iter=stan_iters, chains=stan_chains)
-    m_null_az = az.from_pystan(posterior=m_null, **manifest)
-    comp = az.compare(dict(logit=m_logit_az, null=m_null_az), scale="log")
-    return m_logit, m_null, comp
-
-
 def generalized_linear_model(
     data,
     conds,
     use_stan=False,
     stan_chains=4,
     stan_iters=10000,
-    stan_file=stan_file_glm_mean,
+    stan_file=sa.stan_file_glm_mean,
     demean=False,
     z_score=False,
     alpha=None,
@@ -4748,9 +4498,9 @@ def generalized_linear_model(
             if use_stan:
                 conds = conds.astype(int)
                 if demean:
-                    sf = stan_file_glm_nomean
+                    sf = sa.stan_file_glm_nomean
                 else:
-                    sf = stan_file_glm_mean
+                    sf = sa.stan_file_glm_mean
                 stan_data = {
                     "N": data.shape[1],
                     "K": conds.shape[1],
@@ -4776,6 +4526,79 @@ def generalized_linear_model(
             coeffs[t, :] = np.nan
         models.append(m)
     return models, coeffs
+
+def fit_glms(data, conds, use_stan=False, demean=False, z_score=False, alpha=None):
+    model_pop = []
+    if demean:
+        coeff_add = 0
+    else:
+        coeff_add = 1
+    coeffs_pop = np.zeros((data.shape[1], data.shape[0], conds.shape[2] + coeff_add))
+    for i, neur in enumerate(conds):
+        if use_stan:
+            print(f"neur {i + 1} / {len(conds)}")
+        ms, cs = generalized_linear_model(
+            data[:, i, :],
+            neur,
+            use_stan=use_stan,
+            demean=demean,
+            z_score=z_score,
+            alpha=alpha,
+        )
+        model_pop.append(ms)
+        coeffs_pop[i] = cs
+    return model_pop, coeffs_pop
+
+
+def svm_regression(
+    ds,
+    r,
+    leave_out=1,
+    require_trials=15,
+    resample=100,
+    with_replace=False,
+    shuff_labels=False,
+    stability=False,
+    penalty=1,
+    format_=True,
+    model=svm.SVR,
+    kernel="rbf",
+    collapse_time=False,
+    max_iter=1000,
+    gamma="scale",
+    pop=False,
+    min_population=1,
+    multi_cond=False,
+    **kwargs,
+):
+    spec_params = {"C": penalty, "max_iter": max_iter, "gamma": gamma, "kernel": kernel}
+    if pop:
+        pseudopop = False
+        ds_dict = ds
+        r_dict = r
+    else:
+        pseudopop = True
+        ds_dict = tuple({"all": ds_i} for ds_i in ds)
+        r_dict = tuple({"all": r_i} for r_i in r)
+    out = pop_regression(
+        ds_dict,
+        r_dict,
+        leave_out=leave_out,
+        multi_cond=multi_cond,
+        require_trials=require_trials,
+        resample=resample,
+        with_replace=with_replace,
+        shuff_labels=shuff_labels,
+        stability=stability,
+        params=spec_params,
+        format_=format_,
+        model=model,
+        pseudopop=pseudopop,
+        collapse_time=collapse_time,
+        **kwargs,
+    )
+    return out
+
 
 
 # spiking variability
