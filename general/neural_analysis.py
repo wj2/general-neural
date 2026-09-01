@@ -4446,7 +4446,7 @@ def generalized_linear_model(
     use_stan=False,
     stan_chains=4,
     stan_iters=10000,
-    stan_file=sa.stan_file_glm_mean,
+    stan_file=None,
     demean=False,
     z_score=False,
     alpha=None,
@@ -4474,6 +4474,10 @@ def generalized_linear_model(
         labels as well as a mean term) at each timepoint. The coefficients are
         in the order of the labels, with the mean term in the zeroeth position.
     """
+    if use_stan:
+        import general.stan_analysis as sa
+        if stan_file is None:
+            stan_file = sa.stan_file_glm_mean
     models = []
     if alpha is None:
         alpha = 1
