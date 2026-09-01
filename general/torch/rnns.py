@@ -4,12 +4,12 @@ from torch import nn
 import general.torch.utility as gtu
 
 
-def sample_model_responses(task, model, n_samples=1000):
+def sample_model_responses(task, model, n_samples=1000, **kwargs):
     info, inputs, targets = task.sample_trials(n_samples)
     out = []
     for i, inp in enumerate(inputs):
         inp_use = torch.from_numpy(inp).type(torch.float).to(model.device)
-        out.append(model.forward(inp_use))
+        out.append(model.forward(inp_use, **kwargs))
     return info, inputs, targets, out
 
 
@@ -159,9 +159,12 @@ class EmbodiedCTRNN(nn.Module):
             h_new: tensor of shape (batch, hidden_size),
                 network activity at the next time step
         """
-
+        if dyn_sigma is not None:
+            noise = torch.randn(hidden.shape) * dyn_sigma
+        else:
+            noise = 0
         h_new = self.transfer_function(
-            self.input2h(input) + self.h2h(hidden) + self.b2h(body)
+            self.input2h(input) + self.h2h(hidden) + self.b2h(body) + noise
         )
         h_new = hidden * (1 - self.alpha) + h_new * self.alpha
 
@@ -170,7 +173,7 @@ class EmbodiedCTRNN(nn.Module):
         b_new = body * bm + self.alpha * self.h2b(hidden)
         return h_new, b_new
 
-    def forward(self, input, hidden=None, body=None, **kwargs):
+    def forward(self, input, hidden=None, body=None, ablate_body=False, **kwargs):
         """Propogate input through the network."""
 
         # If hidden activity is not provided, initialize it
@@ -185,6 +188,8 @@ class EmbodiedCTRNN(nn.Module):
         body_output = torch.zeros(shape + (self.body_size,)).to(input.device)
         steps = range(input.size(0))
         for i in steps:
+            if ablate_body:
+                body = body * (1 - self.body_mask)
             hidden, body = self.recurrence(input[i], hidden, body, **kwargs)
             hidden_output[i] = hidden
             body_output[i] = body
@@ -202,8 +207,8 @@ class EmbodiedRecurrent(nn.Module):
         self.in_dim = inp_size
         self.emb_net = net_type(inp_size, num_h, out_size, device=self.device, **kwargs)
 
-    def forward(self, x, hidden=None, body=None):
-        rnn_out, body_out, _ = self.emb_net(x, hidden=hidden, body=body)
+    def forward(self, x, hidden=None, body=None, **kwargs):
+        rnn_out, body_out, _ = self.emb_net(x, hidden=hidden, body=body, **kwargs)
         return body_out, rnn_out
 
 

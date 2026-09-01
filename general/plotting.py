@@ -669,8 +669,11 @@ def add_identity_line(ax, plot_lim, use_xlim=None, use_ylim=None, **kwargs):
 
 def add_xl_identity_line(ax, **kwargs):
     add_identity_line(ax, ax.get_xlim(), **kwargs)
+
+
 def add_yl_identity_line(ax, **kwargs):
     add_identity_line(ax, ax.get_ylim(), **kwargs)
+
 
 def gen_circle_pts(n, r=1):
     angs = np.linspace(0, 2 * np.pi, n)
@@ -832,7 +835,7 @@ def animate_plot_axs(
     else:
         subplot_kw = {}
     _, scrub_axs = plt.subplots(*axs.shape, subplot_kw=subplot_kw)
-    list(plot_func(arg_i, axs=scrub_axs) for arg_i in arg_tc)
+    [plot_func(arg_i, axs=scrub_axs) for arg_i in arg_tc]
     use_xlims = {
         ind: scrub_axs[ind].get_xlim() for ind in u.make_array_ind_iterator(axs.shape)
     }
@@ -926,6 +929,7 @@ def animate_plot(
     use_xlim=None,
     use_ylim=None,
     use_zlim=None,
+    same_xyz_lim=False,
     format=".pdf",
     **kwargs,
 ):
@@ -934,13 +938,19 @@ def animate_plot(
     else:
         subplot_kw = {}
     _, scrub_ax = plt.subplots(1, 1, subplot_kw=subplot_kw)
-    list(plot_func(arg_i, ax=scrub_ax, ind=0) for arg_i in arg_tc)
+    [plot_func(arg_i, ax=scrub_ax, ind=0) for arg_i in arg_tc]
     if use_xlim is None:
         use_xlim = scrub_ax.get_xlim()
     if use_ylim is None:
         use_ylim = scrub_ax.get_ylim()
     if three_dim and use_zlim is None:
         use_zlim = scrub_ax.get_zlim()
+    if same_xyz_lim:
+        lims = np.stack((use_xlim, use_ylim, use_zlim))
+        use_lim = (np.min(lims[:, 0]), np.max(lims[:, 1]))
+        use_xlim = use_lim
+        use_ylim = use_lim
+        use_zlim = use_lim
 
     n_frames = len(arg_tc)
     if azim_range is None:
@@ -1931,13 +1941,14 @@ def make_2d_bars(
     )
 
 
-def make_3d_bars(ax, center=(0, 0, 0), bar_len=0.1, bar_wid=0.7):
+def make_3d_bars(ax, center=(0, 0, 0), bar_len=0.1, bar_wid=0.7, **kwargs):
     ax.plot(
         [center[0], center[0] + bar_len],
         [center[1], center[1]],
         [center[2], center[2]],
         color="k",
         linewidth=bar_wid,
+        **kwargs,
     )
     ax.plot(
         [center[0], center[0]],
@@ -1945,6 +1956,7 @@ def make_3d_bars(ax, center=(0, 0, 0), bar_len=0.1, bar_wid=0.7):
         [center[2], center[2]],
         color="k",
         linewidth=bar_wid,
+        **kwargs,
     )
     ax.plot(
         [center[0], center[0]],
@@ -1952,6 +1964,7 @@ def make_3d_bars(ax, center=(0, 0, 0), bar_len=0.1, bar_wid=0.7):
         [center[2], center[2] + bar_len],
         color="k",
         linewidth=bar_wid,
+        **kwargs,
     )
     ax.set_axis_off()
 
@@ -2102,9 +2115,9 @@ def make_xaxis_scale_bar(
     label="",
     text_buff=0.22,
     fontsize="medium",
-    bar_len=.2,
+    bar_len=0.2,
     round=10,
-    anchor_offset=.2,
+    anchor_offset=0.2,
     **kwargs,
 ):
     xl = ax.get_xlim()
@@ -2339,10 +2352,10 @@ def make_yaxis_scale_bar(
     label="",
     text_buff=0.15,
     fontsize="medium",
-    bar_len=.1,
+    bar_len=0.1,
     round=10,
     anchor_loc="bottom",
-    anchor_offset=.2,
+    anchor_offset=0.2,
     **kwargs,
 ):
     xl = ax.get_xlim()

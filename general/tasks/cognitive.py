@@ -184,9 +184,13 @@ class DelayedMatchTask(Task):
         sigma=0,
         n_dirs=16,
         match_func=None,
+        delay_bounds=(600, 1000),
+        delay_mu=800,
         body=False,
+        no_target=False,
     ):
         super().__init__(dt=dt)
+        self.no_target = no_target
         self.decide_match = match_func
         self.body = body
         self.periods = ["fixation", "sample", "delay", "test"]
@@ -202,7 +206,7 @@ class DelayedMatchTask(Task):
         self.timing = {
             "fixation": 500,
             "sample": 500,
-            "delay": ngym_random.TruncExp(600, 500, 1000),
+            "delay": ngym_random.TruncExp(delay_mu, *delay_bounds),
             "test": 500,
         }
         if timing is not None:
@@ -231,6 +235,9 @@ class DelayedMatchTask(Task):
         self.action_space = spaces.Box(-np.inf, np.inf, shape=(len(name),), name=name)
         self.action_dims = len(name)
 
+    def get_target(self, sample, test):
+        return 1 - self.decide_match(sample, test)
+
     def _new_trial(self, **kwargs):
         # -------------------------------------------------------------------------
         # Trial
@@ -244,7 +251,7 @@ class DelayedMatchTask(Task):
         sample, test = trial["sample"], trial["test"]
         sample_sin, sample_cos = u.radian_to_sincos(sample)
         test_sin, test_cos = u.radian_to_sincos(test)
-        match = self.decide_match(sample, test)
+        target = (self.get_target(sample, test),)
 
         # -----------------------------------------------------------------------
         # Periods
@@ -259,10 +266,12 @@ class DelayedMatchTask(Task):
         self.add_ob(test_cos, period="test", where="dir_cos")
         self.add_randn(0, self.sigma)
 
-        target = (1 - match,)
         if self.body:
             target = target + (0, 0)
+        if self.no_target:
+            target = (0,)
         self.set_groundtruth(target, period="test")
+        
         trial["start_ind"] = self.start_ind
         trial["end_ind"] = self.end_ind
 

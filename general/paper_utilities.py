@@ -1,10 +1,11 @@
-import numpy as np
+import os
+import re
+
 import matplotlib.pyplot as plt
+import numpy as np
 
 import general.plotting_styles as gps
 import general.utility as u
-import os
-import re
 
 
 def split_gridspec(n_rows, start, end, spacing):
@@ -70,7 +71,7 @@ class Figure:
     def make_panels(self, panel_keys=None):
         if panel_keys is None:
             panel_keys = self.panel_keys
-        list(getattr(self, pk)() for pk in panel_keys)
+        [getattr(self, pk)() for pk in panel_keys]
 
     def make_gss(self):
         pass
@@ -109,7 +110,7 @@ class Figure:
         share_x_rows = {}
         share_y_rows = {}
         for i, ind in enumerate(u.make_array_ind_iterator(grid_arr.shape)):
-            ax_kwarg = dict()
+            ax_kwarg = {}
             ax_kwarg.update(all_ax_kwargs)
             if sharex == "horizontal":
                 share_ax_x = share_x_rows.get(ind[0])
