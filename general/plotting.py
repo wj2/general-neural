@@ -1079,20 +1079,25 @@ def _make_hist_bins(pts, n_bins=15, same_bins=True, symmetric_bins=True):
 
 @ax_adder()
 def plot_smoothed_histogram(
-        pts,
-        weights,
-        radius,
-        bins=None, n_bins=15, same_bins=True, symmetric_bins=True, ax=None, symmetric_avg=True,
-        neighbor_weights="distance",
-        cmap="bwr",
-        **kwargs,        
+    pts,
+    weights,
+    radius,
+    bins=None,
+    n_bins=15,
+    same_bins=True,
+    symmetric_bins=True,
+    ax=None,
+    symmetric_avg=True,
+    neighbor_weights="distance",
+    cmap="bwr",
+    **kwargs,
 ):
     if bins is None:
         bins = _make_hist_bins(
             pts, n_bins=n_bins, same_bins=same_bins, symmetric_bins=symmetric_bins
         )
 
-    bcents = [bs[:-1] + np.diff(bs)[0]/2 for bs in bins]
+    bcents = [bs[:-1] + np.diff(bs)[0] / 2 for bs in bins]
     rnr = skn.RadiusNeighborsRegressor(radius, weights=neighbor_weights)
     rnr.fit(pts, weights)
     avg_flat = rnr.predict(np.array(list(it.product(*bcents))))
@@ -1102,13 +1107,8 @@ def plot_smoothed_histogram(
         extreme = np.max(np.abs(avg))
         kwargs["vmin"] = -extreme
         kwargs["vmax"] = extreme
-    m = pcolormesh(
-        *bcents, avg.T, cmap=cmap, ax=ax, **kwargs
-    )
+    m = pcolormesh(*bcents, avg.T, cmap=cmap, ax=ax, **kwargs)
     return m
-    
-
-
 
 
 @ax_adder()
@@ -1129,7 +1129,7 @@ def plot_avg_2d_histogram(
             pts, n_bins=n_bins, same_bins=same_bins, symmetric_bins=symmetric_bins
         )
 
-    bcents = [bs[:-1] + np.diff(bs)[0]/2 for bs in bins]
+    bcents = [bs[:-1] + np.diff(bs)[0] / 2 for bs in bins]
     density, _ = np.histogramdd(pts, bins=bins, weights=weights)
     summed, _ = np.histogramdd(pts, bins=bins)
 
@@ -1139,9 +1139,7 @@ def plot_avg_2d_histogram(
         extreme = np.max(np.abs(avg))
         kwargs["vmin"] = -extreme
         kwargs["vmax"] = extreme
-    m = pcolormesh(
-        *bcents, avg.T, cmap=cmap, ax=ax, **kwargs
-    )
+    m = pcolormesh(*bcents, avg.T, cmap=cmap, ax=ax, **kwargs)
     return m
 
 
