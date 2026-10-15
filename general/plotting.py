@@ -10,6 +10,7 @@ import scipy.stats as sts
 import sklearn.decomposition as skd
 import sklearn.gaussian_process as skgp
 import sklearn.preprocessing as skp
+import sklearn.neighbors as skn
 from matplotlib import animation, patches, tri
 from matplotlib.collections import LineCollection
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
@@ -931,6 +932,7 @@ def animate_plot(
     use_zlim=None,
     same_xyz_lim=False,
     format=".pdf",
+    dpi=500,
     **kwargs,
 ):
     if three_dim:
@@ -982,16 +984,16 @@ def animate_plot(
         frames=n_frames,
         interval=1,
     )
-    anim.save(path, fps=fps, extra_args=extra_args, **kwargs)
+    anim.save(path, fps=fps, extra_args=extra_args, dpi=dpi, **kwargs)
     path_root, _ = os.path.splitext(path)
     if save_first:
         path_first = path_root + "_first" + format
         (f,) = animate(0)
-        f.savefig(path_first, bbox_inches="tight", transparent=True)
+        f.savefig(path_first, bbox_inches="tight", transparent=True, dpi=dpi)
     if save_last:
         path_last = path_root + "_last" + format
         (f,) = animate(-1)
-        f.savefig(path_last, bbox_inches="tight", transparent=True)
+        f.savefig(path_last, bbox_inches="tight", transparent=True, dpi=dpi)
 
 
 def animate_3d_plot(*args, **kwargs):
@@ -1054,6 +1056,95 @@ def symmetric_bounds(data, **kwargs):
     return -bounds[ind], bounds[ind]
 
 
+def _make_hist_bins(pts, n_bins=15, same_bins=True, symmetric_bins=True):
+    match (same_bins, symmetric_bins):
+        case (True, False):
+            b_min = np.min(pts)
+            b_max = np.max(pts)
+            bs = np.linspace(b_min, b_max, n_bins)
+            bins = (bs, bs)
+        case (False, True):
+            b_ext = np.max(np.abs(pts), axis=0)
+            bins = [np.linspace(-b_ei, b_ei, n_bins) for i, b_ei in enumerate(b_ext)]
+        case (False, False):
+            b_min = np.min(pts, axis=0)
+            b_max = np.max(pts, axis=0)
+            bins = [np.linspace(b_mi, b_max[i], n_bins) for i, b_mi in enumerate(b_min)]
+        case (True, True):
+            ext = np.max(np.abs(pts))
+            bs = np.linspace(-ext, ext, n_bins)
+            bins = (bs, bs)
+    return tuple(bins)
+
+
+@ax_adder()
+def plot_smoothed_histogram(
+        pts,
+        weights,
+        radius,
+        bins=None, n_bins=15, same_bins=True, symmetric_bins=True, ax=None, symmetric_avg=True,
+        neighbor_weights="distance",
+        cmap="bwr",
+        **kwargs,        
+):
+    if bins is None:
+        bins = _make_hist_bins(
+            pts, n_bins=n_bins, same_bins=same_bins, symmetric_bins=symmetric_bins
+        )
+
+    bcents = [bs[:-1] + np.diff(bs)[0]/2 for bs in bins]
+    rnr = skn.RadiusNeighborsRegressor(radius, weights=neighbor_weights)
+    rnr.fit(pts, weights)
+    avg_flat = rnr.predict(np.array(list(it.product(*bcents))))
+    avg = np.reshape(avg_flat, [len(bs) for bs in bcents])
+
+    if symmetric_avg and ("vmin" not in kwargs or "vmax" not in kwargs):
+        extreme = np.max(np.abs(avg))
+        kwargs["vmin"] = -extreme
+        kwargs["vmax"] = extreme
+    m = pcolormesh(
+        *bcents, avg.T, cmap=cmap, ax=ax, **kwargs
+    )
+    return m
+    
+
+
+
+
+@ax_adder()
+def plot_avg_2d_histogram(
+    pts,
+    weights,
+    bins=None,
+    n_bins=15,
+    same_bins=True,
+    symmetric_bins=True,
+    ax=None,
+    symmetric_avg=True,
+    cmap="bwr",
+    **kwargs,
+):
+    if bins is None:
+        bins = _make_hist_bins(
+            pts, n_bins=n_bins, same_bins=same_bins, symmetric_bins=symmetric_bins
+        )
+
+    bcents = [bs[:-1] + np.diff(bs)[0]/2 for bs in bins]
+    density, _ = np.histogramdd(pts, bins=bins, weights=weights)
+    summed, _ = np.histogramdd(pts, bins=bins)
+
+    avg = density / summed
+    print(avg)
+    if symmetric_avg and ("vmin" not in kwargs or "vmax" not in kwargs):
+        extreme = np.max(np.abs(avg))
+        kwargs["vmin"] = -extreme
+        kwargs["vmax"] = extreme
+    m = pcolormesh(
+        *bcents, avg.T, cmap=cmap, ax=ax, **kwargs
+    )
+    return m
+
+
 def pcolormesh(
     *args,
     ax=None,
@@ -1064,7 +1155,7 @@ def pcolormesh(
     **kwargs,
 ):
     if ax is None:
-        f, ax = plt.subplots(1, 1)
+        _, ax = plt.subplots(1, 1)
     if len(args) < 3:
         data = args[-1]
         xs = np.arange(data.shape[1])
@@ -1318,13 +1409,16 @@ def plot_trace_ends(
     facecolor=(1, 1, 1),
     color=None,
     progressive_color=True,
+    color_bounds=(0.1, 0.99),
     **kwargs,
 ):
     if color is None:
         color = "r"
     cmap = make_linear_cmap(color)
     if progressive_color:
-        plot_colored_line(*to_plot, cmap=cmap, ax=ax, **kwargs)
+        plot_colored_line(
+            *to_plot, cmap=cmap, ax=ax, color_bounds=color_bounds, **kwargs
+        )
     else:
         l_ = ax.plot(*to_plot, **kwargs)
         color = kwargs.pop("color", l_[0].get_color())
@@ -1356,6 +1450,7 @@ def plot_trace_werr(
     errorbar=True,
     alpha=0.5,
     ax=None,
+    point_size=1,
     error_func=sem,
     style=(),
     central_tendency=np.nanmean,
@@ -1434,7 +1529,9 @@ def plot_trace_werr(
         if color is None and trl is not None:
             color = trl[0].get_color()
         if points or no_lines:
-            scat = ax.scatter(xs, tr, marker=marker, color=color, **kwargs)
+            scat = ax.scatter(
+                xs, tr, marker=marker, color=color, s=point_size, **kwargs
+            )
         if color is None and scat is not None:
             color = scat.get_facecolors()[0]
 
@@ -1446,7 +1543,12 @@ def plot_trace_werr(
         if len(dat.shape) > 1 or jagged or err is not None:
             if fill and not no_lines:
                 ax.fill_between(
-                    xs, tr + er[1, :], tr + er[0, :], color=color, alpha=alpha
+                    xs,
+                    tr + er[1, :],
+                    tr + er[0, :],
+                    color=color,
+                    alpha=alpha,
+                    linewidths=0,
                 )
             else:
                 ax.errorbar(
@@ -1462,7 +1564,12 @@ def plot_trace_werr(
         if len(xs_orig.shape) > 1 or err_x is not None:
             if fill and not no_lines:
                 ax.fill_betweenx(
-                    tr, xs + xs_er[1, :], xs + xs_er[0, :], color=color, alpha=alpha
+                    tr,
+                    xs + xs_er[1, :],
+                    xs + xs_er[0, :],
+                    color=color,
+                    alpha=alpha,
+                    linewidths=0,
                 )
             else:
                 ax.errorbar(
